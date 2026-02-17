@@ -478,26 +478,64 @@ fn render_edge(edge: &PositionedEdge, theme: &Theme) -> String {
 fn render_subgraph(sg: &PositionedSubgraph, theme: &Theme) -> String {
     let mut s = String::new();
 
+    // Resolve fill/stroke from subgraph style overrides or theme defaults
+    let fill = sg.style.fill.as_ref()
+        .map(|c| c.to_css())
+        .unwrap_or_else(|| theme.subgraph_fill.to_css());
+    let stroke = sg.style.stroke.as_ref()
+        .map(|c| c.to_css())
+        .unwrap_or_else(|| theme.subgraph_border.to_css());
+
     // Background rectangle
     s.push_str(&format!(
         r#"<rect x="{}" y="{}" width="{}" height="{}" rx="5" fill="{}" stroke="{}" stroke-width="1" stroke-dasharray="5,5"/>"#,
         sg.x, sg.y, sg.width, sg.height,
-        theme.subgraph_fill.to_css(),
-        theme.subgraph_border.to_css(),
+        fill, stroke,
     ));
     s.push('\n');
 
-    // Title label
+    // Title label (handle <br/> as line breaks, strip other HTML)
     if let Some(label) = &sg.label {
-        s.push_str(&format!(
-            r#"<text x="{}" y="{}" font-family="{}" font-size="{}" font-weight="bold" fill="{}">{}</text>"#,
-            sg.x + 10.0,
-            sg.y + 18.0,
-            theme.font_family,
-            theme.font_size,
-            theme.subgraph_text.to_css(),
-            escape_xml(label),
-        ));
+        let clean = html_util::normalize_br(label);
+        let lines: Vec<&str> = clean.split('\n').collect();
+        if lines.len() == 1 {
+            let text = html_util::strip_html_tags(&lines[0]);
+            s.push_str(&format!(
+                r#"<text x="{}" y="{}" font-family="{}" font-size="{}" font-weight="bold" fill="{}">{}</text>"#,
+                sg.x + 10.0,
+                sg.y + 18.0,
+                theme.font_family,
+                theme.font_size,
+                theme.subgraph_text.to_css(),
+                escape_xml(&text),
+            ));
+        } else {
+            s.push_str(&format!(
+                r#"<text x="{}" y="{}" font-family="{}" font-size="{}" font-weight="bold" fill="{}">"#,
+                sg.x + 10.0,
+                sg.y + 18.0,
+                theme.font_family,
+                theme.font_size,
+                theme.subgraph_text.to_css(),
+            ));
+            for (i, line) in lines.iter().enumerate() {
+                let text = html_util::strip_html_tags(line);
+                if i == 0 {
+                    s.push_str(&format!(
+                        r#"<tspan x="{}" dy="0">{}</tspan>"#,
+                        sg.x + 10.0,
+                        escape_xml(&text),
+                    ));
+                } else {
+                    s.push_str(&format!(
+                        r#"<tspan x="{}" dy="1.2em">{}</tspan>"#,
+                        sg.x + 10.0,
+                        escape_xml(&text),
+                    ));
+                }
+            }
+            s.push_str("</text>");
+        }
         s.push('\n');
     }
 

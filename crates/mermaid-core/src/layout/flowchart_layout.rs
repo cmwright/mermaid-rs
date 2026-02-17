@@ -1,5 +1,6 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
+use dagre_rs::{DagreLayout, LayoutOptions, RankDir};
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::Direction as PetDirection;
 
@@ -19,9 +20,10 @@ const MIN_NODE_WIDTH: f64 = 70.0;
 const MIN_NODE_HEIGHT: f64 = 40.0;
 const NODE_SEP: f64 = 60.0;
 const RANK_SEP: f64 = 100.0;
-const SUBGRAPH_PADDING: f64 = 40.0;
+const SUBGRAPH_PADDING: f64 = 30.0;
 const SUBGRAPH_TITLE_HEIGHT: f64 = 25.0;
-const SUBGRAPH_GROUP_GAP: f64 = 80.0;
+const SUBGRAPH_GROUP_GAP: f64 = 30.0;
+const ZONE_GAP: f64 = 80.0; // Extra gap between top-level subgraph rank zones
 
 // ── Positioned types ────────────────────────────────────────
 
@@ -56,6 +58,7 @@ pub struct PositionedSubgraph {
     pub y: f64,
     pub width: f64,
     pub height: f64,
+    pub style: StyleProperties,
 }
 
 #[derive(Debug, Clone)]
@@ -82,8 +85,8 @@ struct NodeData {
 
 #[derive(Debug, Clone)]
 struct EdgeData {
-    label: Option<String>,
-    edge_type: EdgeType,
+    _label: Option<String>,
+    _edge_type: EdgeType,
 }
 
 // ── Public API ──────────────────────────────────────────────
@@ -105,19 +108,34 @@ pub fn layout_flowchart(ast: &FlowchartAst, measurer: &TextMeasurer<'_>) -> Resu
     // 5. Build subgraph membership map
     let membership = build_subgraph_membership(ast);
 
-    // 6. Assign ranks (layers) using topological ordering
-    let ranks = assign_ranks(&graph, ast.direction);
+    // 6. Compound layout: run dagre independently per top-level subgraph.
+    // This ensures nodes from different top-level subgraphs (e.g. Platform,
+    // OryNetwork, ExtIdPs) occupy separate rank zones.
+    let layers = build_compound_layers(
+        &graph, &index_map, &membership, &all_edges, &ast.subgraphs, ast.direction,
+    );
 
-    // 7. Position nodes within ranks
-    let mut positioned_nodes = position_nodes(&graph, &ranks, ast.direction, &membership);
+    // 6b. Within each layer, group nodes by second-level subgraph membership
+    // while preserving dagre's crossing-reduced ordering.
+    let layers = constrain_layers_by_subgraph(&graph, &layers, &membership);
 
-    // 7. Route edges
+    // 7. Position nodes using constrained layers with our own sizing
+    let mut positioned_nodes = position_nodes_from_layers(
+        &graph,
+        &layers,
+        ast.direction,
+        &membership,
+    );
+
+    // 8. Route edges
     let mut positioned_edges = route_edges(&graph, &index_map, &positioned_nodes, &all_edges);
 
-    // 8. Position subgraphs
-    let mut positioned_subgraphs = position_subgraphs(&ast.subgraphs, &positioned_nodes);
+    // 9. Position subgraphs (with style overrides)
+    let mut positioned_subgraphs = position_subgraphs(
+        &ast.subgraphs, &positioned_nodes, &ast.style_overrides,
+    );
 
-    // 9. Normalize coordinates (shift to positive) and compute bounding box
+    // 10. Normalize coordinates (shift to positive) and compute bounding box
     let (width, height) = normalize_and_compute_bounds(
         &mut positioned_nodes,
         &mut positioned_edges,
@@ -255,6 +273,345 @@ fn collect_subgraph_edges(subgraphs: &[SubgraphDef], all_edges: &mut Vec<EdgeDef
     }
 }
 
+/// Build layers using recursive compound layout: at each nesting level,
+/// group nodes by their immediate subgraph, run dagre per group, then
+/// enforce rank separation between groups connected by cross-group edges.
+///
+/// After computing compound ranks (zone-separated), we run a GLOBAL dagre
+/// pass to get optimal horizontal ordering (crossing reduction across all
+/// edges including cross-zone ones), and re-sort each compound layer to
+/// match the global ordering. This gives us zone-separated Y positions
+/// with globally-optimized X ordering.
+fn build_compound_layers(
+    full_graph: &DiGraph<NodeData, EdgeData>,
+    index_map: &HashMap<String, NodeIndex>,
+    membership: &SubgraphMembership,
+    all_edges: &[EdgeDef],
+    subgraphs: &[SubgraphDef],
+    direction: Direction,
+) -> Vec<Vec<NodeIndex>> {
+    let all_node_indices: Vec<NodeIndex> = full_graph.node_indices().collect();
+
+    // Step 1: Get compound rank assignment (zone-separated)
+    let compound_layers = compound_layout_recursive(
+        full_graph, index_map, membership, all_edges,
+        &all_node_indices, subgraphs, direction, 0,
+    );
+
+    // Step 2: Run global dagre for horizontal ordering hints.
+    // This considers ALL edges (including cross-zone) for crossing reduction.
+    let global_layers = run_dagre_on_subset(
+        full_graph, index_map, all_edges, &all_node_indices, direction,
+    );
+
+    // Build global order map: node → (global_rank, position_in_rank)
+    let mut global_pos: HashMap<NodeIndex, (usize, usize)> = HashMap::new();
+    for (rank, layer) in global_layers.iter().enumerate() {
+        for (pos, &ni) in layer.iter().enumerate() {
+            global_pos.insert(ni, (rank, pos));
+        }
+    }
+
+    // Step 3: Re-sort each compound layer using global ordering.
+    // Nodes that dagre placed at an earlier global rank come first,
+    // and within the same global rank, dagre's position order is preserved.
+    let mut layers: Vec<Vec<NodeIndex>> = compound_layers.into_iter().map(|mut layer| {
+        layer.sort_by(|a, b| {
+            let ga = global_pos.get(a).copied().unwrap_or((usize::MAX, usize::MAX));
+            let gb = global_pos.get(b).copied().unwrap_or((usize::MAX, usize::MAX));
+            ga.cmp(&gb)
+        });
+        layer
+    }).collect();
+
+    // Safety: ensure all nodes are assigned to a layer
+    let assigned: HashSet<NodeIndex> = layers.iter()
+        .flat_map(|layer| layer.iter().copied())
+        .collect();
+    let unassigned: Vec<NodeIndex> = full_graph.node_indices()
+        .filter(|ni| !assigned.contains(ni))
+        .collect();
+    if !unassigned.is_empty() {
+        layers.push(unassigned);
+    }
+
+    layers
+}
+
+/// Recursive compound layout: group nodes by child subgraphs, determine
+/// ordering via cross-group edges, run dagre within each group, then
+/// enforce rank zone separation between groups.
+fn compound_layout_recursive(
+    full_graph: &DiGraph<NodeData, EdgeData>,
+    index_map: &HashMap<String, NodeIndex>,
+    membership: &SubgraphMembership,
+    all_edges: &[EdgeDef],
+    node_indices: &[NodeIndex],
+    child_subgraphs: &[SubgraphDef],
+    direction: Direction,
+    depth: usize,
+) -> Vec<Vec<NodeIndex>> {
+    // If no child subgraphs, just run dagre on these nodes
+    if child_subgraphs.is_empty() {
+        return run_dagre_on_subset(full_graph, index_map, all_edges, node_indices, direction);
+    }
+
+    // Group nodes by which child subgraph they belong to (at this level)
+    let node_id_set: HashSet<&str> = node_indices.iter()
+        .map(|&ni| full_graph[ni].id.as_str())
+        .collect();
+
+    // Map: child subgraph ID → list of node indices in it (direct + nested)
+    let mut sg_nodes: HashMap<String, Vec<NodeIndex>> = HashMap::new();
+    let mut root_nodes: Vec<NodeIndex> = Vec::new(); // nodes not in any child subgraph
+
+    for &ni in node_indices {
+        let id = &full_graph[ni].id;
+        let path = membership.get(id).cloned().unwrap_or_default();
+
+        // Find which child subgraph this node belongs to at this depth
+        let child_sg_id = path.get(depth).cloned();
+
+        if let Some(sg_id) = child_sg_id {
+            // Verify this is actually one of the child subgraphs
+            if child_subgraphs.iter().any(|sg| sg.id == sg_id) {
+                sg_nodes.entry(sg_id).or_default().push(ni);
+            } else {
+                root_nodes.push(ni);
+            }
+        } else {
+            root_nodes.push(ni);
+        }
+    }
+
+    // Determine ordering of child subgraph groups via cross-group edges
+    let internal_edges: Vec<&EdgeDef> = all_edges.iter()
+        .filter(|e| node_id_set.contains(e.from.as_str()) && node_id_set.contains(e.to.as_str()))
+        .collect();
+
+    // Build meta-graph of child subgraphs
+    let mut meta_deps: HashMap<String, HashSet<String>> = HashMap::new(); // target → set of sources
+    for edge in &internal_edges {
+        let from_path = membership.get(&edge.from).cloned().unwrap_or_default();
+        let to_path = membership.get(&edge.to).cloned().unwrap_or_default();
+        let from_sg = from_path.get(depth).cloned();
+        let to_sg = to_path.get(depth).cloned();
+
+        if let (Some(from_id), Some(to_id)) = (from_sg, to_sg) {
+            if from_id != to_id
+                && child_subgraphs.iter().any(|sg| sg.id == from_id)
+                && child_subgraphs.iter().any(|sg| sg.id == to_id)
+            {
+                meta_deps.entry(to_id).or_default().insert(from_id);
+            }
+        }
+    }
+
+    // Topological sort of child subgraphs (using Kahn's algorithm)
+    let sg_ids: Vec<String> = child_subgraphs.iter().map(|sg| sg.id.clone()).collect();
+    let sg_order = topological_sort_subgraphs(&sg_ids, &meta_deps);
+
+    // Group subgraphs into tiers: subgraphs with no cross-group edges between
+    // them share a tier (run dagre together), while dependent groups get separate zones.
+    let mut tiers: Vec<Vec<String>> = Vec::new();
+    let mut sg_tier: HashMap<String, usize> = HashMap::new();
+
+    for sg_id in &sg_order {
+        // Find the max tier of any predecessor
+        let pred_tier = meta_deps.get(sg_id)
+            .map(|preds| {
+                preds.iter()
+                    .filter_map(|p| sg_tier.get(p))
+                    .max()
+                    .copied()
+            })
+            .flatten();
+
+        let tier_idx = match pred_tier {
+            Some(t) => t + 1, // Must be in a later tier than all predecessors
+            None => 0,
+        };
+
+        // Extend tiers if needed
+        while tiers.len() <= tier_idx {
+            tiers.push(Vec::new());
+        }
+        tiers[tier_idx].push(sg_id.clone());
+        sg_tier.insert(sg_id.clone(), tier_idx);
+    }
+
+    // For each tier, collect all nodes and run recursive layout
+    let mut all_layers: Vec<Vec<NodeIndex>> = Vec::new();
+
+    // Root nodes (not in any child subgraph) go into the first tier
+    if !root_nodes.is_empty() {
+        let root_layers = run_dagre_on_subset(
+            full_graph, index_map, all_edges, &root_nodes, direction,
+        );
+        all_layers.extend(root_layers);
+    }
+
+    for tier in &tiers {
+        // Collect all nodes in this tier's subgraphs
+        let mut tier_nodes: Vec<NodeIndex> = Vec::new();
+        let mut tier_child_subgraphs: Vec<&SubgraphDef> = Vec::new();
+
+        for sg_id in tier {
+            if let Some(nodes) = sg_nodes.get(sg_id) {
+                tier_nodes.extend(nodes);
+            }
+            if let Some(sg_def) = child_subgraphs.iter().find(|sg| sg.id == *sg_id) {
+                tier_child_subgraphs.push(sg_def);
+            }
+        }
+
+        if tier_nodes.is_empty() {
+            continue;
+        }
+
+        // If this tier has subgraphs with their own children, recurse
+        // Otherwise just run dagre on the tier's nodes
+        let has_nested = tier_child_subgraphs.iter().any(|sg| !sg.subgraphs.is_empty());
+
+        if has_nested && tier_child_subgraphs.len() == 1 {
+            // Single subgraph with nested children: recurse into it
+            let sg = tier_child_subgraphs[0];
+            let tier_layers = compound_layout_recursive(
+                full_graph, index_map, membership, all_edges,
+                &tier_nodes, &sg.subgraphs, direction, depth + 1,
+            );
+            all_layers.extend(tier_layers);
+        } else {
+            // Multiple subgraphs in same tier or no nested children:
+            // run dagre on all tier nodes together
+            let tier_layers = run_dagre_on_subset(
+                full_graph, index_map, all_edges, &tier_nodes, direction,
+            );
+            all_layers.extend(tier_layers);
+        }
+    }
+
+    all_layers
+}
+
+/// Run dagre on a subset of nodes, using only edges where both endpoints
+/// are in the subset. Returns layers with full-graph NodeIndex values.
+fn run_dagre_on_subset(
+    full_graph: &DiGraph<NodeData, EdgeData>,
+    index_map: &HashMap<String, NodeIndex>,
+    all_edges: &[EdgeDef],
+    node_indices: &[NodeIndex],
+    direction: Direction,
+) -> Vec<Vec<NodeIndex>> {
+    if node_indices.is_empty() {
+        return Vec::new();
+    }
+
+    let node_id_set: HashSet<&str> = node_indices.iter()
+        .map(|&ni| full_graph[ni].id.as_str())
+        .collect();
+
+    // Build sub-graph
+    let mut sub_graph = DiGraph::<NodeData, EdgeData>::new();
+    let mut full_to_sub: HashMap<NodeIndex, NodeIndex> = HashMap::new();
+    let mut sub_to_full: HashMap<NodeIndex, NodeIndex> = HashMap::new();
+
+    for &ni in node_indices {
+        let sub_ni = sub_graph.add_node(full_graph[ni].clone());
+        full_to_sub.insert(ni, sub_ni);
+        sub_to_full.insert(sub_ni, ni);
+    }
+
+    // Add only internal edges
+    for edge in all_edges {
+        if node_id_set.contains(edge.from.as_str()) && node_id_set.contains(edge.to.as_str()) {
+            let from_full = index_map.get(&edge.from);
+            let to_full = index_map.get(&edge.to);
+            if let (Some(&ff), Some(&tf)) = (from_full, to_full) {
+                if let (Some(&from_sub), Some(&to_sub)) = (
+                    full_to_sub.get(&ff),
+                    full_to_sub.get(&tf),
+                ) {
+                    sub_graph.add_edge(from_sub, to_sub, EdgeData {
+                        _label: edge.label.clone(),
+                        _edge_type: edge.edge_type,
+                    });
+                }
+            }
+        }
+    }
+
+    // Run dagre
+    let rank_dir = match direction {
+        Direction::LeftToRight | Direction::RightToLeft => RankDir::LeftToRight,
+        _ => RankDir::TopToBottom,
+    };
+
+    let dagre = DagreLayout::with_options(LayoutOptions {
+        rank_dir,
+        node_sep: NODE_SEP as f32,
+        rank_sep: RANK_SEP as f32,
+        max_iterations: 24,
+    });
+    let result = dagre.compute(&sub_graph);
+
+    // Map layers back to full-graph NodeIndex
+    result.layers.iter()
+        .filter_map(|layer| {
+            let full_layer: Vec<NodeIndex> = layer.iter()
+                .filter_map(|&sub_ni| sub_to_full.get(&sub_ni).copied())
+                .collect();
+            if full_layer.is_empty() { None } else { Some(full_layer) }
+        })
+        .collect()
+}
+
+/// Topological sort of subgraph IDs using Kahn's algorithm.
+fn topological_sort_subgraphs(
+    ids: &[String],
+    deps: &HashMap<String, HashSet<String>>, // target → set of predecessors
+) -> Vec<String> {
+    let mut in_degree: HashMap<&str, usize> = HashMap::new();
+    for id in ids {
+        in_degree.insert(id.as_str(), 0);
+    }
+    for (target, sources) in deps {
+        if let Some(deg) = in_degree.get_mut(target.as_str()) {
+            *deg = sources.iter().filter(|s| ids.iter().any(|id| id == *s)).count();
+        }
+    }
+
+    let mut queue: Vec<&str> = ids.iter()
+        .filter(|id| *in_degree.get(id.as_str()).unwrap_or(&0) == 0)
+        .map(|s| s.as_str())
+        .collect();
+    let mut result: Vec<String> = Vec::new();
+
+    while let Some(id) = queue.pop() {
+        result.push(id.to_string());
+        // Decrement in-degree of dependents
+        for (target, sources) in deps {
+            if sources.contains(id) {
+                if let Some(deg) = in_degree.get_mut(target.as_str()) {
+                    *deg = deg.saturating_sub(1);
+                    if *deg == 0 {
+                        queue.push(target.as_str());
+                    }
+                }
+            }
+        }
+    }
+
+    // Add any remaining (cycles or unvisited)
+    for id in ids {
+        if !result.contains(id) {
+            result.push(id.clone());
+        }
+    }
+
+    result
+}
+
 fn resolve_node_style(
     node: &NodeDef,
     class_defs: &HashMap<String, StyleProperties>,
@@ -338,8 +695,8 @@ fn build_petgraph(
             *from_idx,
             *to_idx,
             EdgeData {
-                label: edge.label.clone(),
-                edge_type: edge.edge_type,
+                _label: edge.label.clone(),
+                _edge_type: edge.edge_type,
             },
         );
     }
@@ -362,76 +719,83 @@ fn compute_node_size(shape: &NodeShape, text: &TextMetrics) -> (f64, f64) {
     }
 }
 
-/// Assign rank (layer) to each node using a simplified Coffman-Graham approach.
-/// Nodes with no incoming edges go to rank 0, their successors to rank 1, etc.
-fn assign_ranks(graph: &DiGraph<NodeData, EdgeData>, _direction: Direction) -> HashMap<NodeIndex, usize> {
-    let mut ranks: HashMap<NodeIndex, usize> = HashMap::new();
+/// Re-sort layers so that nodes belonging to the same subgraph are contiguous
+/// within each rank. Groups are ordered by their first appearance in dagre's
+/// ordering (preserving crossing reduction), not alphabetically.
+fn constrain_layers_by_subgraph(
+    graph: &DiGraph<NodeData, EdgeData>,
+    layers: &[Vec<NodeIndex>],
+    membership: &SubgraphMembership,
+) -> Vec<Vec<NodeIndex>> {
+    let empty_path: Vec<String> = Vec::new();
 
-    // Simple longest-path ranking
-    let topo = petgraph::algo::toposort(graph, None);
-    let order = match topo {
-        Ok(order) => order,
-        Err(_) => {
-            // Graph has cycles — fall back to node index order
-            graph.node_indices().collect()
-        }
-    };
+    layers
+        .iter()
+        .map(|layer| {
+            // Group nodes by their membership path, preserving dagre's order
+            let mut groups: Vec<(Vec<String>, Vec<NodeIndex>)> = Vec::new();
 
-    for idx in &order {
-        let mut max_pred_rank: Option<usize> = None;
-        for pred in graph.neighbors_directed(*idx, PetDirection::Incoming) {
-            if let Some(&pred_rank) = ranks.get(&pred) {
-                max_pred_rank = Some(max_pred_rank.map_or(pred_rank, |m: usize| m.max(pred_rank)));
+            for &ni in layer {
+                let path = membership.get(&graph[ni].id)
+                    .unwrap_or(&empty_path)
+                    .clone();
+
+                if let Some(group) = groups.iter_mut().find(|(p, _)| *p == path) {
+                    group.1.push(ni);
+                } else {
+                    groups.push((path, vec![ni]));
+                }
             }
-        }
-        let rank = match max_pred_rank {
-            Some(r) => r + 1,
-            None => 0,
-        };
-        ranks.insert(*idx, rank);
-    }
 
-    ranks
+            // Flatten: groups keep dagre's order, nodes within groups keep dagre's order
+            groups.into_iter()
+                .flat_map(|(_, members)| members)
+                .collect()
+        })
+        .collect()
 }
 
-/// Position nodes within their ranks.
-fn position_nodes(
+/// Position nodes using dagre-rs layers (which provide rank assignment + crossing-reduced ordering).
+/// We apply our own coordinate assignment that accounts for actual node dimensions,
+/// subgraph membership, and spacing.
+fn position_nodes_from_layers(
     graph: &DiGraph<NodeData, EdgeData>,
-    ranks: &HashMap<NodeIndex, usize>,
+    layers: &[Vec<NodeIndex>],
     direction: Direction,
     membership: &SubgraphMembership,
 ) -> Vec<PositionedNode> {
-    // Group nodes by rank
-    let max_rank = ranks.values().copied().max().unwrap_or(0);
-    let mut rank_groups: Vec<Vec<NodeIndex>> = vec![Vec::new(); max_rank + 1];
-    for (&idx, &rank) in ranks {
-        rank_groups[rank].push(idx);
-    }
-
-    // Sort nodes within each rank by subgraph path then by index
-    let empty_path: Vec<String> = Vec::new();
-    for group in &mut rank_groups {
-        group.sort_by(|a, b| {
-            let path_a = membership.get(&graph[*a].id).unwrap_or(&empty_path);
-            let path_b = membership.get(&graph[*b].id).unwrap_or(&empty_path);
-            path_a.cmp(path_b).then(a.cmp(b))
-        });
-    }
-
     let is_horizontal = matches!(direction, Direction::LeftToRight | Direction::RightToLeft);
+    let empty_path: Vec<String> = Vec::new();
 
-    // Build node_id → NodeIndex lookup
-    let id_to_idx: HashMap<&str, NodeIndex> = graph
-        .node_indices()
-        .map(|idx| (graph[idx].id.as_str(), idx))
-        .collect();
-
-    // Phase 1: Initial left-packed layout
+    // Phase 1: Initial size-aware coordinate assignment
+    // Place nodes accounting for actual widths/heights and subgraph gaps
     let mut node_positions: HashMap<NodeIndex, (f64, f64)> = HashMap::new();
     let mut rank_offset = 0.0;
+    let mut prev_paths: Option<Vec<Vec<String>>> = None;
 
-    for group in &rank_groups {
-        let max_thickness = group
+    for layer in layers {
+        // Add extra spacing when transitioning between subgraph zones at any depth
+        if !layer.is_empty() {
+            let curr_paths: Vec<Vec<String>> = layer.iter()
+                .map(|&ni| membership.get(&graph[ni].id).cloned().unwrap_or_default())
+                .collect();
+
+            if let Some(ref prev) = prev_paths {
+                // Check if the first element of any path changed (top-level subgraph transition)
+                let prev_tops: HashSet<Option<&String>> = prev.iter()
+                    .map(|p| p.first())
+                    .collect();
+                let curr_tops: HashSet<Option<&String>> = curr_paths.iter()
+                    .map(|p| p.first())
+                    .collect();
+                if prev_tops != curr_tops {
+                    rank_offset += ZONE_GAP;
+                }
+            }
+            prev_paths = Some(curr_paths);
+        }
+
+        let max_thickness = layer
             .iter()
             .map(|&idx| {
                 let node = &graph[idx];
@@ -442,7 +806,7 @@ fn position_nodes(
         let mut cross_offset = 0.0;
         let mut prev_path: Option<&Vec<String>> = None;
 
-        for &idx in group {
+        for &idx in layer {
             let node = &graph[idx];
             let node_path = membership.get(&node.id).unwrap_or(&empty_path);
 
@@ -471,43 +835,53 @@ fn position_nodes(
         rank_offset += max_thickness + RANK_SEP;
     }
 
-    // Phase 2: Barycenter centering — nudge nodes toward the average
-    // position of their connected neighbors in adjacent ranks.
-    // Run multiple passes for convergence.
-    for _pass in 0..4 {
-        // Forward pass: rank 1..n, center under predecessors
-        for rank in 1..=max_rank {
-            apply_barycenter(
-                graph,
-                &rank_groups[rank],
-                &node_positions,
-                is_horizontal,
-                PetDirection::Incoming,
-                membership,
-                &empty_path,
-            )
-            .into_iter()
-            .for_each(|(idx, pos)| { node_positions.insert(idx, pos); });
-        }
-        // Backward pass: rank n-1..0, center over successors
-        for rank in (0..max_rank).rev() {
-            apply_barycenter(
-                graph,
-                &rank_groups[rank],
-                &node_positions,
-                is_horizontal,
-                PetDirection::Outgoing,
-                membership,
-                &empty_path,
-            )
-            .into_iter()
-            .for_each(|(idx, pos)| { node_positions.insert(idx, pos); });
-        }
-    }
+    // Phase 2: Undirected barycenter centering
+    // Unlike directional forward/backward passes (which oscillate), this considers
+    // ALL connections simultaneously with a blend factor for smooth convergence.
+    // Critical for spreading nodes across zones: cross-zone connections pull
+    // Platform nodes to align with their OryNetwork counterparts.
+    for _pass in 0..30 {
+        for layer in layers.iter() {
+            let updates: Vec<(NodeIndex, f64)> = layer.iter().filter_map(|&idx| {
+                let mut neighbors: Vec<NodeIndex> = Vec::new();
+                neighbors.extend(graph.neighbors_directed(idx, PetDirection::Incoming));
+                neighbors.extend(graph.neighbors_directed(idx, PetDirection::Outgoing));
+                neighbors.sort();
+                neighbors.dedup();
 
-    // Phase 3: Ensure no overlaps within each rank after centering
-    for group in &rank_groups {
-        remove_overlaps(graph, group, &mut node_positions, is_horizontal, membership, &empty_path);
+                if neighbors.is_empty() { return None; }
+
+                let neighbor_positions: Vec<f64> = neighbors.iter()
+                    .filter_map(|&n| node_positions.get(&n))
+                    .map(|&(x, y)| if is_horizontal { y } else { x })
+                    .collect();
+
+                if neighbor_positions.is_empty() { return None; }
+
+                let avg_cross = neighbor_positions.iter().sum::<f64>()
+                    / neighbor_positions.len() as f64;
+
+                let current_cross = {
+                    let &(x, y) = node_positions.get(&idx)?;
+                    if is_horizontal { y } else { x }
+                };
+
+                // Blend: 30% current + 70% target → fast convergence, smooth
+                let new_cross = current_cross * 0.3 + avg_cross * 0.7;
+                Some((idx, new_cross))
+            }).collect();
+
+            for (idx, new_cross) in updates {
+                if let Some(pos) = node_positions.get_mut(&idx) {
+                    if is_horizontal { pos.1 = new_cross; } else { pos.0 = new_cross; }
+                }
+            }
+        }
+
+        // Re-run overlap removal after each pass to maintain minimum spacing
+        for layer in layers {
+            remove_overlaps_in_layer(graph, layer, &mut node_positions, is_horizontal, membership, &empty_path);
+        }
     }
 
     // Phase 4: Shift everything so minimum coordinate is 0
@@ -559,20 +933,18 @@ fn position_nodes(
     positioned
 }
 
-/// Compute barycenter positions for nodes in a rank.
-/// Each node is moved to the average cross-position of its neighbors in the given direction.
-fn apply_barycenter(
+/// Barycenter centering: move each node toward the average position of its neighbors
+/// in the given direction. Returns updated positions preserving the ordering from dagre.
+fn apply_barycenter_sized(
     graph: &DiGraph<NodeData, EdgeData>,
-    group: &[NodeIndex],
+    layer: &[NodeIndex],
     positions: &HashMap<NodeIndex, (f64, f64)>,
     is_horizontal: bool,
     neighbor_dir: PetDirection,
-    membership: &SubgraphMembership,
-    empty_path: &Vec<String>,
 ) -> Vec<(NodeIndex, (f64, f64))> {
     let mut updates = Vec::new();
 
-    for &idx in group {
+    for &idx in layer {
         let neighbors: Vec<NodeIndex> = graph.neighbors_directed(idx, neighbor_dir).collect();
         if neighbors.is_empty() {
             continue;
@@ -595,42 +967,38 @@ fn apply_barycenter(
         }
     }
 
-    // Sort updates by desired cross position to maintain relative order
+    // Sort by desired cross position to maintain relative order
     updates.sort_by(|a, b| {
         let ca = if is_horizontal { (a.1).1 } else { (a.1).0 };
         let cb = if is_horizontal { (b.1).1 } else { (b.1).0 };
         ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    // Verify no position reversal within same subgraph (maintain order)
-    let _ = membership;
-    let _ = empty_path;
-
     updates
 }
 
-/// Ensure no nodes overlap within a rank after barycenter centering.
-fn remove_overlaps(
+/// Ensure no nodes overlap within a layer after barycenter centering.
+fn remove_overlaps_in_layer(
     graph: &DiGraph<NodeData, EdgeData>,
-    group: &[NodeIndex],
+    layer: &[NodeIndex],
     positions: &mut HashMap<NodeIndex, (f64, f64)>,
     is_horizontal: bool,
     membership: &SubgraphMembership,
     empty_path: &Vec<String>,
 ) {
-    if group.len() < 2 {
+    if layer.len() < 2 {
         return;
     }
 
-    // Sort group by current cross position
-    let mut sorted: Vec<NodeIndex> = group.to_vec();
+    // Sort by current cross position
+    let mut sorted: Vec<NodeIndex> = layer.to_vec();
     sorted.sort_by(|a, b| {
         let ca = positions.get(a).map(|&(x, y)| if is_horizontal { y } else { x }).unwrap_or(0.0);
         let cb = positions.get(b).map(|&(x, y)| if is_horizontal { y } else { x }).unwrap_or(0.0);
         ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    // Walk through and push nodes apart if they overlap
+    // Push nodes apart if they overlap
     for i in 1..sorted.len() {
         let prev_idx = sorted[i - 1];
         let curr_idx = sorted[i];
@@ -643,7 +1011,7 @@ fn remove_overlaps(
         let prev_size = if is_horizontal { prev_node.height } else { prev_node.width };
         let curr_size = if is_horizontal { curr_node.height } else { curr_node.width };
 
-        // Minimum gap: NODE_SEP, plus extra at subgraph boundaries
+        // Extra gap at subgraph boundaries
         let prev_path = membership.get(&prev_node.id).unwrap_or(empty_path);
         let curr_path = membership.get(&curr_node.id).unwrap_or(empty_path);
         let extra_gap = if prev_path != curr_path {
@@ -730,6 +1098,7 @@ fn edge_connection_point(node: &PositionedNode, target_x: f64, target_y: f64) ->
 fn position_subgraphs(
     subgraphs: &[SubgraphDef],
     positioned_nodes: &[PositionedNode],
+    style_overrides: &[StyleOverride],
 ) -> Vec<PositionedSubgraph> {
     let node_pos: HashMap<&str, &PositionedNode> = positioned_nodes
         .iter()
@@ -737,18 +1106,19 @@ fn position_subgraphs(
         .collect();
 
     let mut result = Vec::new();
-    position_subgraphs_recursive(subgraphs, &node_pos, &mut result);
+    position_subgraphs_recursive(subgraphs, &node_pos, style_overrides, &mut result);
     result
 }
 
 fn position_subgraphs_recursive(
     subgraphs: &[SubgraphDef],
     node_pos: &HashMap<&str, &PositionedNode>,
+    style_overrides: &[StyleOverride],
     result: &mut Vec<PositionedSubgraph>,
 ) {
     for sg in subgraphs {
         // Recurse into children first so their bounds are available
-        position_subgraphs_recursive(&sg.subgraphs, node_pos, result);
+        position_subgraphs_recursive(&sg.subgraphs, node_pos, style_overrides, result);
 
         let mut min_x = f64::MAX;
         let mut min_y = f64::MAX;
@@ -792,13 +1162,35 @@ fn position_subgraphs_recursive(
         }
 
         if has_content {
+            // Account for multi-line titles (e.g. labels with <br/>)
+            let title_height = if let Some(ref label) = sg.label {
+                let normalized = crate::render::html_util::normalize_br(label);
+                let line_count = normalized.split('\n').count();
+                SUBGRAPH_TITLE_HEIGHT + (line_count.saturating_sub(1) as f64) * 16.0
+            } else {
+                SUBGRAPH_TITLE_HEIGHT
+            };
+
+            // Resolve style overrides for this subgraph
+            let mut style = StyleProperties::default();
+            for so in style_overrides {
+                if so.node_id == sg.id {
+                    style = style.merge(&so.properties);
+                }
+            }
+
+            // Use subgraph ID as label when no explicit label is given
+            // (matches mermaid.js behavior for `subgraph ID` without ["label"])
+            let label = sg.label.clone().or_else(|| Some(sg.id.clone()));
+
             result.push(PositionedSubgraph {
                 id: sg.id.clone(),
-                label: sg.label.clone(),
+                label,
                 x: min_x - SUBGRAPH_PADDING,
-                y: min_y - SUBGRAPH_PADDING - SUBGRAPH_TITLE_HEIGHT,
+                y: min_y - SUBGRAPH_PADDING - title_height,
                 width: (max_x - min_x) + 2.0 * SUBGRAPH_PADDING,
-                height: (max_y - min_y) + 2.0 * SUBGRAPH_PADDING + SUBGRAPH_TITLE_HEIGHT,
+                height: (max_y - min_y) + 2.0 * SUBGRAPH_PADDING + title_height,
+                style,
             });
         }
     }

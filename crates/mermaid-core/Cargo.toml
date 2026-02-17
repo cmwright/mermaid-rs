@@ -6,7 +6,8 @@ edition.workspace = true
 [dependencies]
 pest = "2.7"
 pest_derive = "2.7"
-petgraph = "0.6"
+petgraph = "0.8"
+dagre-rs = "0.1"
 ab_glyph = "0.2"
 thiserror.workspace = true
 log.workspace = true
