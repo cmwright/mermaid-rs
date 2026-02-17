@@ -1,0 +1,188 @@
+// Mermaid Flowchart PEG Grammar
+// Handles: graph/flowchart declarations, node shapes, edge types,
+// subgraphs, classDef, class assignments, style overrides, comments
+
+flowchart = {
+    SOI ~ NEWLINE* ~ directive* ~ diagram_header ~ NEWLINE* ~
+    (statement ~ stmt_sep)* ~ statement? ~
+    NEWLINE* ~ EOI
+}
+
+stmt_sep = _{ (NEWLINE | ";")+ }
+
+diagram_header = {
+    diagram_keyword ~ direction?
+}
+
+diagram_keyword = @{ "flowchart" | "graph" }
+
+direction = @{
+    "TB" | "TD" | "BT" | "LR" | "RL"
+}
+
+// ── Statements ──────────────────────────────────────────────
+
+statement = _{
+    comment
+    | directive
+    | subgraph_block
+    | class_def_stmt
+    | class_assign_stmt
+    | style_stmt
+    | link_chain
+    | node_stmt
+}
+
+comment = _{ "%%" ~ (!NEWLINE ~ ANY)* }
+
+directive = {
+    "%%{" ~ directive_body ~ "}%%"
+}
+directive_body = @{ (!"}" ~ ANY)* }
+
+// ── Subgraphs ───────────────────────────────────────────────
+
+subgraph_block = {
+    "subgraph" ~ subgraph_id ~ subgraph_label? ~ NEWLINE+ ~
+    subgraph_direction? ~
+    (statement ~ stmt_sep)* ~ statement? ~
+    NEWLINE* ~ "end"
+}
+
+subgraph_id = @{ identifier }
+
+subgraph_label = { "[\"" ~ quoted_text ~ "\"]" | "[" ~ bracket_text ~ "]" }
+
+subgraph_direction = { "direction" ~ direction ~ NEWLINE+ }
+
+// ── Nodes ───────────────────────────────────────────────────
+
+node_stmt = { node_def }
+
+node_def = {
+    node_id ~ node_shape? ~ class_shorthand?
+}
+
+// Prevent reserved keywords from matching as node IDs
+node_id = @{ !reserved_word ~ identifier }
+reserved_word = _{ "end" ~ !(ASCII_ALPHANUMERIC | "_" | "-") }
+
+class_shorthand = { ":::" ~ identifier }
+
+// Node shapes — ordered from most-specific delimiters to least-specific
+// so PEG ordered choice tries the longest match first.
+node_shape = _{
+    shape_double_circle
+    | shape_stadium
+    | shape_subroutine
+    | shape_cylinder
+    | shape_hexagon
+    | shape_trapezoid
+    | shape_trapezoid_alt
+    | shape_parallelogram
+    | shape_parallelogram_alt
+    | shape_circle
+    | shape_diamond
+    | shape_rounded
+    | shape_asymmetric
+    | shape_rect
+}
+
+shape_rect           = { "[\"" ~ quoted_text ~ "\"]" | "[" ~ bracket_text ~ "]" }
+shape_rounded        = { "(" ~ paren_text ~ ")" }
+shape_stadium        = { "([" ~ bracket_text ~ "])" }
+shape_subroutine     = { "[[" ~ bracket_text ~ "]]" }
+shape_cylinder       = { "[(" ~ paren_text ~ ")]" }
+shape_circle         = { "((" ~ paren_text ~ "))" }
+shape_double_circle  = { "(((" ~ paren_text ~ ")))" }
+shape_diamond        = { "{" ~ brace_text ~ "}" }
+shape_hexagon        = { "{{" ~ brace_text ~ "}}" }
+shape_asymmetric     = { ">" ~ bracket_text ~ "]" }
+shape_trapezoid      = { "[/" ~ slash_text ~ "\\]" }
+shape_trapezoid_alt  = { "[\\" ~ backslash_text ~ "/]" }
+shape_parallelogram  = { "[/" ~ slash_text ~ "/]" }
+shape_parallelogram_alt = { "[\\" ~ backslash_text ~ "\\]" }
+
+// Context-dependent label text: stops at the correct closing delimiter.
+bracket_text   = @{ (!"]" ~ !NEWLINE ~ ANY)+ }
+paren_text     = @{ (!")" ~ !NEWLINE ~ ANY)+ }
+brace_text     = @{ (!"}" ~ !NEWLINE ~ ANY)+ }
+slash_text     = @{ (!"/" ~ !"\\" ~ !NEWLINE ~ ANY)+ }
+backslash_text = @{ (!"/" ~ !"\\" ~ !NEWLINE ~ ANY)+ }
+quoted_text    = @{ (!"\"" ~ ANY)+ }
+
+// ── Edges / Link Chains ─────────────────────────────────────
+
+link_chain = {
+    node_def ~ (edge ~ node_def)+
+}
+
+edge = {
+    edge_operator ~ pipe_label?
+}
+
+// Silent rule so inner matches promote to edge's children
+edge_operator = _{
+    thick_arrow_labeled
+    | thick_arrow
+    | thick_line
+    | dotted_arrow_labeled
+    | dotted_arrow
+    | dotted_line
+    | solid_arrow_labeled
+    | solid_arrow
+    | solid_line_labeled
+    | solid_line
+}
+
+// Solid edges
+solid_arrow         = @{ "-" ~ "-"+ ~ ">" }
+solid_line          = @{ "-" ~ "-" ~ "-"+ }
+solid_arrow_labeled = { "--" ~ edge_inline_text ~ "-->" }
+solid_line_labeled  = { "--" ~ edge_inline_text ~ "---" }
+
+// Dotted edges
+dotted_arrow        = @{ "-" ~ "."+ ~ "-"+ ~ ">" }
+dotted_line         = @{ "-" ~ "."+ ~ "-"+ }
+dotted_arrow_labeled = { "-." ~ edge_inline_text ~ ".->" }
+
+// Thick edges
+thick_arrow         = @{ "=" ~ "="+ ~ ">" }
+thick_line          = @{ "=" ~ "=" ~ "="+ }
+thick_arrow_labeled = { "==" ~ edge_inline_text ~ "==>" }
+
+// Edge label text — inline between edge delimiters (e.g., --text-->)
+edge_inline_text = @{ (!" " ~ !NEWLINE ~ ANY)+ | (!("-->" | "---" | ".->" | "==>") ~ ANY)+ }
+
+// Pipe-style edge label: -->|text| (appears after the arrow)
+pipe_label = { "|" ~ pipe_text ~ "|" }
+pipe_text  = @{ (!"|" ~ !NEWLINE ~ ANY)+ }
+
+// ── Styling ─────────────────────────────────────────────────
+
+class_def_stmt = {
+    "classDef" ~ class_name ~ style_props_text
+}
+
+class_assign_stmt = {
+    "class" ~ node_id_list ~ class_name
+}
+
+style_stmt = {
+    "style" ~ node_id ~ style_props_text
+}
+
+class_name = @{ identifier }
+
+node_id_list = {
+    node_id ~ ("," ~ node_id)*
+}
+
+style_props_text = @{ (!(";" | NEWLINE) ~ ANY)+ }
+
+// ── Primitives ──────────────────────────────────────────────
+
+identifier = @{ (ASCII_ALPHANUMERIC | "_" | "-")+ }
+
+WHITESPACE = _{ " " | "\t" }
+NEWLINE    = _{ "\r\n" | "\n" | "\r" }

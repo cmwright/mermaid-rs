@@ -1,0 +1,15 @@
+[package]
+name = "mermaid-core"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+pest = "2.7"
+pest_derive = "2.7"
+petgraph = "0.6"
+ab_glyph = "0.2"
+thiserror.workspace = true
+log.workspace = true
+
+[dev-dependencies]
+pretty_assertions = "1"
