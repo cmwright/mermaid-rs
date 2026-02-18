@@ -102,29 +102,24 @@ fn route_orthogonal_with_avoidance(
     nodes: &[PositionedNode],
     is_horizontal: bool,
 ) -> Vec<(f64, f64)> {
-    if path_avoids_nodes(&[start, end], from_id, to_id, nodes) {
+    let eps = 1e-6;
+
+    // Only use a direct line when source and target are axis-aligned
+    // (the line is already perpendicular to both node faces).
+    let aligned = if is_horizontal {
+        (start.1 - end.1).abs() < eps
+    } else {
+        (start.0 - end.0).abs() < eps
+    };
+
+    if aligned && path_avoids_nodes(&[start, end], from_id, to_id, nodes) {
         return vec![start, end];
     }
 
-    let l_routes = if is_horizontal {
-        vec![
-            vec![start, (start.0, end.1), end],
-            vec![start, (end.0, start.1), end],
-        ]
-    } else {
-        vec![
-            vec![start, (end.0, start.1), end],
-            vec![start, (start.0, end.1), end],
-        ]
-    };
-
-    for route in l_routes {
-        if path_avoids_nodes(&route, from_id, to_id, nodes) {
-            return dedupe_adjacent_points(route);
-        }
-    }
-
-    let offsets = [0.0, 50.0, -50.0, 100.0, -100.0, 150.0, -150.0];
+    // Z-routes: always perpendicular at both source and target.
+    // For TB: vertical → horizontal → vertical
+    // For LR: horizontal → vertical → horizontal
+    let offsets = [0.0, 30.0, -30.0, 60.0, -60.0, 100.0, -100.0, 150.0, -150.0, 200.0, -200.0];
 
     for off in offsets {
         let points = if is_horizontal {
@@ -140,7 +135,15 @@ fn route_orthogonal_with_avoidance(
         }
     }
 
-    vec![start, end]
+    // Last resort: Z-route at midpoint without collision check
+    let points = if is_horizontal {
+        let mid_x = (start.0 + end.0) / 2.0;
+        vec![start, (mid_x, start.1), (mid_x, end.1), end]
+    } else {
+        let mid_y = (start.1 + end.1) / 2.0;
+        vec![start, (start.0, mid_y), (end.0, mid_y), end]
+    };
+    dedupe_adjacent_points(points)
 }
 
 fn dedupe_adjacent_points(points: Vec<(f64, f64)>) -> Vec<(f64, f64)> {

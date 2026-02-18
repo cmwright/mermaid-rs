@@ -92,6 +92,11 @@ pub fn assign_coordinates(
         }
     }
 
+    // Subgraph chain centering: for subgraphs where each layer has at most
+    // one node, align all nodes to the same cross-axis position (their average).
+    // This produces perfectly straight arrows within subgraphs.
+    center_subgraph_chains(graph, layers, &mut positions, is_horizontal, membership, &empty_path);
+
     // For BT or RL directions, mirror the positions
     if matches!(direction, Direction::BottomToTop | Direction::RightToLeft) {
         let max_coord = if is_horizontal {
@@ -136,10 +141,14 @@ fn refine_layer(
     membership: &SubgraphMembership,
     empty_path: &Vec<String>,
 ) {
-    // Compute desired positions based on neighbor barycenters
+    // Compute desired positions based on weighted neighbor barycenters.
+    // Same-subgraph neighbors get 3x weight so nodes within a subgraph
+    // stay vertically aligned, producing straight arrows.
     let mut desired: Vec<(NodeIndex, f64)> = Vec::new();
 
     for &idx in layer {
+        let node_path = membership.get(&graph[idx].id).unwrap_or(empty_path);
+
         let neighbors_in: Vec<NodeIndex> = graph
             .neighbors_directed(idx, petgraph::Direction::Incoming)
             .collect();
@@ -156,14 +165,22 @@ fn refine_layer(
             continue;
         }
 
-        let avg_cross: f64 = all_neighbors
-            .iter()
-            .filter_map(|&&n| positions.get(&n))
-            .map(|&(x, y)| if is_horizontal { y } else { x })
-            .sum::<f64>()
-            / all_neighbors.len() as f64;
+        let mut weighted_sum = 0.0;
+        let mut total_weight = 0.0;
 
-        desired.push((idx, avg_cross));
+        for &&n in &all_neighbors {
+            if let Some(&pos) = positions.get(&n) {
+                let cross = if is_horizontal { pos.1 } else { pos.0 };
+                let neighbor_path = membership.get(&graph[n].id).unwrap_or(empty_path);
+                let weight = if node_path == neighbor_path { 3.0 } else { 1.0 };
+                weighted_sum += cross * weight;
+                total_weight += weight;
+            }
+        }
+
+        if total_weight > 0.0 {
+            desired.push((idx, weighted_sum / total_weight));
+        }
     }
 
     // Apply desired positions
@@ -261,4 +278,70 @@ fn enforce_spacing(
             }
         }
     }
+}
+
+/// For subgraphs where each layer has at most one member node, set all nodes
+/// to the same cross-axis coordinate (their average) so arrows are perfectly
+/// straight within the subgraph.
+fn center_subgraph_chains(
+    graph: &DiGraph<NodeData, EdgeData>,
+    layers: &[Vec<NodeIndex>],
+    positions: &mut HashMap<NodeIndex, (f64, f64)>,
+    is_horizontal: bool,
+    membership: &SubgraphMembership,
+    empty_path: &Vec<String>,
+) {
+    // Build layer index for each node
+    let mut node_layer: HashMap<NodeIndex, usize> = HashMap::new();
+    for (rank, layer) in layers.iter().enumerate() {
+        for &idx in layer {
+            node_layer.insert(idx, rank);
+        }
+    }
+
+    // Collect nodes by their innermost subgraph path
+    let mut sg_nodes: HashMap<&Vec<String>, Vec<NodeIndex>> = HashMap::new();
+    for idx in graph.node_indices() {
+        let path = membership.get(&graph[idx].id).unwrap_or(empty_path);
+        if !path.is_empty() {
+            sg_nodes.entry(path).or_default().push(idx);
+        }
+    }
+
+    for (_path, nodes) in &sg_nodes {
+        if nodes.len() < 2 {
+            continue;
+        }
+
+        // Check: at most one node per layer from this subgraph
+        let mut layer_count: HashMap<usize, usize> = HashMap::new();
+        for &idx in nodes {
+            if let Some(&layer) = node_layer.get(&idx) {
+                *layer_count.entry(layer).or_insert(0) += 1;
+            }
+        }
+        if layer_count.values().any(|&c| c > 1) {
+            continue;
+        }
+
+        // Compute average cross-axis position
+        let sum: f64 = nodes
+            .iter()
+            .filter_map(|idx| positions.get(idx))
+            .map(|&(x, y)| if is_horizontal { y } else { x })
+            .sum();
+        let avg = sum / nodes.len() as f64;
+
+        // Align all nodes to the average
+        for &idx in nodes {
+            if let Some(pos) = positions.get_mut(&idx) {
+                if is_horizontal {
+                    pos.1 = avg;
+                } else {
+                    pos.0 = avg;
+                }
+            }
+        }
+    }
+
 }
