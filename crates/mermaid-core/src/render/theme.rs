@@ -31,7 +31,7 @@ impl Default for Theme {
             secondary_color: Color::Hex("#ffffde".into()),
             line_color: Color::Hex("#333333".into()),
             text_color: Color::Hex("#333333".into()),
-            font_family: "sans-serif".into(),
+            font_family: "'Hack', monospace".into(),
             font_size: 14.0,
             node_border_width: 2.0,
             edge_width: 2.0,

@@ -2,9 +2,9 @@ use ab_glyph::FontRef;
 
 use crate::error::{MermaidError, Result};
 
-/// Embedded DejaVu Sans font bytes (SIL Open Font License).
+/// Embedded Hack font bytes (MIT License).
 /// This font is bundled so the tool works out of the box without system fonts.
-const DEFAULT_FONT_BYTES: &[u8] = include_bytes!("../../../assets/fonts/DejaVuSans.ttf");
+const DEFAULT_FONT_BYTES: &[u8] = include_bytes!("../../../assets/fonts/Hack-Regular.ttf");
 
 #[derive(Clone)]
 pub struct FontProvider {
