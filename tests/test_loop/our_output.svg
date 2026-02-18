@@ -1,0 +1,252 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2618 892" width="2618" height="892">
+<style>
+  svg { background: #ffffff; }
+  .node-text { font-family: sans-serif; font-size: 14px; }
+  .edge-label { font-family: sans-serif; font-size: 11.9px; }
+</style>
+<defs>
+  <marker id="arrowhead" viewBox="0 0 10 10" markerWidth="8" markerHeight="8" refX="8.5" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#333333"/>
+  </marker>
+  <marker id="arrowhead-thick" viewBox="0 0 10 10" markerWidth="8" markerHeight="8" refX="8.5" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#333333"/>
+  </marker>
+</defs>
+<g transform="translate(8, 8)">
+<rect x="449.32972717285156" y="114" width="854.3825759887695" height="268" rx="5" fill="#ebebff33" stroke="#9370DB" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="459.32972717285156" y="132" font-family="sans-serif" font-size="14" font-weight="bold" fill="#333333"><tspan x="459.32972717285156" dy="0">Organization: Acme Holdings</tspan><tspan x="459.32972717285156" dy="1.2em">(id=org-123, plan=enterprise)</tspan></text>
+<rect x="1311.712303161621" y="114" width="179.546142578125" height="134" rx="5" fill="#ebebff33" stroke="#9370DB" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="1321.712303161621" y="132" font-family="sans-serif" font-size="14" font-weight="bold" fill="#333333"><tspan x="1321.712303161621" dy="0">Organization: Smallco</tspan><tspan x="1321.712303161621" dy="1.2em">(id=org-456, plan=free)</tspan></text>
+<rect x="193.0578842163086" y="273" width="248.27184295654297" height="207" rx="5" fill="#ebebff33" stroke="#9370DB" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="203.0578842163086" y="291" font-family="sans-serif" font-size="14" font-weight="bold" fill="#333333">Legal Entity: Acme Holdings Inc.</text>
+<rect x="449.32972717285156" y="398" width="134.0578842163086" height="180" rx="5" fill="#ebebff33" stroke="#9370DB" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="459.32972717285156" y="416" font-family="sans-serif" font-size="14" font-weight="bold" fill="#333333">Legal Entity: Acme EU GmbH</text>
+<rect x="1311.712303161621" y="273" width="287.72318267822266" height="207" rx="5" fill="#ebebff33" stroke="#9370DB" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="1321.712303161621" y="291" font-family="sans-serif" font-size="14" font-weight="bold" fill="#333333">Legal Entity: Smallco LLC</text>
+<rect x="185.0578842163086" y="88" width="1422.3776016235352" height="498" rx="5" fill="#ebebff33" stroke="#9370DB" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="195.0578842163086" y="106" font-family="sans-serif" font-size="14" font-weight="bold" fill="#333333">Platform</text>
+<rect x="1009.9907989501953" y="644" width="575.1795501708984" height="216" rx="5" fill="#d4eaff" stroke="#336" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="1019.9907989501953" y="662" font-family="sans-serif" font-size="14" font-weight="bold" fill="#333333">Ory Org: Acme US (ory-org-aaa)</text>
+<rect x="248.81879425048828" y="644" width="753.172004699707" height="216" rx="5" fill="#d4f5d4" stroke="#363" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="258.8187942504883" y="662" font-family="sans-serif" font-size="14" font-weight="bold" fill="#333333">Ory Org: Acme EU (ory-org-bbb)</text>
+<rect x="1593.1703491210938" y="644" width="993.6141204833984" height="207" rx="5" fill="#f5e6ff" stroke="#636" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="1603.1703491210938" y="662" font-family="sans-serif" font-size="14" font-weight="bold" fill="#333333">Ory Org: Smallco (ory-org-ccc)</text>
+<rect x="240.81879425048828" y="618" width="2353.965675354004" height="250" rx="5" fill="#ebebff33" stroke="#9370DB" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="250.81879425048828" y="636" font-family="sans-serif" font-size="14" font-weight="bold" fill="#333333">Ory Network</text>
+<rect x="0" y="0" width="204.32718658447266" height="64" rx="5" fill="#ebebff33" stroke="#9370DB" stroke-width="1" stroke-dasharray="5,5"/>
+<text x="10" y="18" font-family="sans-serif" font-size="14" font-weight="bold" fill="#333333">External Identity Providers</text>
+<path d="M 557.3297271728516 240 L 1117.9907989501953 670" fill="none" stroke="#333333" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="792.6602630615234" y="445" width="90" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="837.6602630615234" y="455" text-anchor="middle" dominant-baseline="central" fill="#333333">ory_org_id</text>
+<path d="M 540.6355209350586 374 L 534.6355209350586 396 Q 540.6355209350586 402 534.6355209350586 408 L 331.30537033081055 396 Q 325.30537033081055 402 331.30537033081055 408 L 325.30537033081055 670" fill="none" stroke="#333333" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="280.30537033081055" y="526" width="90" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="325.30537033081055" y="536" text-anchor="middle" dominant-baseline="central" fill="#333333">ory_org_id</text>
+<path d="M 1223.2148208618164 374 L 1217.2148208618164 516 Q 1223.2148208618164 522 1217.2148208618164 528 L 1123.9907989501953 516 Q 1117.9907989501953 522 1123.9907989501953 528 L 1117.9907989501953 670" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3,3" marker-end="url(#arrowhead)"/>
+<rect x="1138.2148208618164" y="438" width="170" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="1223.2148208618164" y="448" text-anchor="middle" dominant-baseline="central" fill="#333333">inherits from parent</text>
+<path d="M 1401.4853744506836 240 L 1395.4853744506836 449 Q 1401.4853744506836 455 1407.4853744506836 461 L 1667.844009399414 449 Q 1673.844009399414 455 1679.844009399414 461 L 1673.844009399414 670" fill="none" stroke="#333333" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="1492.6646919250488" y="445" width="90" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="1537.6646919250488" y="455" text-anchor="middle" dominant-baseline="central" fill="#333333">ory_org_id</text>
+<path d="M 240.36115646362305 472 L 234.36115646362305 605 Q 240.36115646362305 611 246.36115646362305 617 L 1111.9907989501953 605 Q 1117.9907989501953 611 1123.9907989501953 617 L 1117.9907989501953 670" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="606.1759777069092" y="601" width="146" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="679.1759777069092" y="611" text-anchor="middle" dominant-baseline="central" fill="#333333">configures domain</text>
+<path d="M 532.3297271728516 570 L 526.3297271728516 614 Q 532.3297271728516 620 526.3297271728516 626 L 331.30537033081055 614 Q 325.30537033081055 620 331.30537033081055 626 L 325.30537033081055 670" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="355.81754875183105" y="610" width="146" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="428.81754875183105" y="620" text-anchor="middle" dominant-baseline="central" fill="#333333">configures domain</text>
+<path d="M 1357.8704414367676 472 L 1351.8704414367676 565 Q 1357.8704414367676 571 1363.8704414367676 577 L 1667.844009399414 565 Q 1673.844009399414 571 1679.844009399414 577 L 1673.844009399414 670" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="1442.8572254180908" y="561" width="146" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="1515.8572254180908" y="571" text-anchor="middle" dominant-baseline="central" fill="#333333">configures domain</text>
+<path d="M 1516.6527252197266 804 L 1510.6527252197266 396 Q 1516.6527252197266 390 1510.6527252197266 396 L 168.94043922424316 384 Q 162.94043922424316 390 168.94043922424316 384 L 162.94043922424316 56" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="766.7965822219849" y="380" width="146" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="839.7965822219849" y="390" text-anchor="middle" dominant-baseline="central" fill="#333333">SAML AuthnRequest</text>
+<path d="M 924.2974243164063 804 L 918.2974243164063 396 Q 924.2974243164063 390 918.2974243164063 396 L 49.776845932006836 384 Q 43.776845932006836 390 49.776845932006836 384 L 43.776845932006836 56" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="419.03713512420654" y="380" width="130" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="484.03713512420654" y="390" text-anchor="middle" dominant-baseline="central" fill="#333333">OIDC /authorize</text>
+<path d="M 557.3297271728516 240 L 551.3297271728516 263.5 Q 557.3297271728516 269.5 551.3297271728516 275.5 L 347.4706573486328 263.5 Q 341.4706573486328 269.5 347.4706573486328 275.5 L 341.4706573486328 299" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3,3" marker-end="url(#arrowhead)"/>
+<rect x="404.4001922607422" y="259.5" width="90" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="449.4001922607422" y="269.5" text-anchor="middle" dominant-baseline="central" fill="#333333">REPRESENTS</text>
+<path d="M 540.6355209350586 374 L 534.6355209350586 393 Q 540.6355209350586 399 534.6355209350586 405 L 522.3586692810059 393 Q 516.3586692810059 399 522.3586692810059 405 L 516.3586692810059 424" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3,3" marker-end="url(#arrowhead)"/>
+<rect x="495.6355209350586" y="376.5" width="90" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="540.6355209350586" y="386.5" text-anchor="middle" dominant-baseline="central" fill="#333333">REPRESENTS</text>
+<path d="M 1401.4853744506836 240 L 1395.4853744506836 263.5 Q 1401.4853744506836 269.5 1407.4853744506836 275.5 L 1526.4065437316895 263.5 Q 1532.4065437316895 269.5 1538.4065437316895 275.5 L 1532.4065437316895 299" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3,3" marker-end="url(#arrowhead)"/>
+<rect x="1421.9459590911865" y="259.5" width="90" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="1466.9459590911865" y="269.5" text-anchor="middle" dominant-baseline="central" fill="#333333">REPRESENTS</text>
+<path d="M 557.3297271728516 240 L 551.3297271728516 259 Q 557.3297271728516 265 551.3297271728516 271 L 546.6355209350586 259 Q 540.6355209350586 265 546.6355209350586 271 L 540.6355209350586 290" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="504.32972717285156" y="242.5" width="106" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="557.3297271728516" y="252.5" text-anchor="middle" dominant-baseline="central" fill="#333333">HAS_CHILD_OU</text>
+<path d="M 557.3297271728516 240 L 551.3297271728516 259 Q 557.3297271728516 265 563.3297271728516 271 L 1217.2148208618164 259 Q 1223.2148208618164 265 1229.2148208618164 271 L 1223.2148208618164 290" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="837.272274017334" y="255" width="106" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="890.272274017334" y="265" text-anchor="middle" dominant-baseline="central" fill="#333333">HAS_CHILD_OU</text>
+<path d="M 341.4706573486328 365 L 335.4706573486328 397.5 Q 341.4706573486328 403.5 335.4706573486328 409.5 L 246.36115646362305 397.5 Q 240.36115646362305 403.5 246.36115646362305 409.5 L 240.36115646362305 442" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="241.91590690612793" y="393.5" width="98" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="290.91590690612793" y="403.5" text-anchor="middle" dominant-baseline="central" fill="#333333">OWNS_DOMAIN</text>
+<path d="M 516.3586692810059 490 L 510.35866928100586 509 Q 516.3586692810059 515 522.3586692810059 521 L 526.3297271728516 509 Q 532.3297271728516 515 538.3297271728516 521 L 532.3297271728516 540" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="467.35866928100586" y="492.5" width="98" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="516.3586692810059" y="502.5" text-anchor="middle" dominant-baseline="central" fill="#333333">OWNS_DOMAIN</text>
+<path d="M 1532.4065437316895 365 L 1526.4065437316895 397.5 Q 1532.4065437316895 403.5 1526.4065437316895 409.5 L 1363.8704414367676 397.5 Q 1357.8704414367676 403.5 1363.8704414367676 409.5 L 1357.8704414367676 442" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="1396.1384925842285" y="393.5" width="98" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="1445.1384925842285" y="403.5" text-anchor="middle" dominant-baseline="central" fill="#333333">OWNS_DOMAIN</text>
+<path d="M 1117.9907989501953 754 L 1111.9907989501953 773 Q 1117.9907989501953 779 1123.9907989501953 785 L 1510.6527252197266 773 Q 1516.6527252197266 779 1522.6527252197266 785 L 1516.6527252197266 804" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="1264.321762084961" y="769" width="106" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="1317.321762084961" y="779" text-anchor="middle" dominant-baseline="central" fill="#333333">SSO provider</text>
+<path d="M 1117.9907989501953 754 L 1111.9907989501953 777.5 Q 1117.9907989501953 783.5 1123.9907989501953 789.5 L 1314.2395477294922 777.5 Q 1320.2395477294922 783.5 1326.2395477294922 789.5 L 1320.2395477294922 813" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="1190.1151733398438" y="773.5" width="58" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="1219.1151733398438" y="783.5" text-anchor="middle" dominant-baseline="central" fill="#333333">member</text>
+<path d="M 1117.9907989501953 754 L 1111.9907989501953 777.5 Q 1117.9907989501953 783.5 1111.9907989501953 789.5 L 1107.1673965454102 777.5 Q 1101.1673965454102 783.5 1107.1673965454102 789.5 L 1101.1673965454102 813" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="1088.9907989501953" y="758.75" width="58" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="1117.9907989501953" y="768.75" text-anchor="middle" dominant-baseline="central" fill="#333333">member</text>
+<path d="M 325.30537033081055 754 L 319.30537033081055 773 Q 325.30537033081055 779 331.30537033081055 785 L 918.2974243164063 773 Q 924.2974243164063 779 930.2974243164063 785 L 924.2974243164063 804" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="571.8013973236084" y="769" width="106" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="624.8013973236084" y="779" text-anchor="middle" dominant-baseline="central" fill="#333333">SSO provider</text>
+<path d="M 325.30537033081055 754 L 319.30537033081055 777.5 Q 325.30537033081055 783.5 331.30537033081055 789.5 L 717.3917999267578 777.5 Q 723.3917999267578 783.5 729.3917999267578 789.5 L 723.3917999267578 813" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="495.3485851287842" y="773.5" width="58" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="524.3485851287842" y="783.5" text-anchor="middle" dominant-baseline="central" fill="#333333">member</text>
+<path d="M 1673.844009399414 754 L 1667.844009399414 777.5 Q 1673.844009399414 783.5 1679.844009399414 789.5 L 2490.75301361084 777.5 Q 2496.75301361084 783.5 2502.75301361084 789.5 L 2496.75301361084 813" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="2056.298511505127" y="773.5" width="58" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="2085.298511505127" y="783.5" text-anchor="middle" dominant-baseline="central" fill="#333333">member</text>
+<path d="M 1673.844009399414 754 L 1667.844009399414 777.5 Q 1673.844009399414 783.5 1679.844009399414 789.5 L 2277.045379638672 777.5 Q 2283.045379638672 783.5 2289.045379638672 789.5 L 2283.045379638672 813" fill="none" stroke="#333333" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>
+<rect x="1949.444694519043" y="773.5" width="58" height="20" rx="3" fill="rgba(232,232,232,0.8)"/>
+<text class="edge-label" x="1978.444694519043" y="783.5" text-anchor="middle" dominant-baseline="central" fill="#333333">member</text>
+<g transform="translate(723.3917999267578, 828)">
+  <rect x="-81.21224975585938" y="-15" width="162.42449951171875" height="30" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" dominant-baseline="central" fill="#333333">Identity: carol@acme.eu</text>
+</g>
+<g transform="translate(557.3297271728516, 198)">
+  <rect x="-82.9094009399414" y="-42" width="165.8188018798828" height="84" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" fill="#333333">
+    <tspan x="0" dy="-1.7999999999999998em" dominant-baseline="central" font-weight="bold">Root OU: Acme US</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">id = ou-root-456</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">geo = US</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">ory_org_id = ory-org-aaa</tspan>
+  </text>
+</g>
+<g transform="translate(540.6355209350586, 332)">
+  <rect x="-83.30579376220703" y="-42" width="166.61158752441406" height="84" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" fill="#333333">
+    <tspan x="0" dy="-1.7999999999999998em" dominant-baseline="central" font-weight="bold">Child OU: Acme EU</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">id = ou-child-789</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">geo = EU</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">ory_org_id = ory-org-bbb</tspan>
+  </text>
+</g>
+<g transform="translate(924.2974243164063, 828)">
+  <rect x="-69.69337463378906" y="-24" width="139.38674926757813" height="48" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" fill="#333333">
+    <tspan x="0" dy="-0.6em" dominant-baseline="central" font-weight="bold">OIDC Connection</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">provider = Azure AD</tspan>
+  </text>
+</g>
+<g transform="translate(532.3297271728516, 555)">
+  <rect x="-33.9710578918457" y="-15" width="67.9421157836914" height="30" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" dominant-baseline="central" fill="#333333">acme.eu</text>
+</g>
+<g transform="translate(1673.844009399414, 712)">
+  <rect x="-72.67366027832031" y="-42" width="145.34732055664063" height="84" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" fill="#333333">
+    <tspan x="0" dy="-1.7999999999999998em" dominant-baseline="central" font-weight="bold">Ory Organization</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">id = ory-org-ccc</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">label = Smallco</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">domains = smallco.io</tspan>
+  </text>
+</g>
+<g transform="translate(2283.045379638672, 828)">
+  <rect x="-81.67617797851563" y="-15" width="163.35235595703125" height="30" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" dominant-baseline="central" fill="#333333">Identity: eve@smallco.io</text>
+</g>
+<g transform="translate(325.30537033081055, 712)">
+  <rect x="-68.48657608032227" y="-42" width="136.97315216064453" height="84" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" fill="#333333">
+    <tspan x="0" dy="-1.7999999999999998em" dominant-baseline="central" font-weight="bold">Ory Organization</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">id = ory-org-bbb</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">label = Acme EU</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">domains = acme.eu</tspan>
+  </text>
+</g>
+<g transform="translate(1101.1673965454102, 828)">
+  <rect x="-83.17659759521484" y="-15" width="166.3531951904297" height="30" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" dominant-baseline="central" fill="#333333">Identity: bob@acme.com</text>
+</g>
+<g transform="translate(516.3586692810059, 457)">
+  <rect x="-59.0289421081543" y="-33" width="118.0578842163086" height="66" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" fill="#333333">
+    <tspan x="0" dy="-1.2em" dominant-baseline="central" font-weight="bold">Acme EU GmbH</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">id = le-002</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">entityType = LLC</tspan>
+  </text>
+</g>
+<g transform="translate(1532.4065437316895, 332)">
+  <rect x="-59.0289421081543" y="-33" width="118.0578842163086" height="66" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" fill="#333333">
+    <tspan x="0" dy="-1.2em" dominant-baseline="central" font-weight="bold">Smallco LLC</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">id = le-003</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">entityType = LLC</tspan>
+  </text>
+</g>
+<g transform="translate(341.4706573486328, 332)">
+  <rect x="-91.85906982421875" y="-33" width="183.7181396484375" height="66" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" fill="#333333">
+    <tspan x="0" dy="-1.2em" dominant-baseline="central" font-weight="bold">Acme Holdings Inc.</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">id = le-001</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">entityType = CORPORATION</tspan>
+  </text>
+</g>
+<g transform="translate(1320.2395477294922, 828)">
+  <rect x="-85.89555358886719" y="-15" width="171.79110717773438" height="30" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" dominant-baseline="central" fill="#333333">Identity: alice@acme.com</text>
+</g>
+<g transform="translate(1357.8704414367676, 457)">
+  <rect x="-38.158138275146484" y="-15" width="76.31627655029297" height="30" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" dominant-baseline="central" fill="#333333">smallco.io</text>
+</g>
+<g transform="translate(1223.2148208618164, 332)">
+  <rect x="-72.49748229980469" y="-42" width="144.99496459960938" height="84" fill="#fff3cd" stroke="#996" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" fill="#333333">
+    <tspan x="0" dy="-1.7999999999999998em" dominant-baseline="central" font-weight="bold">Child OU: Acme APAC</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">id = ou-child-012</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">geo = US</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">ory_org_id = null</tspan>
+  </text>
+</g>
+<g transform="translate(162.94043922424316, 41)">
+  <rect x="-33.38674736022949" y="-15" width="66.77349472045898" height="30" fill="#f5f5f5" stroke="#999" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" dominant-baseline="central" fill="#333333">Okta IdP</text>
+</g>
+<g transform="translate(2496.75301361084, 828)">
+  <rect x="-82.03145599365234" y="-15" width="164.0629119873047" height="30" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" dominant-baseline="central" fill="#333333">Identity: dan@smallco.io</text>
+</g>
+<g transform="translate(1117.9907989501953, 712)">
+  <rect x="-73.81879425048828" y="-42" width="147.63758850097656" height="84" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" fill="#333333">
+    <tspan x="0" dy="-1.7999999999999998em" dominant-baseline="central" font-weight="bold">Ory Organization</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">id = ory-org-aaa</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">label = Acme US</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">domains = acme.com</tspan>
+  </text>
+</g>
+<g transform="translate(43.776845932006836, 41)">
+  <rect x="-35.776845932006836" y="-15" width="71.55369186401367" height="30" fill="#f5f5f5" stroke="#999" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" dominant-baseline="central" fill="#333333">Azure AD</text>
+</g>
+<g transform="translate(1516.6527252197266, 828)">
+  <rect x="-60.51762390136719" y="-24" width="121.03524780273438" height="48" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" fill="#333333">
+    <tspan x="0" dy="-0.6em" dominant-baseline="central" font-weight="bold">SAML Connection</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">provider = Okta</tspan>
+  </text>
+</g>
+<g transform="translate(240.36115646362305, 457)">
+  <rect x="-39.30327224731445" y="-15" width="78.6065444946289" height="30" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" dominant-baseline="central" fill="#333333">acme.com</text>
+</g>
+<g transform="translate(1401.4853744506836, 198)">
+  <rect x="-81.7730712890625" y="-42" width="163.546142578125" height="84" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+  <text class="node-text" text-anchor="middle" fill="#333333">
+    <tspan x="0" dy="-1.7999999999999998em" dominant-baseline="central" font-weight="bold">Root OU: Smallco</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">id = ou-root-999</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">geo = US</tspan>
+    <tspan x="0" dy="1.2em" dominant-baseline="central">ory_org_id = ory-org-ccc</tspan>
+  </text>
+</g>
+</g>
+</svg>

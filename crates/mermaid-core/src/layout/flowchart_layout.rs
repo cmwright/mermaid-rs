@@ -14,16 +14,20 @@ use crate::layout::text_measure::{TextMeasurer, TextMetrics};
 
 // ── Layout constants ────────────────────────────────────────
 
-const NODE_PADDING_H: f64 = 24.0;
-const NODE_PADDING_V: f64 = 14.0;
-const MIN_NODE_WIDTH: f64 = 70.0;
-const MIN_NODE_HEIGHT: f64 = 40.0;
-const NODE_SEP: f64 = 60.0;
-const RANK_SEP: f64 = 100.0;
-const SUBGRAPH_PADDING: f64 = 30.0;
-const SUBGRAPH_TITLE_HEIGHT: f64 = 25.0;
-const SUBGRAPH_GROUP_GAP: f64 = 30.0;
-const ZONE_GAP: f64 = 80.0; // Extra gap between top-level subgraph rank zones
+// Match Mermaid flowchart defaults as closely as possible:
+// - nodeSpacing / rankSpacing default to 50
+// - node padding is typically small (8px in flowchart DB defaults)
+// - diagram/subgraph margins are modest (single-digit values)
+const NODE_PADDING_H: f64 = 8.0;
+const NODE_PADDING_V: f64 = 8.0;
+const MIN_NODE_WIDTH: f64 = 0.0;
+const MIN_NODE_HEIGHT: f64 = 0.0;
+const NODE_SEP: f64 = 50.0;
+const RANK_SEP: f64 = 50.0;
+const SUBGRAPH_PADDING: f64 = 8.0;
+const SUBGRAPH_TITLE_HEIGHT: f64 = 18.0;
+const SUBGRAPH_GROUP_GAP: f64 = 25.0;
+const ZONE_GAP: f64 = 50.0;
 
 // ── Positioned types ────────────────────────────────────────
 
@@ -108,34 +112,72 @@ pub fn layout_flowchart(ast: &FlowchartAst, measurer: &TextMeasurer<'_>) -> Resu
     // 5. Build subgraph membership map
     let membership = build_subgraph_membership(ast);
 
-    // 6. Compound layout: run dagre independently per top-level subgraph.
-    // This ensures nodes from different top-level subgraphs (e.g. Platform,
-    // OryNetwork, ExtIdPs) occupy separate rank zones.
+    // 6. Hierarchical compound layering (Mermaid-like zone behavior):
+    // keep top-level and nested subgraphs as distinct rank zones.
     let layers = build_compound_layers(
         &graph, &index_map, &membership, &all_edges, &ast.subgraphs, ast.direction,
     );
 
-    // 6b. Within each layer, group nodes by second-level subgraph membership
-    // while preserving dagre's crossing-reduced ordering.
+    // 6b. Keep nodes in each layer grouped by membership path while preserving
+    // dagre ordering within each group.
     let layers = constrain_layers_by_subgraph(&graph, &layers, &membership);
 
-    // 7. Position nodes using constrained layers with our own sizing
+    // Dagre coordinate hints help keep connected nodes closer together.
+    let all_node_indices: Vec<NodeIndex> = graph.node_indices().collect();
+    let dagre_hints = run_dagre_positions_on_subset(
+        &graph,
+        &index_map,
+        &all_edges,
+        &all_node_indices,
+        ast.direction,
+    );
+
+    // 7. Position nodes using layered ordering and explicit subgraph spacing.
     let mut positioned_nodes = position_nodes_from_layers(
         &graph,
         &layers,
         ast.direction,
         &membership,
+        &dagre_hints,
     );
 
-    // 8. Route edges
-    let mut positioned_edges = route_edges(&graph, &index_map, &positioned_nodes, &all_edges);
+    // Compact each top-level subgraph with a local dagre pass (Mermaid-like
+    // recursive cluster compactness), then pack zones globally.
+    compact_top_level_subgraphs(
+        &graph,
+        &index_map,
+        &all_edges,
+        &membership,
+        ast.direction,
+        &mut positioned_nodes,
+    );
 
-    // 9. Position subgraphs (with style overrides)
+    // Normalize top-level subgraph zones so each zone keeps its internal layout
+    // but top-level bands are packed in Mermaid-like order without cross-zone overlap.
+    normalize_top_level_zones(&mut positioned_nodes, &membership, ast.direction);
+
+    // 8. Position subgraphs (with style overrides)
     let mut positioned_subgraphs = position_subgraphs(
         &ast.subgraphs, &positioned_nodes, &ast.style_overrides,
     );
 
-    // 10. Normalize coordinates (shift to positive) and compute bounding box
+    // 9. Ensure sibling subgraphs do not overlap as a final safety net.
+    separate_overlapping_sibling_subgraphs(
+        ast,
+        &membership,
+        &mut positioned_nodes,
+        &positioned_subgraphs,
+        &all_edges,
+        ast.direction,
+    );
+    positioned_subgraphs = position_subgraphs(
+        &ast.subgraphs, &positioned_nodes, &ast.style_overrides,
+    );
+
+    // 10. Route edges after final node positions
+    let mut positioned_edges = route_edges(&positioned_nodes, &all_edges, ast.direction);
+
+    // 11. Normalize coordinates (shift to positive) and compute bounding box
     let (width, height) = normalize_and_compute_bounds(
         &mut positioned_nodes,
         &mut positioned_edges,
@@ -763,31 +805,27 @@ fn position_nodes_from_layers(
     layers: &[Vec<NodeIndex>],
     direction: Direction,
     membership: &SubgraphMembership,
+    dagre_hints: &HashMap<NodeIndex, (f64, f64)>,
 ) -> Vec<PositionedNode> {
     let is_horizontal = matches!(direction, Direction::LeftToRight | Direction::RightToLeft);
     let empty_path: Vec<String> = Vec::new();
 
-    // Phase 1: Initial size-aware coordinate assignment
-    // Place nodes accounting for actual widths/heights and subgraph gaps
+    // Initial size-aware coordinate assignment driven by layer order.
     let mut node_positions: HashMap<NodeIndex, (f64, f64)> = HashMap::new();
     let mut rank_offset = 0.0;
     let mut prev_paths: Option<Vec<Vec<String>>> = None;
 
     for layer in layers {
-        // Add extra spacing when transitioning between subgraph zones at any depth
+        // Add extra spacing when transitioning between top-level subgraph zones.
         if !layer.is_empty() {
-            let curr_paths: Vec<Vec<String>> = layer.iter()
+            let curr_paths: Vec<Vec<String>> = layer
+                .iter()
                 .map(|&ni| membership.get(&graph[ni].id).cloned().unwrap_or_default())
                 .collect();
 
             if let Some(ref prev) = prev_paths {
-                // Check if the first element of any path changed (top-level subgraph transition)
-                let prev_tops: HashSet<Option<&String>> = prev.iter()
-                    .map(|p| p.first())
-                    .collect();
-                let curr_tops: HashSet<Option<&String>> = curr_paths.iter()
-                    .map(|p| p.first())
-                    .collect();
+                let prev_tops: HashSet<Option<&String>> = prev.iter().map(|p| p.first()).collect();
+                let curr_tops: HashSet<Option<&String>> = curr_paths.iter().map(|p| p.first()).collect();
                 if prev_tops != curr_tops {
                     rank_offset += ZONE_GAP;
                 }
@@ -805,6 +843,7 @@ fn position_nodes_from_layers(
 
         let mut cross_offset = 0.0;
         let mut prev_path: Option<&Vec<String>> = None;
+        let mut prev_idx: Option<NodeIndex> = None;
 
         for &idx in layer {
             let node = &graph[idx];
@@ -820,68 +859,43 @@ fn position_nodes_from_layers(
                 }
             }
 
-            let (x, y) = if is_horizontal {
-                (rank_offset + max_thickness / 2.0, cross_offset + node.height / 2.0)
+            let desired_cross = dagre_hints
+                .get(&idx)
+                .map(|&(x, y)| if is_horizontal { y } else { x })
+                .unwrap_or(cross_offset + if is_horizontal { node.height / 2.0 } else { node.width / 2.0 });
+
+            let min_cross = if let Some(prev_i) = prev_idx {
+                let prev = &graph[prev_i];
+                let prev_size = if is_horizontal { prev.height } else { prev.width };
+                let curr_size = if is_horizontal { node.height } else { node.width };
+                let prev_cross = node_positions
+                    .get(&prev_i)
+                    .map(|&(x, y)| if is_horizontal { y } else { x })
+                    .unwrap_or(0.0);
+                prev_cross + prev_size / 2.0 + curr_size / 2.0 + NODE_SEP
             } else {
-                (cross_offset + node.width / 2.0, rank_offset + max_thickness / 2.0)
+                if is_horizontal { node.height / 2.0 } else { node.width / 2.0 }
+            };
+            let cross_center = desired_cross.max(min_cross);
+
+            let (x, y) = if is_horizontal {
+                (rank_offset + max_thickness / 2.0, cross_center)
+            } else {
+                (cross_center, rank_offset + max_thickness / 2.0)
             };
 
             node_positions.insert(idx, (x, y));
-            cross_offset += if is_horizontal { node.height } else { node.width };
-            cross_offset += NODE_SEP;
+            cross_offset = cross_center + if is_horizontal { node.height / 2.0 } else { node.width / 2.0 } + NODE_SEP;
             prev_path = Some(node_path);
+            prev_idx = Some(idx);
         }
 
         rank_offset += max_thickness + RANK_SEP;
     }
 
-    // Phase 2: Undirected barycenter centering
-    // Unlike directional forward/backward passes (which oscillate), this considers
-    // ALL connections simultaneously with a blend factor for smooth convergence.
-    // Critical for spreading nodes across zones: cross-zone connections pull
-    // Platform nodes to align with their OryNetwork counterparts.
-    for _pass in 0..30 {
-        for layer in layers.iter() {
-            let updates: Vec<(NodeIndex, f64)> = layer.iter().filter_map(|&idx| {
-                let mut neighbors: Vec<NodeIndex> = Vec::new();
-                neighbors.extend(graph.neighbors_directed(idx, PetDirection::Incoming));
-                neighbors.extend(graph.neighbors_directed(idx, PetDirection::Outgoing));
-                neighbors.sort();
-                neighbors.dedup();
-
-                if neighbors.is_empty() { return None; }
-
-                let neighbor_positions: Vec<f64> = neighbors.iter()
-                    .filter_map(|&n| node_positions.get(&n))
-                    .map(|&(x, y)| if is_horizontal { y } else { x })
-                    .collect();
-
-                if neighbor_positions.is_empty() { return None; }
-
-                let avg_cross = neighbor_positions.iter().sum::<f64>()
-                    / neighbor_positions.len() as f64;
-
-                let current_cross = {
-                    let &(x, y) = node_positions.get(&idx)?;
-                    if is_horizontal { y } else { x }
-                };
-
-                // Blend: 30% current + 70% target → fast convergence, smooth
-                let new_cross = current_cross * 0.3 + avg_cross * 0.7;
-                Some((idx, new_cross))
-            }).collect();
-
-            for (idx, new_cross) in updates {
-                if let Some(pos) = node_positions.get_mut(&idx) {
-                    if is_horizontal { pos.1 = new_cross; } else { pos.0 = new_cross; }
-                }
-            }
-        }
-
-        // Re-run overlap removal after each pass to maintain minimum spacing
-        for layer in layers {
-            remove_overlaps_in_layer(graph, layer, &mut node_positions, is_horizontal, membership, &empty_path);
-        }
+    // Minimal post-processing: only prevent overlaps in each rank.
+    for layer in layers {
+        remove_overlaps_in_layer(graph, layer, &mut node_positions, is_horizontal, membership, &empty_path);
     }
 
     // Phase 4: Shift everything so minimum coordinate is 0
@@ -931,6 +945,182 @@ fn position_nodes_from_layers(
     }
 
     positioned
+}
+
+fn run_dagre_positions_on_subset(
+    full_graph: &DiGraph<NodeData, EdgeData>,
+    index_map: &HashMap<String, NodeIndex>,
+    all_edges: &[EdgeDef],
+    node_indices: &[NodeIndex],
+    direction: Direction,
+) -> HashMap<NodeIndex, (f64, f64)> {
+    if node_indices.is_empty() {
+        return HashMap::new();
+    }
+
+    let node_id_set: HashSet<&str> = node_indices.iter()
+        .map(|&ni| full_graph[ni].id.as_str())
+        .collect();
+
+    let mut sub_graph = DiGraph::<NodeData, EdgeData>::new();
+    let mut full_to_sub: HashMap<NodeIndex, NodeIndex> = HashMap::new();
+    let mut sub_to_full: HashMap<NodeIndex, NodeIndex> = HashMap::new();
+
+    for &ni in node_indices {
+        let sub_ni = sub_graph.add_node(full_graph[ni].clone());
+        full_to_sub.insert(ni, sub_ni);
+        sub_to_full.insert(sub_ni, ni);
+    }
+
+    for edge in all_edges {
+        if node_id_set.contains(edge.from.as_str()) && node_id_set.contains(edge.to.as_str()) {
+            let from_full = index_map.get(&edge.from);
+            let to_full = index_map.get(&edge.to);
+            if let (Some(&ff), Some(&tf)) = (from_full, to_full) {
+                if let (Some(&from_sub), Some(&to_sub)) = (
+                    full_to_sub.get(&ff),
+                    full_to_sub.get(&tf),
+                ) {
+                    sub_graph.add_edge(from_sub, to_sub, EdgeData {
+                        _label: edge.label.clone(),
+                        _edge_type: edge.edge_type,
+                    });
+                }
+            }
+        }
+    }
+
+    let rank_dir = match direction {
+        Direction::LeftToRight | Direction::RightToLeft => RankDir::LeftToRight,
+        _ => RankDir::TopToBottom,
+    };
+
+    let dagre = DagreLayout::with_options(LayoutOptions {
+        rank_dir,
+        node_sep: NODE_SEP as f32,
+        rank_sep: RANK_SEP as f32,
+        max_iterations: 24,
+    });
+    let result = dagre.compute(&sub_graph);
+
+    result.node_positions
+        .into_iter()
+        .filter_map(|(sub_idx, (x, y))| sub_to_full.get(&sub_idx).copied().map(|full_idx| (full_idx, (x as f64, y as f64))))
+        .collect()
+}
+
+fn normalize_top_level_zones(
+    nodes: &mut [PositionedNode],
+    membership: &SubgraphMembership,
+    direction: Direction,
+) {
+    if nodes.is_empty() {
+        return;
+    }
+    let is_horizontal = matches!(direction, Direction::LeftToRight | Direction::RightToLeft);
+
+    let mut zone_nodes: HashMap<Option<String>, Vec<usize>> = HashMap::new();
+    for (i, n) in nodes.iter().enumerate() {
+        let top = membership
+            .get(&n.id)
+            .and_then(|p| p.first().cloned());
+        zone_nodes.entry(top).or_default().push(i);
+    }
+
+    // Compute zone bounds in current coordinates.
+    #[derive(Clone, Copy)]
+    struct ZoneBounds {
+        min_main: f64,
+        max_main: f64,
+        min_cross: f64,
+    }
+    let mut bounds: HashMap<Option<String>, ZoneBounds> = HashMap::new();
+    for (zone, idxs) in &zone_nodes {
+        let mut min_main = f64::MAX;
+        let mut max_main = f64::MIN;
+        let mut min_cross = f64::MAX;
+        for &i in idxs {
+            let n = &nodes[i];
+            let (main0, main1, cross0) = if is_horizontal {
+                (n.x - n.width / 2.0, n.x + n.width / 2.0, n.y - n.height / 2.0)
+            } else {
+                (n.y - n.height / 2.0, n.y + n.height / 2.0, n.x - n.width / 2.0)
+            };
+            min_main = min_main.min(main0);
+            max_main = max_main.max(main1);
+            min_cross = min_cross.min(cross0);
+        }
+        bounds.insert(zone.clone(), ZoneBounds { min_main, max_main, min_cross });
+    }
+
+    // Preserve natural order by current main-axis position.
+    let mut zones: Vec<Option<String>> = bounds.keys().cloned().collect();
+    zones.sort_by(|a, b| {
+        let aa = bounds.get(a).map(|z| z.min_main).unwrap_or(0.0);
+        let bb = bounds.get(b).map(|z| z.min_main).unwrap_or(0.0);
+        aa.partial_cmp(&bb).unwrap_or(std::cmp::Ordering::Equal)
+    });
+
+    // Pack zones with fixed gap and align each zone to cross-axis origin.
+    let mut next_main = 0.0;
+    for zone in zones {
+        let Some(zb) = bounds.get(&zone).copied() else { continue };
+        let shift_main = next_main - zb.min_main;
+        let shift_cross = -zb.min_cross;
+
+        if let Some(idxs) = zone_nodes.get(&zone) {
+            for &i in idxs {
+                let n = &mut nodes[i];
+                if is_horizontal {
+                    n.x += shift_main;
+                    n.y += shift_cross;
+                } else {
+                    n.y += shift_main;
+                    n.x += shift_cross;
+                }
+            }
+        }
+        next_main += (zb.max_main - zb.min_main) + RANK_SEP + ZONE_GAP;
+    }
+}
+
+fn compact_top_level_subgraphs(
+    graph: &DiGraph<NodeData, EdgeData>,
+    index_map: &HashMap<String, NodeIndex>,
+    all_edges: &[EdgeDef],
+    membership: &SubgraphMembership,
+    direction: Direction,
+    positioned_nodes: &mut [PositionedNode],
+) {
+    let mut top_groups: HashMap<String, Vec<NodeIndex>> = HashMap::new();
+    for ni in graph.node_indices() {
+        let id = &graph[ni].id;
+        if let Some(path) = membership.get(id) {
+            if let Some(top) = path.first() {
+                top_groups.entry(top.clone()).or_default().push(ni);
+            }
+        }
+    }
+
+    let mut new_positions: HashMap<String, (f64, f64)> = HashMap::new();
+    for group_nodes in top_groups.values() {
+        if group_nodes.is_empty() {
+            continue;
+        }
+        let local_layers = run_dagre_on_subset(graph, index_map, all_edges, group_nodes, direction);
+        let local_hints = run_dagre_positions_on_subset(graph, index_map, all_edges, group_nodes, direction);
+        let local_pos = position_nodes_from_layers(graph, &local_layers, direction, membership, &local_hints);
+        for n in local_pos {
+            new_positions.insert(n.id, (n.x, n.y));
+        }
+    }
+
+    for n in positioned_nodes.iter_mut() {
+        if let Some(&(x, y)) = new_positions.get(&n.id) {
+            n.x = x;
+            n.y = y;
+        }
+    }
 }
 
 /// Barycenter centering: move each node toward the average position of its neighbors
@@ -990,18 +1180,12 @@ fn remove_overlaps_in_layer(
         return;
     }
 
-    // Sort by current cross position
-    let mut sorted: Vec<NodeIndex> = layer.to_vec();
-    sorted.sort_by(|a, b| {
-        let ca = positions.get(a).map(|&(x, y)| if is_horizontal { y } else { x }).unwrap_or(0.0);
-        let cb = positions.get(b).map(|&(x, y)| if is_horizontal { y } else { x }).unwrap_or(0.0);
-        ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    // Push nodes apart if they overlap
-    for i in 1..sorted.len() {
-        let prev_idx = sorted[i - 1];
-        let curr_idx = sorted[i];
+    // Keep dagre/layer ordering stable so subgraph groups remain contiguous.
+    // Re-sorting by current position here can interleave groups and make
+    // sibling subgraph bounds overlap.
+    for i in 1..layer.len() {
+        let prev_idx = layer[i - 1];
+        let curr_idx = layer[i];
 
         let prev_node = &graph[prev_idx];
         let curr_node = &graph[curr_idx];
@@ -1036,17 +1220,17 @@ fn remove_overlaps_in_layer(
     }
 }
 
-/// Route edges as straight lines between node centers.
+/// Route edges with orthogonal segments and basic node-collision avoidance.
 fn route_edges(
-    _graph: &DiGraph<NodeData, EdgeData>,
-    _index_map: &HashMap<String, NodeIndex>,
     positioned_nodes: &[PositionedNode],
     edges: &[EdgeDef],
+    direction: Direction,
 ) -> Vec<PositionedEdge> {
     let node_pos: HashMap<&str, &PositionedNode> = positioned_nodes
         .iter()
         .map(|n| (n.id.as_str(), n))
         .collect();
+    let is_horizontal = matches!(direction, Direction::LeftToRight | Direction::RightToLeft);
 
     edges
         .iter()
@@ -1054,43 +1238,174 @@ fn route_edges(
             let from = node_pos.get(edge.from.as_str())?;
             let to = node_pos.get(edge.to.as_str())?;
 
-            // Compute connection points at node boundaries
-            let (from_x, from_y) = edge_connection_point(from, to.x, to.y);
-            let (to_x, to_y) = edge_connection_point(to, from.x, from.y);
+            let (from_x, from_y) = preferred_port_point(from, to.x, to.y, is_horizontal);
+            let (to_x, to_y) = preferred_port_point(to, from.x, from.y, is_horizontal);
 
-            let mid_x = (from_x + to_x) / 2.0;
-            let mid_y = (from_y + to_y) / 2.0;
+            let points = route_orthogonal_with_avoidance(
+                (*from).id.as_str(),
+                (*to).id.as_str(),
+                (from_x, from_y),
+                (to_x, to_y),
+                positioned_nodes,
+                is_horizontal,
+            );
+
+            let label_anchor = edge_label_anchor(&points);
+
 
             Some(PositionedEdge {
                 from_id: edge.from.clone(),
                 to_id: edge.to.clone(),
                 edge_type: edge.edge_type,
                 label: edge.label.clone(),
-                label_x: edge.label.as_ref().map(|_| mid_x),
-                label_y: edge.label.as_ref().map(|_| mid_y),
-                points: vec![(from_x, from_y), (to_x, to_y)],
+                label_x: edge.label.as_ref().map(|_| label_anchor.0),
+                label_y: edge.label.as_ref().map(|_| label_anchor.1),
+                points,
             })
         })
         .collect()
 }
 
-/// Compute the point on a node's boundary closest to a target point.
-fn edge_connection_point(node: &PositionedNode, target_x: f64, target_y: f64) -> (f64, f64) {
-    let dx = target_x - node.x;
-    let dy = target_y - node.y;
+fn edge_label_anchor(points: &[(f64, f64)]) -> (f64, f64) {
+    if points.is_empty() {
+        return (0.0, 0.0);
+    }
+    if points.len() == 1 {
+        return points[0];
+    }
+    let mut best_len = -1.0;
+    let mut best_mid = ((points[0].0 + points[1].0) / 2.0, (points[0].1 + points[1].1) / 2.0);
+    for w in points.windows(2) {
+        let dx = w[1].0 - w[0].0;
+        let dy = w[1].1 - w[0].1;
+        let len = dx * dx + dy * dy;
+        if len > best_len {
+            best_len = len;
+            best_mid = ((w[0].0 + w[1].0) / 2.0, (w[0].1 + w[1].1) / 2.0);
+        }
+    }
+    best_mid
+}
+
+fn preferred_port_point(
+    node: &PositionedNode,
+    target_x: f64,
+    target_y: f64,
+    is_horizontal: bool,
+) -> (f64, f64) {
     let hw = node.width / 2.0;
     let hh = node.height / 2.0;
+    if is_horizontal {
+        if target_x >= node.x {
+            (node.x + hw, node.y)
+        } else {
+            (node.x - hw, node.y)
+        }
+    } else if target_y >= node.y {
+        (node.x, node.y + hh)
+    } else {
+        (node.x, node.y - hh)
+    }
+}
 
-    if dx.abs() < 1e-6 && dy.abs() < 1e-6 {
-        return (node.x, node.y + hh);
+fn route_orthogonal_with_avoidance(
+    from_id: &str,
+    to_id: &str,
+    start: (f64, f64),
+    end: (f64, f64),
+    nodes: &[PositionedNode],
+    is_horizontal: bool,
+) -> Vec<(f64, f64)> {
+    let offsets = [0.0, 40.0, -40.0, 80.0, -80.0, 120.0, -120.0, 160.0, -160.0];
+
+    for off in offsets {
+        let mut points = if is_horizontal {
+            let mid_x = (start.0 + end.0) / 2.0 + off;
+            vec![start, (mid_x, start.1), (mid_x, end.1), end]
+        } else {
+            let mid_y = (start.1 + end.1) / 2.0 + off;
+            vec![start, (start.0, mid_y), (end.0, mid_y), end]
+        };
+        points = dedupe_adjacent_points(points);
+        if path_avoids_nodes(&points, from_id, to_id, nodes) {
+            return points;
+        }
     }
 
-    // For rectangles: find intersection with the bounding box
-    let scale_x = if dx.abs() > 1e-6 { hw / dx.abs() } else { f64::MAX };
-    let scale_y = if dy.abs() > 1e-6 { hh / dy.abs() } else { f64::MAX };
-    let scale = scale_x.min(scale_y);
+    vec![start, end]
+}
 
-    (node.x + dx * scale, node.y + dy * scale)
+fn dedupe_adjacent_points(points: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
+    let mut out: Vec<(f64, f64)> = Vec::with_capacity(points.len());
+    for p in points {
+        if out
+            .last()
+            .map(|q| (q.0 - p.0).abs() < 1e-6 && (q.1 - p.1).abs() < 1e-6)
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        out.push(p);
+    }
+    out
+}
+
+fn path_avoids_nodes(
+    points: &[(f64, f64)],
+    from_id: &str,
+    to_id: &str,
+    nodes: &[PositionedNode],
+) -> bool {
+    for seg in points.windows(2) {
+        for n in nodes {
+            if n.id == from_id || n.id == to_id {
+                continue;
+            }
+            let min_x = n.x - n.width / 2.0 - 4.0;
+            let max_x = n.x + n.width / 2.0 + 4.0;
+            let min_y = n.y - n.height / 2.0 - 4.0;
+            let max_y = n.y + n.height / 2.0 + 4.0;
+            if segment_intersects_rect(seg[0], seg[1], min_x, min_y, max_x, max_y) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+fn segment_intersects_rect(
+    a: (f64, f64),
+    b: (f64, f64),
+    min_x: f64,
+    min_y: f64,
+    max_x: f64,
+    max_y: f64,
+) -> bool {
+    let eps = 1e-6;
+    if (a.1 - b.1).abs() < eps {
+        // Horizontal segment
+        let y = a.1;
+        if y < min_y || y > max_y {
+            return false;
+        }
+        let (x1, x2) = if a.0 <= b.0 { (a.0, b.0) } else { (b.0, a.0) };
+        x2 > min_x && x1 < max_x
+    } else if (a.0 - b.0).abs() < eps {
+        // Vertical segment
+        let x = a.0;
+        if x < min_x || x > max_x {
+            return false;
+        }
+        let (y1, y2) = if a.1 <= b.1 { (a.1, b.1) } else { (b.1, a.1) };
+        y2 > min_y && y1 < max_y
+    } else {
+        // Fallback for non-orthogonal segments
+        let seg_min_x = a.0.min(b.0);
+        let seg_max_x = a.0.max(b.0);
+        let seg_min_y = a.1.min(b.1);
+        let seg_max_y = a.1.max(b.1);
+        seg_max_x > min_x && seg_min_x < max_x && seg_max_y > min_y && seg_min_y < max_y
+    }
 }
 
 /// Position subgraphs as bounding boxes around their contained nodes.
@@ -1196,6 +1511,157 @@ fn position_subgraphs_recursive(
     }
 }
 
+fn separate_overlapping_sibling_subgraphs(
+    ast: &FlowchartAst,
+    membership: &SubgraphMembership,
+    nodes: &mut [PositionedNode],
+    subgraphs: &[PositionedSubgraph],
+    all_edges: &[EdgeDef],
+    direction: Direction,
+) {
+    let is_horizontal = matches!(direction, Direction::LeftToRight | Direction::RightToLeft);
+    let overlap_epsilon = 1e-6;
+
+    let mut parent_children: HashMap<Option<String>, Vec<String>> = HashMap::new();
+    collect_subgraph_parent_map(&ast.subgraphs, None, &mut parent_children);
+
+    let bounds: HashMap<&str, &PositionedSubgraph> = subgraphs
+        .iter()
+        .map(|sg| (sg.id.as_str(), sg))
+        .collect();
+
+    for child_ids in parent_children.values() {
+        let mut siblings: Vec<&str> = child_ids
+            .iter()
+            .map(|s| s.as_str())
+            .filter(|id| bounds.contains_key(id))
+            .collect();
+
+        // Mermaid/dagre ordering tends to minimize crossings/edge travel.
+        // For sibling clusters, approximate that by sorting siblings by the
+        // barycenter of their external connections.
+        let node_by_id: HashMap<&str, &PositionedNode> = nodes.iter().map(|n| (n.id.as_str(), n)).collect();
+        let mut sibling_members: HashMap<&str, HashSet<&str>> = HashMap::new();
+        for &sg_id in &siblings {
+            let members: HashSet<&str> = membership
+                .iter()
+                .filter(|(_, path)| path.iter().any(|p| p == sg_id))
+                .map(|(id, _)| id.as_str())
+                .collect();
+            sibling_members.insert(sg_id, members);
+        }
+        let mut target_cross: HashMap<&str, f64> = HashMap::new();
+        for &sg_id in &siblings {
+            let Some(members) = sibling_members.get(sg_id) else { continue };
+            let mut acc = 0.0;
+            let mut cnt = 0usize;
+            for e in all_edges {
+                let from_in = members.contains(e.from.as_str());
+                let to_in = members.contains(e.to.as_str());
+                if from_in == to_in {
+                    continue;
+                }
+                let other = if from_in { e.to.as_str() } else { e.from.as_str() };
+                if let Some(n) = node_by_id.get(other) {
+                    acc += if is_horizontal { n.y } else { n.x };
+                    cnt += 1;
+                }
+            }
+            if cnt > 0 {
+                target_cross.insert(sg_id, acc / cnt as f64);
+            } else if let Some(sg) = bounds.get(sg_id) {
+                target_cross.insert(sg_id, if is_horizontal { sg.y + sg.height / 2.0 } else { sg.x + sg.width / 2.0 });
+            }
+        }
+
+        siblings.sort_by(|a, b| {
+            let ta = target_cross.get(a).copied().unwrap_or(0.0);
+            let tb = target_cross.get(b).copied().unwrap_or(0.0);
+            let primary = ta.partial_cmp(&tb).unwrap_or(std::cmp::Ordering::Equal);
+            if primary != std::cmp::Ordering::Equal {
+                return primary;
+            }
+            let sa = bounds.get(a).map(|sg| if is_horizontal { sg.y } else { sg.x }).unwrap_or(0.0);
+            let sb = bounds.get(b).map(|sg| if is_horizontal { sg.y } else { sg.x }).unwrap_or(0.0);
+            sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // Track shifted bounds for already-processed siblings so we can
+        // separate only when siblings overlap in the main axis.
+        let mut placed: Vec<(&str, f64, f64)> = Vec::new(); // (id, shifted_cross_start, shifted_cross_end)
+
+        for id in siblings {
+            let Some(sg) = bounds.get(id) else { continue };
+            let cross_start = if is_horizontal { sg.y } else { sg.x };
+            let cross_size = if is_horizontal { sg.height } else { sg.width };
+            let cross_end = cross_start + cross_size;
+
+            let main_start = if is_horizontal { sg.x } else { sg.y };
+            let main_end = if is_horizontal { sg.x + sg.width } else { sg.y + sg.height };
+
+            // Only separate from siblings that overlap on main axis.
+            let mut required_cross_start = cross_start;
+            for (placed_id, _placed_cross_start, placed_cross_end) in &placed {
+                let Some(placed_sg) = bounds.get(placed_id) else { continue };
+                let placed_main_start = if is_horizontal { placed_sg.x } else { placed_sg.y };
+                let placed_main_end = if is_horizontal {
+                    placed_sg.x + placed_sg.width
+                } else {
+                    placed_sg.y + placed_sg.height
+                };
+
+                let main_overlap =
+                    main_start < placed_main_end - overlap_epsilon
+                        && main_end > placed_main_start + overlap_epsilon;
+                if main_overlap {
+                    required_cross_start = required_cross_start.max(*placed_cross_end + 8.0);
+                }
+            }
+
+            if required_cross_start > cross_start {
+                let delta = required_cross_start - cross_start;
+                shift_nodes_in_subgraph(nodes, membership, id, delta, is_horizontal);
+                placed.push((id, cross_start + delta, cross_end + delta));
+            } else {
+                placed.push((id, cross_start, cross_end));
+            }
+        }
+    }
+}
+
+fn collect_subgraph_parent_map(
+    subgraphs: &[SubgraphDef],
+    parent: Option<String>,
+    out: &mut HashMap<Option<String>, Vec<String>>,
+) {
+    for sg in subgraphs {
+        out.entry(parent.clone()).or_default().push(sg.id.clone());
+        collect_subgraph_parent_map(&sg.subgraphs, Some(sg.id.clone()), out);
+    }
+}
+
+fn shift_nodes_in_subgraph(
+    nodes: &mut [PositionedNode],
+    membership: &SubgraphMembership,
+    subgraph_id: &str,
+    delta: f64,
+    is_horizontal: bool,
+) {
+    for node in nodes {
+        let in_subgraph = membership
+            .get(&node.id)
+            .map(|path| path.iter().any(|sg| sg == subgraph_id))
+            .unwrap_or(false);
+        if in_subgraph {
+            if is_horizontal {
+                node.y += delta;
+            } else {
+                node.x += delta;
+            }
+        }
+    }
+}
+
 /// Shift all positioned elements so everything has positive coordinates,
 /// then compute the total bounding box.
 fn normalize_and_compute_bounds(
@@ -1216,10 +1682,11 @@ fn normalize_and_compute_bounds(
         min_y = min_y.min(sg.y);
     }
 
-    // Shift everything so min coords are at 0
-    if min_x < 0.0 || min_y < 0.0 {
-        let shift_x = if min_x < 0.0 { -min_x } else { 0.0 };
-        let shift_y = if min_y < 0.0 { -min_y } else { 0.0 };
+    // Always anchor graph at the origin so large positive offsets
+    // from intermediate layout steps do not leak into final output.
+    if min_x.is_finite() && min_y.is_finite() {
+        let shift_x = -min_x;
+        let shift_y = -min_y;
 
         for node in nodes.iter_mut() {
             node.x += shift_x;
@@ -1252,8 +1719,8 @@ fn normalize_and_compute_bounds(
         max_y = max_y.max(sg.y + sg.height);
     }
 
-    // Add margin
-    (max_x + 40.0, max_y + 40.0)
+    // Keep diagram margin tight to Mermaid defaults.
+    (max_x + 8.0, max_y + 8.0)
 }
 
 #[cfg(test)]

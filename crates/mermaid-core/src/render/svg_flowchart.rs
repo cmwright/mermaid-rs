@@ -6,7 +6,7 @@ use crate::layout::flowchart_layout::{
 };
 use crate::render::theme::Theme;
 
-const SVG_PADDING: f64 = 20.0;
+const SVG_PADDING: f64 = 8.0;
 
 /// Render a positioned flowchart graph to an SVG string.
 pub fn render_svg(graph: &PositionedGraph, theme: &Theme) -> Result<String> {
@@ -70,21 +70,19 @@ pub fn render_svg(graph: &PositionedGraph, theme: &Theme) -> Result<String> {
 
 fn build_defs(theme: &Theme) -> String {
     let line_color = theme.line_color.to_css();
-    let sz = theme.arrowhead_size;
+    let sz = theme.arrowhead_size.max(8.0);
 
     format!(
         r#"<defs>
-  <marker id="arrowhead" markerWidth="{sz}" markerHeight="{hh}" refX="{sz}" refY="{rr}" orient="auto" markerUnits="strokeWidth">
-    <polygon points="0 0, {sz} {rr}, 0 {hh}" fill="{line_color}"/>
+  <marker id="arrowhead" viewBox="0 0 10 10" markerWidth="{mw}" markerHeight="{mw}" refX="8.5" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="{line_color}"/>
   </marker>
-  <marker id="arrowhead-thick" markerWidth="{sz}" markerHeight="{hh}" refX="{sz}" refY="{rr}" orient="auto" markerUnits="strokeWidth">
-    <polygon points="0 0, {sz} {rr}, 0 {hh}" fill="{line_color}"/>
+  <marker id="arrowhead-thick" viewBox="0 0 10 10" markerWidth="{mw}" markerHeight="{mw}" refX="8.5" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="{line_color}"/>
   </marker>
 </defs>
 "#,
-        sz = sz,
-        hh = sz * 0.7,
-        rr = sz * 0.35,
+        mw = sz * 0.8,
         line_color = line_color,
     )
 }
@@ -404,15 +402,13 @@ fn render_edge(edge: &PositionedEdge, theme: &Theme) -> String {
     let mut s = String::new();
 
     // Build path
-    let (x0, y0) = edge.points[0];
-    let mut path_d = format!("M {} {}", x0, y0);
-    for &(x, y) in &edge.points[1..] {
-        path_d.push_str(&format!(" L {} {}", x, y));
-    }
+    let path_d = build_rounded_edge_path(&edge.points, 6.0);
 
     let mut attrs = format!(
-        r#"d="{}" fill="none" stroke="{}" stroke-width="{}""#,
-        path_d, line_color, theme.edge_width,
+        r#"d="{}" fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round""#,
+        path_d,
+        line_color,
+        theme.edge_width.max(1.75),
     );
 
     // Edge type styling
@@ -421,12 +417,12 @@ fn render_edge(edge: &PositionedEdge, theme: &Theme) -> String {
             attrs.push_str(r#" marker-end="url(#arrowhead)""#);
         }
         EdgeType::DottedArrow => {
-            attrs.push_str(r#" stroke-dasharray="5,5" marker-end="url(#arrowhead)""#);
+            attrs.push_str(r#" stroke-dasharray="3,3" marker-end="url(#arrowhead)""#);
         }
         EdgeType::ThickArrow => {
             // Override stroke-width for thick
             attrs = format!(
-                r#"d="{}" fill="none" stroke="{}" stroke-width="{}" marker-end="url(#arrowhead)""#,
+                r#"d="{}" fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)""#,
                 path_d,
                 line_color,
                 theme.edge_width * 2.0,
@@ -434,11 +430,11 @@ fn render_edge(edge: &PositionedEdge, theme: &Theme) -> String {
         }
         EdgeType::SolidLine => {}
         EdgeType::DottedLine => {
-            attrs.push_str(r#" stroke-dasharray="5,5""#);
+            attrs.push_str(r#" stroke-dasharray="3,3""#);
         }
         EdgeType::ThickLine => {
             attrs = format!(
-                r#"d="{}" fill="none" stroke="{}" stroke-width="{}""#,
+                r#"d="{}" fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round""#,
                 path_d,
                 line_color,
                 theme.edge_width * 2.0,
@@ -454,12 +450,11 @@ fn render_edge(edge: &PositionedEdge, theme: &Theme) -> String {
         let label_w = label.len() as f64 * 8.0 + 10.0;
         let label_h = 20.0;
         s.push_str(&format!(
-            r#"<rect x="{}" y="{}" width="{}" height="{}" rx="3" fill="{}" opacity="0.9"/>"#,
+            r#"<rect x="{}" y="{}" width="{}" height="{}" rx="3" fill="rgba(232,232,232,0.8)"/>"#,
             lx - label_w / 2.0,
             ly - label_h / 2.0,
             label_w,
             label_h,
-            theme.background.to_css(),
         ));
         s.push('\n');
         s.push_str(&format!(
@@ -473,6 +468,53 @@ fn render_edge(edge: &PositionedEdge, theme: &Theme) -> String {
     }
 
     s
+}
+
+fn build_rounded_edge_path(points: &[(f64, f64)], radius: f64) -> String {
+    if points.is_empty() {
+        return String::new();
+    }
+    if points.len() == 1 {
+        return format!("M {} {}", points[0].0, points[0].1);
+    }
+
+    let mut path = format!("M {} {}", points[0].0, points[0].1);
+    for i in 1..points.len() - 1 {
+        let prev = points[i - 1];
+        let curr = points[i];
+        let next = points[i + 1];
+
+        let dx1 = curr.0 - prev.0;
+        let dy1 = curr.1 - prev.1;
+        let dx2 = next.0 - curr.0;
+        let dy2 = next.1 - curr.1;
+
+        let orthogonal_turn =
+            (dx1.abs() < 1e-6 && dy2.abs() < 1e-6) || (dy1.abs() < 1e-6 && dx2.abs() < 1e-6);
+        if !orthogonal_turn {
+            path.push_str(&format!(" L {} {}", curr.0, curr.1));
+            continue;
+        }
+
+        let len1 = (dx1.abs() + dy1.abs()).max(1e-6);
+        let len2 = (dx2.abs() + dy2.abs()).max(1e-6);
+        let r = radius.min(len1 / 2.0).min(len2 / 2.0);
+
+        let p1 = (
+            curr.0 - dx1.signum() * r,
+            curr.1 - dy1.signum() * r,
+        );
+        let p2 = (
+            curr.0 + dx2.signum() * r,
+            curr.1 + dy2.signum() * r,
+        );
+
+        path.push_str(&format!(" L {} {}", p1.0, p1.1));
+        path.push_str(&format!(" Q {} {} {} {}", curr.0, curr.1, p2.0, p2.1));
+    }
+    let last = points[points.len() - 1];
+    path.push_str(&format!(" L {} {}", last.0, last.1));
+    path
 }
 
 fn render_subgraph(sg: &PositionedSubgraph, theme: &Theme) -> String {

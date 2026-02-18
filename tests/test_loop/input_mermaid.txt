@@ -1,0 +1,90 @@
+graph TD
+    subgraph Platform
+        subgraph OrgPkg["Organization: Acme Holdings<br/>(id=org-123, plan=enterprise)"]
+            RootOU["<b>Root OU: Acme US</b><br/>id = ou-root-456<br/>geo = US<br/>ory_org_id = ory-org-aaa"]
+            EUOU["<b>Child OU: Acme EU</b><br/>id = ou-child-789<br/>geo = EU<br/>ory_org_id = ory-org-bbb"]
+            APACOU["<b>Child OU: Acme APAC</b><br/>id = ou-child-012<br/>geo = US<br/>ory_org_id = null"]
+            RootOU -->|HAS_CHILD_OU| EUOU
+            RootOU -->|HAS_CHILD_OU| APACOU
+        end
+
+        subgraph OrgPkg2["Organization: Smallco<br/>(id=org-456, plan=free)"]
+            SmallOU["<b>Root OU: Smallco</b><br/>id = ou-root-999<br/>geo = US<br/>ory_org_id = ory-org-ccc"]
+        end
+
+        subgraph LEPkg1["Legal Entity: Acme Holdings Inc."]
+            LE1["<b>Acme Holdings Inc.</b><br/>id = le-001<br/>entityType = CORPORATION"]
+            D1["acme.com"]
+            LE1 -->|OWNS_DOMAIN| D1
+        end
+
+        subgraph LEPkg2["Legal Entity: Acme EU GmbH"]
+            LE2["<b>Acme EU GmbH</b><br/>id = le-002<br/>entityType = LLC"]
+            D2["acme.eu"]
+            LE2 -->|OWNS_DOMAIN| D2
+        end
+
+        subgraph LEPkg3["Legal Entity: Smallco LLC"]
+            LE3["<b>Smallco LLC</b><br/>id = le-003<br/>entityType = LLC"]
+            D3["smallco.io"]
+            LE3 -->|OWNS_DOMAIN| D3
+        end
+
+        RootOU -.->|REPRESENTS| LE1
+        EUOU -.->|REPRESENTS| LE2
+        SmallOU -.->|REPRESENTS| LE3
+    end
+
+    subgraph OryNetwork["Ory Network"]
+        subgraph OryUS["Ory Org: Acme US (ory-org-aaa)"]
+            OO1["<b>Ory Organization</b><br/>id = ory-org-aaa<br/>label = Acme US<br/>domains = acme.com"]
+            SSO1["<b>SAML Connection</b><br/>provider = Okta"]
+            ID1["Identity: alice@acme.com"]
+            ID2["Identity: bob@acme.com"]
+            OO1 -->|SSO provider| SSO1
+            OO1 -->|member| ID1
+            OO1 -->|member| ID2
+        end
+
+        subgraph OryEU["Ory Org: Acme EU (ory-org-bbb)"]
+            OO2["<b>Ory Organization</b><br/>id = ory-org-bbb<br/>label = Acme EU<br/>domains = acme.eu"]
+            SSO2["<b>OIDC Connection</b><br/>provider = Azure AD"]
+            ID3["Identity: carol@acme.eu"]
+            OO2 -->|SSO provider| SSO2
+            OO2 -->|member| ID3
+        end
+
+        subgraph OrySmall["Ory Org: Smallco (ory-org-ccc)"]
+            OO3["<b>Ory Organization</b><br/>id = ory-org-ccc<br/>label = Smallco<br/>domains = smallco.io"]
+            ID4["Identity: dan@smallco.io"]
+            ID5["Identity: eve@smallco.io"]
+            OO3 -->|member| ID4
+            OO3 -->|member| ID5
+        end
+    end
+
+    subgraph ExtIdPs["External Identity Providers"]
+        OktaIdP["Okta IdP"]
+        AzureIdP["Azure AD"]
+    end
+
+    %% Cross-references
+    RootOU ==>|ory_org_id| OO1
+    EUOU ==>|ory_org_id| OO2
+    APACOU -.->|inherits from parent| OO1
+    SmallOU ==>|ory_org_id| OO3
+
+    D1 -->|configures domain| OO1
+    D2 -->|configures domain| OO2
+    D3 -->|configures domain| OO3
+
+    SSO1 -->|SAML AuthnRequest| OktaIdP
+    SSO2 -->|OIDC /authorize| AzureIdP
+
+    %% Styles
+    style OryUS fill:#d4eaff,stroke:#336
+    style OryEU fill:#d4f5d4,stroke:#363
+    style OrySmall fill:#f5e6ff,stroke:#636
+    style APACOU fill:#fff3cd,stroke:#996
+    style OktaIdP fill:#f5f5f5,stroke:#999
+    style AzureIdP fill:#f5f5f5,stroke:#999
