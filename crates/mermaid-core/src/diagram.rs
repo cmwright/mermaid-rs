@@ -2,9 +2,11 @@ use crate::ast::common::Color;
 use crate::error::Result;
 use crate::font::FontProvider;
 use crate::layout::flowchart_layout;
+use crate::layout::sequence_layout;
 use crate::layout::text_measure::TextMeasurer;
 use crate::parser::{self, DiagramKind};
 use crate::render::svg_flowchart;
+use crate::render::svg_sequence;
 use crate::render::theme::Theme;
 
 /// Output format for rendering.
@@ -40,6 +42,7 @@ pub fn render(source: &str, config: &RenderConfig) -> Result<String> {
     let kind = parser::detect_diagram_kind(source)?;
     match kind {
         DiagramKind::Flowchart => render_flowchart(source, config),
+        DiagramKind::Sequence => render_sequence(source, config),
     }
 }
 
@@ -54,6 +57,21 @@ fn render_flowchart(source: &str, config: &RenderConfig) -> Result<String> {
 
     // 3. Render SVG
     let svg = svg_flowchart::render_svg(&positioned, &config.theme)?;
+
+    Ok(svg)
+}
+
+fn render_sequence(source: &str, config: &RenderConfig) -> Result<String> {
+    // 1. Parse
+    let ast = crate::parser::sequence::parse_sequence(source)?;
+
+    // 2. Layout
+    let font_ref = config.font_provider.font_ref()?;
+    let measurer = TextMeasurer::new(font_ref, config.theme.font_size as f32);
+    let layout = sequence_layout::layout_sequence(&ast, &measurer, &config.theme)?;
+
+    // 3. Render SVG
+    let svg = svg_sequence::render_svg(&layout, &config.theme)?;
 
     Ok(svg)
 }

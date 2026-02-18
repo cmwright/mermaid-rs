@@ -1,0 +1,201 @@
+// Mermaid Sequence Diagram PEG Grammar
+// Handles: participant/actor declarations, message arrows, activation,
+// alt/else/end, loop/end, opt/end, par/and/end, critical/option/end,
+// break/end, rect/end, notes, autonumber
+
+sequence_diagram = {
+    SOI ~ NEWLINE* ~ sequence_header ~ NEWLINE* ~
+    (seq_statement ~ stmt_sep)* ~ seq_statement? ~
+    NEWLINE* ~ EOI
+}
+
+sequence_header = { "sequenceDiagram" }
+
+stmt_sep = _{ (NEWLINE | ";")+ }
+
+// ── Statements ──────────────────────────────────────────────
+
+seq_statement = _{
+    seq_comment
+    | autonumber_stmt
+    | participant_stmt
+    | actor_stmt
+    | activate_stmt
+    | deactivate_stmt
+    | note_stmt
+    | block_alt
+    | block_loop
+    | block_opt
+    | block_par
+    | block_critical
+    | block_break
+    | block_rect
+    | message_stmt
+}
+
+seq_comment = _{ "%%" ~ (!NEWLINE ~ ANY)* }
+
+// ── Participant / Actor ─────────────────────────────────────
+
+participant_stmt = {
+    "participant" ~ participant_id ~ ("as" ~ display_name)?
+}
+
+actor_stmt = {
+    "actor" ~ participant_id ~ ("as" ~ display_name)?
+}
+
+// General participant_id: used in declarations, activate/deactivate, notes
+participant_id = @{ (ASCII_ALPHANUMERIC | "_" | "-")+ }
+
+// Message-context participant_id: stops before arrow characters.
+// Allows hyphens in the middle (e.g. "svc-users-v2") but won't consume
+// hyphens that begin an arrow (->> --> -> -->> -x --x).
+msg_participant_id = @{
+    (ASCII_ALPHANUMERIC | "_")+ ~
+    (("-" ~ !(">" | "-" | "x")) ~ (ASCII_ALPHANUMERIC | "_")+)*
+}
+
+// display_name captures rest of line (allows HTML like <br/>, parens, etc.)
+display_name = @{ (!NEWLINE ~ ANY)+ }
+
+// ── Messages ────────────────────────────────────────────────
+
+message_stmt = {
+    msg_participant_id ~ arrow_type ~ msg_participant_id ~ activation_modifier? ~ ":" ~ message_text
+}
+
+// Arrow types — ordered longest-first for correct PEG matching
+arrow_type = {
+    dotted_arrow_seq
+    | dotted_cross
+    | dotted_open
+    | solid_arrow_seq
+    | solid_cross
+    | solid_open
+}
+
+solid_arrow_seq  = @{ "->>" }
+dotted_arrow_seq = @{ "-->>" }
+solid_open       = @{ "->" }
+dotted_open      = @{ "-->" }
+solid_cross      = @{ "-x" }
+dotted_cross     = @{ "--x" }
+
+activation_modifier = @{ "+" | "-" }
+
+// message_text captures rest of line after ":"
+message_text = @{ (!NEWLINE ~ ANY)* }
+
+// ── Activation ──────────────────────────────────────────────
+
+activate_stmt = {
+    "activate" ~ participant_id
+}
+
+deactivate_stmt = {
+    "deactivate" ~ participant_id
+}
+
+// ── Autonumber ──────────────────────────────────────────────
+
+autonumber_stmt = { "autonumber" }
+
+// ── Notes ───────────────────────────────────────────────────
+
+note_stmt = {
+    note_left_of
+    | note_right_of
+    | note_over
+}
+
+note_left_of = {
+    "note" ~ "left" ~ "of" ~ participant_id ~ ":" ~ note_text
+}
+
+note_right_of = {
+    "note" ~ "right" ~ "of" ~ participant_id ~ ":" ~ note_text
+}
+
+note_over = {
+    "note" ~ "over" ~ participant_id_list ~ ":" ~ note_text
+}
+
+participant_id_list = {
+    participant_id ~ ("," ~ participant_id)*
+}
+
+note_text = @{ (!NEWLINE ~ ANY)* }
+
+// ── Blocks ──────────────────────────────────────────────────
+
+block_alt = {
+    "alt" ~ block_label ~ NEWLINE+ ~
+    block_body ~
+    (else_section)* ~
+    "end"
+}
+
+else_section = {
+    "else" ~ block_label? ~ NEWLINE+ ~
+    block_body
+}
+
+block_loop = {
+    "loop" ~ block_label ~ NEWLINE+ ~
+    block_body ~
+    "end"
+}
+
+block_opt = {
+    "opt" ~ block_label ~ NEWLINE+ ~
+    block_body ~
+    "end"
+}
+
+block_par = {
+    "par" ~ block_label ~ NEWLINE+ ~
+    block_body ~
+    (and_section)* ~
+    "end"
+}
+
+and_section = {
+    "and" ~ block_label? ~ NEWLINE+ ~
+    block_body
+}
+
+block_critical = {
+    "critical" ~ block_label ~ NEWLINE+ ~
+    block_body ~
+    (option_section)* ~
+    "end"
+}
+
+option_section = {
+    "option" ~ block_label? ~ NEWLINE+ ~
+    block_body
+}
+
+block_break = {
+    "break" ~ block_label ~ NEWLINE+ ~
+    block_body ~
+    "end"
+}
+
+block_rect = {
+    "rect" ~ block_label ~ NEWLINE+ ~
+    block_body ~
+    "end"
+}
+
+block_label = @{ (!NEWLINE ~ ANY)* }
+
+block_body = {
+    (seq_statement ~ stmt_sep)* ~ seq_statement?
+}
+
+// ── Primitives ──────────────────────────────────────────────
+
+WHITESPACE = _{ " " | "\t" }
+NEWLINE    = _{ "\r\n" | "\n" | "\r" }

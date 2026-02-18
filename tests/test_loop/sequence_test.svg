@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1344 1076" width="1344" height="1076">
+<style>
+  svg { background: #ffffff; }
+  .seq-text { font-family: 'Hack', monospace; font-size: 14px; }
+  .seq-label { font-family: 'Hack', monospace; font-size: 12.6px; }
+  .seq-note { font-family: 'Hack', monospace; font-size: 11.9px; }
+</style>
+<defs>
+  <marker id="seq-arrowhead" viewBox="0 0 10 10" markerWidth="8" markerHeight="8" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#333333"/>
+  </marker>
+  <marker id="seq-arrowhead-open" viewBox="0 0 10 10" markerWidth="8" markerHeight="8" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+    <path d="M 0 0 L 10 5 L 0 10" fill="none" stroke="#333333" stroke-width="1.5"/>
+  </marker>
+  <marker id="seq-cross" viewBox="0 0 10 10" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+    <path d="M 1 1 L 9 9 M 1 9 L 9 1" fill="none" stroke="#333333" stroke-width="2"/>
+  </marker>
+</defs>
+<g transform="translate(8, 8)">
+<rect x="0" y="231" width="904.6234970092773" height="466" rx="3" fill="#ebebff22" stroke="#9370DB" stroke-width="1"/>
+<polygon points="0,231 166,231 166,245 162,249 0,249" fill="#ECECFF" stroke="#9370DB" stroke-width="1"/>
+<text class="seq-label" x="4" y="240" text-anchor="start" dominant-baseline="central" fill="#333333" font-weight="bold">alt [SSO configured]</text>
+<line x1="0" y1="479" x2="904.6234970092773" y2="479" stroke="#9370DB" stroke-width="1" stroke-dasharray="5,5"/>
+<text class="seq-label" x="8" y="493" text-anchor="start" dominant-baseline="auto" fill="#333333" font-style="italic">[Password only]</text>
+<line x1="33" y1="83" x2="33" y2="992" stroke="#333333" stroke-width="1" stroke-dasharray="5,5"/>
+<line x1="255.74154663085938" y1="83" x2="255.74154663085938" y2="992" stroke="#333333" stroke-width="1" stroke-dasharray="5,5"/>
+<line x1="543.6500244140625" y1="83" x2="543.6500244140625" y2="992" stroke="#333333" stroke-width="1" stroke-dasharray="5,5"/>
+<line x1="817.0769500732422" y1="83" x2="817.0769500732422" y2="992" stroke="#333333" stroke-width="1" stroke-dasharray="5,5"/>
+<line x1="1004.0681228637695" y1="83" x2="1004.0681228637695" y2="992" stroke="#333333" stroke-width="1" stroke-dasharray="5,5"/>
+<line x1="1248.5319747924805" y1="83" x2="1248.5319747924805" y2="992" stroke="#333333" stroke-width="1" stroke-dasharray="5,5"/>
+<line x1="33" y1="83" x2="255.74154663085938" y2="83" stroke="#333333" stroke-width="2" marker-end="url(#seq-arrowhead)"/>
+<text class="seq-label" x="144.3707733154297" y="78" text-anchor="middle" dominant-baseline="auto" fill="#333333">Enter email (alice@acme.com)</text>
+<line x1="255.74154663085938" y1="123" x2="543.6500244140625" y2="123" stroke="#333333" stroke-width="2" marker-end="url(#seq-arrowhead)"/>
+<text class="seq-label" x="399.69578552246094" y="118" text-anchor="middle" dominant-baseline="auto" fill="#333333">POST /self-service/login {identifier}</text>
+<polyline points="543.6500244140625,163 573.6500244140625,163 573.6500244140625,191 543.6500244140625,191" fill="none" stroke="#333333" stroke-width="2" marker-end="url(#seq-arrowhead)"/>
+<text class="seq-label" x="578.6500244140625" y="181" text-anchor="start" dominant-baseline="auto" fill="#333333">Resolve domain → Ory Org → SSO connection</text>
+<line x1="543.6500244140625" y1="251" x2="817.0769500732422" y2="251" stroke="#333333" stroke-width="2" marker-end="url(#seq-arrowhead)"/>
+<text class="seq-label" x="680.3634872436523" y="246" text-anchor="middle" dominant-baseline="auto" fill="#333333">SAML AuthnRequest / OIDC /authorize</text>
+<line x1="817.0769500732422" y1="291" x2="33" y2="291" stroke="#333333" stroke-width="2" marker-end="url(#seq-arrowhead)"/>
+<text class="seq-label" x="425.0384750366211" y="286" text-anchor="middle" dominant-baseline="auto" fill="#333333">Authentication prompt</text>
+<line x1="33" y1="331" x2="817.0769500732422" y2="331" stroke="#333333" stroke-width="2" marker-end="url(#seq-arrowhead)"/>
+<text class="seq-label" x="425.0384750366211" y="326" text-anchor="middle" dominant-baseline="auto" fill="#333333">Authenticate</text>
+<line x1="817.0769500732422" y1="371" x2="543.6500244140625" y2="371" stroke="#333333" stroke-width="2" marker-end="url(#seq-arrowhead)"/>
+<text class="seq-label" x="680.3634872436523" y="366" text-anchor="middle" dominant-baseline="auto" fill="#333333">SAML Response / OIDC callback</text>
+<polyline points="543.6500244140625,411 573.6500244140625,411 573.6500244140625,439 543.6500244140625,439" fill="none" stroke="#333333" stroke-width="2" marker-end="url(#seq-arrowhead)"/>
+<text class="seq-label" x="578.6500244140625" y="429" text-anchor="start" dominant-baseline="auto" fill="#333333">Create/update identity, assign to Ory Org, issue session</text>
+<line x1="543.6500244140625" y1="499" x2="255.74154663085938" y2="499" stroke="#333333" stroke-width="2" marker-end="url(#seq-arrowhead)"/>
+<text class="seq-label" x="399.69578552246094" y="494" text-anchor="middle" dominant-baseline="auto" fill="#333333">Show password prompt</text>
+<line x1="33" y1="539" x2="255.74154663085938" y2="539" stroke="#333333" stroke-width="2" marker-end="url(#seq-arrowhead)"/>
+<text class="seq-label" x="144.3707733154297" y="534" text-anchor="middle" dominant-baseline="auto" fill="#333333">Enter password</text>
+<line x1="255.74154663085938" y1="579" x2="543.6500244140625" y2="579" stroke="#333333" stroke-width="2" marker-end="url(#seq-arrowhead)"/>
+<text class="seq-label" x="399.69578552246094" y="574" text-anchor="middle" dominant-baseline="auto" fill="#333333">Submit credentials</text>
+<polyline points="543.6500244140625,619 573.6500244140625,619 573.6500244140625,647 543.6500244140625,647" fill="none" stroke="#333333" stroke-width="2" marker-end="url(#seq-arrowhead)"/>
+<text class="seq-label" x="578.6500244140625" y="637" text-anchor="start" dominant-baseline="auto" fill="#333333">Validate, issue session</text>
+<line x1="543.6500244140625" y1="697" x2="1004.0681228637695" y2="697" stroke="#333333" stroke-width="2" marker-end="url(#seq-arrowhead)"/>
+<text class="seq-label" x="773.859073638916" y="692" text-anchor="middle" dominant-baseline="auto" fill="#333333">Webhook: after.login {identity, session}</text>
+<line x1="1004.0681228637695" y1="737" x2="1248.5319747924805" y2="737" stroke="#333333" stroke-width="2" marker-end="url(#seq-arrowhead)"/>
+<text class="seq-label" x="1126.300048828125" y="732" text-anchor="middle" dominant-baseline="auto" fill="#333333">Upsert user record (JIT if new)</text>
+<line x1="255.74154663085938" y1="777" x2="1004.0681228637695" y2="777" stroke="#333333" stroke-width="2" marker-end="url(#seq-arrowhead)"/>
+<text class="seq-label" x="629.9048347473145" y="772" text-anchor="middle" dominant-baseline="auto" fill="#333333">POST /v1/auth/token (session cookie)</text>
+<line x1="1004.0681228637695" y1="817" x2="543.6500244140625" y2="817" stroke="#333333" stroke-width="2" marker-end="url(#seq-arrowhead)"/>
+<text class="seq-label" x="773.859073638916" y="812" text-anchor="middle" dominant-baseline="auto" fill="#333333">GET /sessions/whoami (validate session)</text>
+<line x1="543.6500244140625" y1="857" x2="1004.0681228637695" y2="857" stroke="#333333" stroke-width="2" stroke-dasharray="5,5" marker-end="url(#seq-arrowhead)"/>
+<text class="seq-label" x="773.859073638916" y="852" text-anchor="middle" dominant-baseline="auto" fill="#333333">Session + identity</text>
+<line x1="1004.0681228637695" y1="897" x2="1248.5319747924805" y2="897" stroke="#333333" stroke-width="2" marker-end="url(#seq-arrowhead)"/>
+<text class="seq-label" x="1126.300048828125" y="892" text-anchor="middle" dominant-baseline="auto" fill="#333333">Load roles, entitlements, flags</text>
+<line x1="1004.0681228637695" y1="937" x2="255.74154663085938" y2="937" stroke="#333333" stroke-width="2" stroke-dasharray="5,5" marker-end="url(#seq-arrowhead)"/>
+<text class="seq-label" x="629.9048347473145" y="932" text-anchor="middle" dominant-baseline="auto" fill="#333333">Self-minted JWT (ES256)</text>
+<circle cx="33" cy="20" r="8" fill="none" stroke="#9370DB" stroke-width="2"/>
+<line x1="33" y1="28" x2="33" y2="42" stroke="#9370DB" stroke-width="2"/>
+<line x1="21" y1="33" x2="45" y2="33" stroke="#9370DB" stroke-width="2"/>
+<line x1="33" y1="42" x2="23" y2="52" stroke="#9370DB" stroke-width="2"/>
+<line x1="33" y1="42" x2="43" y2="52" stroke="#9370DB" stroke-width="2"/>
+<text class="seq-text" x="33" y="54" text-anchor="middle" dominant-baseline="hanging" fill="#333333">User</text>
+<rect x="207.15807342529297" y="10" width="97.16694641113281" height="30" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+<text class="seq-text" x="255.74154663085938" y="25" text-anchor="middle" dominant-baseline="central" fill="#333333">Factor UI</text>
+<rect x="491.4461669921875" y="10" width="104.40771484375" height="30" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+<text class="seq-text" x="543.6500244140625" y="25" text-anchor="middle" dominant-baseline="central" fill="#333333">Ory Kratos</text>
+<rect x="739.530403137207" y="10" width="155.0930938720703" height="46" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+<text class="seq-text" x="817.0769500732422" y="33" text-anchor="middle" fill="#333333">
+  <tspan x="817.0769500732422" dy="-0.6em" dominant-baseline="central">External IdP</tspan>
+  <tspan x="817.0769500732422" dy="1.2em" dominant-baseline="central">(Okta / Azure AD)</tspan>
+</text>
+<rect x="944.6234970092773" y="10" width="118.88925170898438" height="30" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+<text class="seq-text" x="1004.0681228637695" y="25" text-anchor="middle" dominant-baseline="central" fill="#333333">svc-users-v2</text>
+<rect x="1178.2261962890625" y="10" width="140.61155700683594" height="30" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+<text class="seq-text" x="1248.5319747924805" y="25" text-anchor="middle" dominant-baseline="central" fill="#333333">User Service DB</text>
+<circle cx="33" cy="1002" r="8" fill="none" stroke="#9370DB" stroke-width="2"/>
+<line x1="33" y1="1010" x2="33" y2="1024" stroke="#9370DB" stroke-width="2"/>
+<line x1="21" y1="1015" x2="45" y2="1015" stroke="#9370DB" stroke-width="2"/>
+<line x1="33" y1="1024" x2="23" y2="1034" stroke="#9370DB" stroke-width="2"/>
+<line x1="33" y1="1024" x2="43" y2="1034" stroke="#9370DB" stroke-width="2"/>
+<text class="seq-text" x="33" y="1036" text-anchor="middle" dominant-baseline="hanging" fill="#333333">User</text>
+<rect x="207.15807342529297" y="992" width="97.16694641113281" height="30" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+<text class="seq-text" x="255.74154663085938" y="1007" text-anchor="middle" dominant-baseline="central" fill="#333333">Factor UI</text>
+<rect x="491.4461669921875" y="992" width="104.40771484375" height="30" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+<text class="seq-text" x="543.6500244140625" y="1007" text-anchor="middle" dominant-baseline="central" fill="#333333">Ory Kratos</text>
+<rect x="739.530403137207" y="992" width="155.0930938720703" height="46" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+<text class="seq-text" x="817.0769500732422" y="1015" text-anchor="middle" fill="#333333">
+  <tspan x="817.0769500732422" dy="-0.6em" dominant-baseline="central">External IdP</tspan>
+  <tspan x="817.0769500732422" dy="1.2em" dominant-baseline="central">(Okta / Azure AD)</tspan>
+</text>
+<rect x="944.6234970092773" y="992" width="118.88925170898438" height="30" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+<text class="seq-text" x="1004.0681228637695" y="1007" text-anchor="middle" dominant-baseline="central" fill="#333333">svc-users-v2</text>
+<rect x="1178.2261962890625" y="992" width="140.61155700683594" height="30" fill="#ECECFF" stroke="#9370DB" stroke-width="2"/>
+<text class="seq-text" x="1248.5319747924805" y="1007" text-anchor="middle" dominant-baseline="central" fill="#333333">User Service DB</text>
+</g>
+</svg>

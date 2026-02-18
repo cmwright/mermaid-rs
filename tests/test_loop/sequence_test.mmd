@@ -1,0 +1,29 @@
+sequenceDiagram
+    actor User
+    participant UI as Factor UI
+    participant Kratos as Ory Kratos
+    participant IdP as External IdP<br/>(Okta / Azure AD)
+    participant SvcUsers as svc-users-v2
+    participant DB as User Service DB
+    User->>UI: Enter email (alice@acme.com)
+    UI->>Kratos: POST /self-service/login {identifier}
+    Kratos->>Kratos: Resolve domain → Ory Org → SSO connection
+    alt SSO configured
+        Kratos->>IdP: SAML AuthnRequest / OIDC /authorize
+        IdP->>User: Authentication prompt
+        User->>IdP: Authenticate
+        IdP->>Kratos: SAML Response / OIDC callback
+        Kratos->>Kratos: Create/update identity, assign to Ory Org, issue session
+    else Password only
+        Kratos->>UI: Show password prompt
+        User->>UI: Enter password
+        UI->>Kratos: Submit credentials
+        Kratos->>Kratos: Validate, issue session
+    end
+    Kratos->>SvcUsers: Webhook: after.login {identity, session}
+    SvcUsers->>DB: Upsert user record (JIT if new)
+    UI->>SvcUsers: POST /v1/auth/token (session cookie)
+    SvcUsers->>Kratos: GET /sessions/whoami (validate session)
+    Kratos-->>SvcUsers: Session + identity
+    SvcUsers->>DB: Load roles, entitlements, flags
+    SvcUsers-->>UI: Self-minted JWT (ES256)

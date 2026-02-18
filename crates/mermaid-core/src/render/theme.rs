@@ -18,6 +18,18 @@ pub struct Theme {
     pub subgraph_fill: Color,
     pub subgraph_border: Color,
     pub subgraph_text: Color,
+    // Sequence diagram specific
+    pub actor_fill: Color,
+    pub actor_border: Color,
+    pub actor_text: Color,
+    pub note_fill: Color,
+    pub note_border: Color,
+    pub note_text: Color,
+    pub activation_fill: Color,
+    pub activation_border: Color,
+    pub loop_fill: Color,
+    pub loop_line: Color,
+    pub label_box_fill: Color,
 }
 
 impl Default for Theme {
@@ -39,6 +51,18 @@ impl Default for Theme {
             subgraph_fill: Color::Hex("#ebebff33".into()),
             subgraph_border: Color::Hex("#9370DB".into()),
             subgraph_text: Color::Hex("#333333".into()),
+            // Sequence defaults (matching mermaid.js default theme)
+            actor_fill: Color::Hex("#ECECFF".into()),
+            actor_border: Color::Hex("#9370DB".into()),
+            actor_text: Color::Hex("#333333".into()),
+            note_fill: Color::Hex("#fff5ad".into()),
+            note_border: Color::Hex("#aaaa33".into()),
+            note_text: Color::Hex("#333333".into()),
+            activation_fill: Color::Hex("#ECECFF".into()),
+            activation_border: Color::Hex("#9370DB".into()),
+            loop_fill: Color::Hex("#ebebff22".into()),
+            loop_line: Color::Hex("#9370DB".into()),
+            label_box_fill: Color::Hex("#ECECFF".into()),
         }
     }
 }
@@ -57,6 +81,17 @@ impl Theme {
             subgraph_fill: Color::Hex("#384252".into()),
             subgraph_border: Color::Hex("#81B1DB".into()),
             subgraph_text: Color::Hex("#e0dfdf".into()),
+            actor_fill: Color::Hex("#1f2020".into()),
+            actor_border: Color::Hex("#81B1DB".into()),
+            actor_text: Color::Hex("#e0dfdf".into()),
+            note_fill: Color::Hex("#fff5ad".into()),
+            note_border: Color::Hex("#aaaa33".into()),
+            note_text: Color::Hex("#333333".into()),
+            activation_fill: Color::Hex("#384252".into()),
+            activation_border: Color::Hex("#81B1DB".into()),
+            loop_fill: Color::Hex("#38425222".into()),
+            loop_line: Color::Hex("#81B1DB".into()),
+            label_box_fill: Color::Hex("#384252".into()),
             ..Self::default()
         }
     }
@@ -72,6 +107,17 @@ impl Theme {
             subgraph_fill: Color::Hex("#cde49833".into()),
             subgraph_border: Color::Hex("#13540c".into()),
             subgraph_text: Color::Hex("#13540c".into()),
+            actor_fill: Color::Hex("#cde498".into()),
+            actor_border: Color::Hex("#13540c".into()),
+            actor_text: Color::Hex("#13540c".into()),
+            note_fill: Color::Hex("#fff5ad".into()),
+            note_border: Color::Hex("#aaaa33".into()),
+            note_text: Color::Hex("#333333".into()),
+            activation_fill: Color::Hex("#cde498".into()),
+            activation_border: Color::Hex("#13540c".into()),
+            loop_fill: Color::Hex("#cde49822".into()),
+            loop_line: Color::Hex("#13540c".into()),
+            label_box_fill: Color::Hex("#cde498".into()),
             ..Self::default()
         }
     }
@@ -87,6 +133,17 @@ impl Theme {
             subgraph_fill: Color::Hex("#f4f4f433".into()),
             subgraph_border: Color::Hex("#666666".into()),
             subgraph_text: Color::Hex("#333333".into()),
+            actor_fill: Color::Hex("#f4f4f4".into()),
+            actor_border: Color::Hex("#666666".into()),
+            actor_text: Color::Hex("#333333".into()),
+            note_fill: Color::Hex("#fff5ad".into()),
+            note_border: Color::Hex("#aaaa33".into()),
+            note_text: Color::Hex("#333333".into()),
+            activation_fill: Color::Hex("#f4f4f4".into()),
+            activation_border: Color::Hex("#666666".into()),
+            loop_fill: Color::Hex("#f4f4f422".into()),
+            loop_line: Color::Hex("#666666".into()),
+            label_box_fill: Color::Hex("#f4f4f4".into()),
             ..Self::default()
         }
     }

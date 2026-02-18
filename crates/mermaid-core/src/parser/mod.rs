@@ -1,4 +1,5 @@
 pub mod flowchart;
+pub mod sequence;
 
 use crate::error::{MermaidError, Result};
 
@@ -6,7 +7,7 @@ use crate::error::{MermaidError, Result};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagramKind {
     Flowchart,
-    // Future: Sequence, Class, State, Er, Gantt, Pie, ...
+    Sequence,
 }
 
 /// Detect the diagram kind from the first significant line of source.
@@ -29,7 +30,9 @@ pub fn detect_diagram_kind(source: &str) -> Result<DiagramKind> {
             return Ok(DiagramKind::Flowchart);
         }
 
-        // Future: "sequenceDiagram", "classDiagram", etc.
+        if trimmed.starts_with("sequenceDiagram") {
+            return Ok(DiagramKind::Sequence);
+        }
 
         return Err(MermaidError::UnsupportedDiagram(
             trimmed
@@ -60,6 +63,14 @@ mod tests {
         assert_eq!(
             detect_diagram_kind("graph LR\n    A --> B").unwrap(),
             DiagramKind::Flowchart
+        );
+    }
+
+    #[test]
+    fn test_detect_sequence() {
+        assert_eq!(
+            detect_diagram_kind("sequenceDiagram\n    A->>B: Hello").unwrap(),
+            DiagramKind::Sequence
         );
     }
 

@@ -3,6 +3,7 @@ pub mod edge_routing;
 pub mod flowchart_layout;
 pub mod graph_builder;
 pub mod normalize;
+pub mod sequence_layout;
 pub mod sugiyama;
 pub mod text_measure;
 pub mod types;
