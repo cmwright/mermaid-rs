@@ -255,8 +255,14 @@ pub fn build_petgraph(
 fn compute_node_size(shape: &NodeShape, text: &TextMetrics) -> (f64, f64) {
     let base_w = (text.width + 2.0 * NODE_PADDING_H).max(MIN_NODE_WIDTH);
     let base_h = (text.height + 2.0 * NODE_PADDING_V).max(MIN_NODE_HEIGHT);
+    const RECT_LABEL_EXTRA_WIDTH: f64 = 12.0;
 
     match shape {
+        NodeShape::Rectangle
+        | NodeShape::RoundedRectangle
+        | NodeShape::Stadium
+        | NodeShape::Subroutine
+        | NodeShape::Cylinder => (base_w + RECT_LABEL_EXTRA_WIDTH, base_h),
         NodeShape::Diamond => (base_w * 1.42, base_h * 1.42),
         NodeShape::Circle | NodeShape::DoubleCircle => {
             let diameter = base_w.max(base_h);

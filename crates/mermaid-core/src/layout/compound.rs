@@ -3,7 +3,10 @@ use std::collections::{HashMap, HashSet};
 use crate::ast::common::StyleProperties;
 use crate::ast::flowchart::{EdgeDef, FlowchartAst, StyleOverride, SubgraphDef};
 use crate::layout::graph_builder::SubgraphMembership;
+use crate::layout::text_measure::TextMeasurer;
 use crate::layout::types::*;
+
+const SUBGRAPH_TITLE_SIDE_PADDING: f64 = 18.0;
 
 /// Position subgraphs as bounding boxes around their contained nodes.
 /// Recursively processes nested subgraphs from innermost to outermost.
@@ -11,6 +14,7 @@ pub fn position_subgraphs(
     subgraphs: &[SubgraphDef],
     positioned_nodes: &[PositionedNode],
     style_overrides: &[StyleOverride],
+    measurer: &TextMeasurer<'_>,
 ) -> Vec<PositionedSubgraph> {
     let node_pos: HashMap<&str, &PositionedNode> = positioned_nodes
         .iter()
@@ -18,7 +22,7 @@ pub fn position_subgraphs(
         .collect();
 
     let mut result = Vec::new();
-    position_subgraphs_recursive(subgraphs, &node_pos, style_overrides, &mut result);
+    position_subgraphs_recursive(subgraphs, &node_pos, style_overrides, measurer, &mut result);
     result
 }
 
@@ -26,10 +30,11 @@ fn position_subgraphs_recursive(
     subgraphs: &[SubgraphDef],
     node_pos: &HashMap<&str, &PositionedNode>,
     style_overrides: &[StyleOverride],
+    measurer: &TextMeasurer<'_>,
     result: &mut Vec<PositionedSubgraph>,
 ) {
     for sg in subgraphs {
-        position_subgraphs_recursive(&sg.subgraphs, node_pos, style_overrides, result);
+        position_subgraphs_recursive(&sg.subgraphs, node_pos, style_overrides, measurer, result);
 
         let mut min_x = f64::MAX;
         let mut min_y = f64::MAX;
@@ -77,6 +82,15 @@ fn position_subgraphs_recursive(
             } else {
                 SUBGRAPH_TITLE_HEIGHT
             };
+            let title_text = sg.label.as_deref().unwrap_or(&sg.id);
+            let title_width = measure_subgraph_title_width(title_text, measurer);
+            let content_width = max_x - min_x;
+            let min_required_width = title_width + 2.0 * SUBGRAPH_TITLE_SIDE_PADDING;
+            if content_width < min_required_width {
+                let extra = (min_required_width - content_width) / 2.0;
+                min_x -= extra;
+                max_x += extra;
+            }
 
             let mut style = StyleProperties::default();
             for so in style_overrides {
@@ -98,6 +112,15 @@ fn position_subgraphs_recursive(
             });
         }
     }
+}
+
+fn measure_subgraph_title_width(label: &str, measurer: &TextMeasurer<'_>) -> f64 {
+    let normalized = crate::render::html_util::normalize_br(label);
+    normalized
+        .split('\n')
+        .map(|line| crate::render::html_util::strip_html_tags(line))
+        .map(|line| measurer.measure(&line).width)
+        .fold(0.0, f64::max)
 }
 
 /// Ensure sibling subgraphs do not overlap.

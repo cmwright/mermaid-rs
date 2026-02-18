@@ -609,12 +609,14 @@ fn render_subgraph(sg: &PositionedSubgraph, theme: &Theme) -> String {
     if let Some(label) = &sg.label {
         let clean = html_util::normalize_br(label);
         let lines: Vec<&str> = clean.split('\n').collect();
+        let label_x = sg.x + sg.width / 2.0;
+        let label_y = sg.y + 18.0;
         if lines.len() == 1 {
             let text = html_util::strip_html_tags(&lines[0]);
             s.push_str(&format!(
-                r#"<text x="{}" y="{}" font-family="{}" font-size="{}" font-weight="bold" fill="{}">{}</text>"#,
-                sg.x + 10.0,
-                sg.y + 18.0,
+                r#"<text x="{}" y="{}" text-anchor="middle" font-family="{}" font-size="{}" font-weight="bold" fill="{}">{}</text>"#,
+                label_x,
+                label_y,
                 theme.font_family,
                 theme.font_size,
                 theme.subgraph_text.to_css(),
@@ -622,9 +624,9 @@ fn render_subgraph(sg: &PositionedSubgraph, theme: &Theme) -> String {
             ));
         } else {
             s.push_str(&format!(
-                r#"<text x="{}" y="{}" font-family="{}" font-size="{}" font-weight="bold" fill="{}">"#,
-                sg.x + 10.0,
-                sg.y + 18.0,
+                r#"<text x="{}" y="{}" text-anchor="middle" font-family="{}" font-size="{}" font-weight="bold" fill="{}">"#,
+                label_x,
+                label_y,
                 theme.font_family,
                 theme.font_size,
                 theme.subgraph_text.to_css(),
@@ -634,13 +636,13 @@ fn render_subgraph(sg: &PositionedSubgraph, theme: &Theme) -> String {
                 if i == 0 {
                     s.push_str(&format!(
                         r#"<tspan x="{}" dy="0">{}</tspan>"#,
-                        sg.x + 10.0,
+                        label_x,
                         escape_xml(&text),
                     ));
                 } else {
                     s.push_str(&format!(
                         r#"<tspan x="{}" dy="1.2em">{}</tspan>"#,
-                        sg.x + 10.0,
+                        label_x,
                         escape_xml(&text),
                     ));
                 }

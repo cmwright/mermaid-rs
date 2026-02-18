@@ -50,7 +50,7 @@ pub fn layout_flowchart(
 
     // 8. Position subgraphs (with style overrides)
     let mut positioned_subgraphs =
-        compound::position_subgraphs(&ast.subgraphs, &positioned_nodes, &ast.style_overrides);
+        compound::position_subgraphs(&ast.subgraphs, &positioned_nodes, &ast.style_overrides, measurer);
 
     // 9. Ensure sibling subgraphs do not overlap
     compound::separate_overlapping_sibling_subgraphs(
@@ -62,7 +62,7 @@ pub fn layout_flowchart(
         is_horizontal,
     );
     positioned_subgraphs =
-        compound::position_subgraphs(&ast.subgraphs, &positioned_nodes, &ast.style_overrides);
+        compound::position_subgraphs(&ast.subgraphs, &positioned_nodes, &ast.style_overrides, measurer);
 
     // 10. Extract bend points and label positions from dummy node positions, then route edges
     let extraction = build_edge_bend_points(
