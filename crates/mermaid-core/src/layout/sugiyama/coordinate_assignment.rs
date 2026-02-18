@@ -1,14 +1,13 @@
 use petgraph::graph::{DiGraph, NodeIndex};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::ast::flowchart::Direction;
 use crate::layout::graph_builder::SubgraphMembership;
 use crate::layout::types::*;
 
-/// Size-aware coordinate placement.
+/// Brandes-Köpf coordinate assignment.
 /// - Main axis: accumulate max_thickness_in_rank + RANK_SEP
-/// - Cross axis: place with node_width/2 + NODE_SEP + next_width/2 minimum spacing
-/// - Barycenter refinement passes
+/// - Cross axis: 4-pass block alignment + horizontal compaction + balance
 /// - Extra gap at subgraph boundaries
 /// - Direction handling (TB/BT/LR/RL)
 pub fn assign_coordinates(
@@ -20,106 +19,60 @@ pub fn assign_coordinates(
     let is_horizontal = matches!(direction, Direction::LeftToRight | Direction::RightToLeft);
     let empty_path: Vec<String> = Vec::new();
 
-    let mut positions: HashMap<NodeIndex, (f64, f64)> = HashMap::new();
-
-    // Initial placement: position nodes along main and cross axes
+    // ── Main-axis placement ──
+    let mut main_pos: HashMap<NodeIndex, f64> = HashMap::new();
     let mut rank_offset = 0.0;
-
     for layer in layers {
-        let max_thickness = layer
+        let max_thick = layer
             .iter()
-            .map(|&idx| {
-                let node = &graph[idx];
+            .map(|&i| {
                 if is_horizontal {
-                    node.width
+                    graph[i].width
                 } else {
-                    node.height
+                    graph[i].height
                 }
             })
             .fold(0.0f64, f64::max);
-
-        let mut cross_offset = 0.0;
-        let mut prev_path: Option<&Vec<String>> = None;
-
         for &idx in layer {
-            let node = &graph[idx];
-            let node_path = membership.get(&node.id).unwrap_or(&empty_path);
-
-            // Add spacing at subgraph boundaries
-            if let Some(prev) = prev_path {
-                if prev != node_path {
-                    let common = prev
-                        .iter()
-                        .zip(node_path.iter())
-                        .take_while(|(a, b)| a == b)
-                        .count();
-                    let divergence = prev.len().max(node_path.len()) - common;
-                    cross_offset += SUBGRAPH_GROUP_GAP * divergence as f64;
-                }
-            }
-
-            let cross_size = if is_horizontal {
-                node.height
-            } else {
-                node.width
-            };
-
-            let cross_center = cross_offset + cross_size / 2.0;
-
-            let (x, y) = if is_horizontal {
-                (rank_offset + max_thickness / 2.0, cross_center)
-            } else {
-                (cross_center, rank_offset + max_thickness / 2.0)
-            };
-
-            positions.insert(idx, (x, y));
-            cross_offset = cross_center + cross_size / 2.0 + NODE_SEP;
-            prev_path = Some(node_path);
+            main_pos.insert(idx, rank_offset + max_thick / 2.0);
         }
-
-        rank_offset += max_thickness + RANK_SEP;
+        rank_offset += max_thick + RANK_SEP;
     }
 
-    // Barycenter refinement: shift nodes toward average neighbor position
-    for _pass in 0..5 {
-        // Down sweep
-        for layer in layers.iter().skip(1) {
-            refine_layer(graph, layer, &mut positions, is_horizontal, membership, &empty_path);
-        }
-        // Up sweep
-        for layer in layers.iter().rev().skip(1) {
-            refine_layer(graph, layer, &mut positions, is_horizontal, membership, &empty_path);
-        }
+    // ── Cross-axis: Brandes-Köpf 4-pass ──
+    let cross_pos = brandes_kopf(graph, layers, is_horizontal, membership, &empty_path);
+
+    // ── Combine ──
+    let mut positions: HashMap<NodeIndex, (f64, f64)> = HashMap::new();
+    for &idx in layers.iter().flat_map(|l| l.iter()) {
+        let m = main_pos[&idx];
+        let c = cross_pos.get(&idx).copied().unwrap_or(0.0);
+        positions.insert(
+            idx,
+            if is_horizontal { (m, c) } else { (c, m) },
+        );
     }
 
-    // Subgraph chain centering: for subgraphs where each layer has at most
-    // one node, align all nodes to the same cross-axis position (their average).
-    // This produces perfectly straight arrows within subgraphs.
-    center_subgraph_chains(graph, layers, &mut positions, is_horizontal, membership, &empty_path);
-
-    // For BT or RL directions, mirror the positions
+    // ── BT / RL mirror ──
     if matches!(direction, Direction::BottomToTop | Direction::RightToLeft) {
-        let max_coord = if is_horizontal {
-            positions
-                .values()
-                .map(|&(x, _)| x)
-                .fold(0.0f64, f64::max)
-                + graph
-                    .node_indices()
-                    .filter_map(|ni| positions.get(&ni).map(|_| graph[ni].width))
-                    .fold(0.0f64, f64::max)
-        } else {
-            positions
-                .values()
-                .map(|&(_, y)| y)
-                .fold(0.0f64, f64::max)
-                + graph
-                    .node_indices()
-                    .filter_map(|ni| positions.get(&ni).map(|_| graph[ni].height))
-                    .fold(0.0f64, f64::max)
-        };
+        let max_coord = positions
+            .values()
+            .map(|&(x, y)| if is_horizontal { x } else { y })
+            .fold(0.0f64, f64::max)
+            + graph
+                .node_indices()
+                .filter_map(|ni| {
+                    positions.get(&ni).map(|_| {
+                        if is_horizontal {
+                            graph[ni].width
+                        } else {
+                            graph[ni].height
+                        }
+                    })
+                })
+                .fold(0.0f64, f64::max);
 
-        for (_, pos) in positions.iter_mut() {
+        for pos in positions.values_mut() {
             if is_horizontal {
                 pos.0 = max_coord - pos.0;
             } else {
@@ -131,217 +84,384 @@ pub fn assign_coordinates(
     positions
 }
 
-/// Refine a single layer by shifting nodes toward their neighbors' average
-/// position, while respecting minimum spacing constraints.
-fn refine_layer(
-    graph: &DiGraph<NodeData, EdgeData>,
-    layer: &[NodeIndex],
-    positions: &mut HashMap<NodeIndex, (f64, f64)>,
-    is_horizontal: bool,
-    membership: &SubgraphMembership,
-    empty_path: &Vec<String>,
-) {
-    // Compute desired positions based on weighted neighbor barycenters.
-    // Same-subgraph neighbors get 3x weight so nodes within a subgraph
-    // stay vertically aligned, producing straight arrows.
-    let mut desired: Vec<(NodeIndex, f64)> = Vec::new();
+// ─────────────────────────────────────────────────────────────
+// Brandes-Köpf internals
+// ─────────────────────────────────────────────────────────────
 
-    for &idx in layer {
-        let node_path = membership.get(&graph[idx].id).unwrap_or(empty_path);
-
-        let neighbors_in: Vec<NodeIndex> = graph
-            .neighbors_directed(idx, petgraph::Direction::Incoming)
-            .collect();
-        let neighbors_out: Vec<NodeIndex> = graph
-            .neighbors_directed(idx, petgraph::Direction::Outgoing)
-            .collect();
-
-        let all_neighbors: Vec<&NodeIndex> = neighbors_in
-            .iter()
-            .chain(neighbors_out.iter())
-            .collect();
-
-        if all_neighbors.is_empty() {
-            continue;
-        }
-
-        let mut weighted_sum = 0.0;
-        let mut total_weight = 0.0;
-
-        for &&n in &all_neighbors {
-            if let Some(&pos) = positions.get(&n) {
-                let cross = if is_horizontal { pos.1 } else { pos.0 };
-                let neighbor_path = membership.get(&graph[n].id).unwrap_or(empty_path);
-                let weight = if node_path == neighbor_path { 3.0 } else { 1.0 };
-                weighted_sum += cross * weight;
-                total_weight += weight;
-            }
-        }
-
-        if total_weight > 0.0 {
-            desired.push((idx, weighted_sum / total_weight));
-        }
-    }
-
-    // Apply desired positions
-    for (idx, target) in &desired {
-        if let Some(pos) = positions.get_mut(idx) {
-            if is_horizontal {
-                pos.1 = *target;
-            } else {
-                pos.0 = *target;
-            }
-        }
-    }
-
-    // Enforce minimum spacing (no overlaps)
-    enforce_spacing(graph, layer, positions, is_horizontal, membership, empty_path);
-}
-
-/// Ensure nodes in a layer don't overlap, respecting minimum spacing.
-fn enforce_spacing(
-    graph: &DiGraph<NodeData, EdgeData>,
-    layer: &[NodeIndex],
-    positions: &mut HashMap<NodeIndex, (f64, f64)>,
-    is_horizontal: bool,
-    membership: &SubgraphMembership,
-    empty_path: &Vec<String>,
-) {
-    if layer.len() < 2 {
-        return;
-    }
-
-    // Sort layer by current cross-axis position
-    let mut sorted: Vec<NodeIndex> = layer.to_vec();
-    sorted.sort_by(|a, b| {
-        let ca = positions
-            .get(a)
-            .map(|&(x, y)| if is_horizontal { y } else { x })
-            .unwrap_or(0.0);
-        let cb = positions
-            .get(b)
-            .map(|&(x, y)| if is_horizontal { y } else { x })
-            .unwrap_or(0.0);
-        ca.partial_cmp(&cb).unwrap_or(std::cmp::Ordering::Equal)
-    });
-
-    for i in 1..sorted.len() {
-        let prev_idx = sorted[i - 1];
-        let curr_idx = sorted[i];
-
-        let prev_node = &graph[prev_idx];
-        let curr_node = &graph[curr_idx];
-
-        let prev_cross = positions
-            .get(&prev_idx)
-            .map(|&(x, y)| if is_horizontal { y } else { x })
-            .unwrap_or(0.0);
-        let prev_size = if is_horizontal {
-            prev_node.height
-        } else {
-            prev_node.width
-        };
-        let curr_size = if is_horizontal {
-            curr_node.height
-        } else {
-            curr_node.width
-        };
-
-        let prev_path = membership.get(&prev_node.id).unwrap_or(empty_path);
-        let curr_path = membership.get(&curr_node.id).unwrap_or(empty_path);
-        let extra_gap = if prev_path != curr_path {
-            let common = prev_path
-                .iter()
-                .zip(curr_path.iter())
-                .take_while(|(a, b)| a == b)
-                .count();
-            let divergence = prev_path.len().max(curr_path.len()) - common;
-            SUBGRAPH_GROUP_GAP * divergence as f64
-        } else {
-            0.0
-        };
-
-        let min_center_dist = prev_size / 2.0 + curr_size / 2.0 + NODE_SEP + extra_gap;
-        let curr_cross = positions
-            .get(&curr_idx)
-            .map(|&(x, y)| if is_horizontal { y } else { x })
-            .unwrap_or(0.0);
-
-        if curr_cross - prev_cross < min_center_dist {
-            let new_cross = prev_cross + min_center_dist;
-            if let Some(pos) = positions.get_mut(&curr_idx) {
-                if is_horizontal {
-                    pos.1 = new_cross;
-                } else {
-                    pos.0 = new_cross;
-                }
-            }
-        }
-    }
-}
-
-/// For subgraphs where each layer has at most one member node, set all nodes
-/// to the same cross-axis coordinate (their average) so arrows are perfectly
-/// straight within the subgraph.
-fn center_subgraph_chains(
+/// Run 4 alignment passes (up-left, up-right, down-left, down-right)
+/// and balance by averaging the middle two values per node.
+fn brandes_kopf(
     graph: &DiGraph<NodeData, EdgeData>,
     layers: &[Vec<NodeIndex>],
-    positions: &mut HashMap<NodeIndex, (f64, f64)>,
     is_horizontal: bool,
     membership: &SubgraphMembership,
-    empty_path: &Vec<String>,
-) {
-    // Build layer index for each node
-    let mut node_layer: HashMap<NodeIndex, usize> = HashMap::new();
-    for (rank, layer) in layers.iter().enumerate() {
-        for &idx in layer {
-            node_layer.insert(idx, rank);
-        }
-    }
+    empty_path: &[String],
+) -> HashMap<NodeIndex, f64> {
+    let mut xss: Vec<HashMap<NodeIndex, f64>> = Vec::with_capacity(4);
 
-    // Collect nodes by their innermost subgraph path
-    let mut sg_nodes: HashMap<&Vec<String>, Vec<NodeIndex>> = HashMap::new();
-    for idx in graph.node_indices() {
-        let path = membership.get(&graph[idx].id).unwrap_or(empty_path);
-        if !path.is_empty() {
-            sg_nodes.entry(path).or_default().push(idx);
-        }
-    }
+    for vert in 0..2u8 {
+        // vert=0: up (top-to-bottom layers, predecessors)
+        // vert=1: down (bottom-to-top layers, successors)
+        let adjusted: Vec<Vec<NodeIndex>> = if vert == 0 {
+            layers.to_vec()
+        } else {
+            layers.iter().rev().cloned().collect()
+        };
 
-    for (_path, nodes) in &sg_nodes {
-        if nodes.len() < 2 {
-            continue;
-        }
+        for horiz in 0..2u8 {
+            // horiz=0: left (normal order), horiz=1: right (reversed)
+            let final_layers: Vec<Vec<NodeIndex>> = if horiz == 0 {
+                adjusted.clone()
+            } else {
+                adjusted
+                    .iter()
+                    .map(|l| l.iter().rev().copied().collect())
+                    .collect()
+            };
 
-        // Check: at most one node per layer from this subgraph
-        let mut layer_count: HashMap<usize, usize> = HashMap::new();
-        for &idx in nodes {
-            if let Some(&layer) = node_layer.get(&idx) {
-                *layer_count.entry(layer).or_insert(0) += 1;
+            let use_preds = vert == 0;
+            let root = vertical_alignment(graph, &final_layers, use_preds);
+
+            let mut xs = horizontal_compaction(
+                graph,
+                &final_layers,
+                &root,
+                is_horizontal,
+                membership,
+                empty_path,
+            );
+
+            // For right-biased, negate coordinates
+            if horiz == 1 {
+                for v in xs.values_mut() {
+                    *v = -*v;
+                }
             }
-        }
-        if layer_count.values().any(|&c| c > 1) {
-            continue;
-        }
 
-        // Compute average cross-axis position
-        let sum: f64 = nodes
+            xss.push(xs);
+        }
+    }
+
+    // Align all results to the smallest-width alignment
+    let smallest = find_smallest_width(&xss, graph, is_horizontal);
+    align_to_smallest(&mut xss, smallest, graph, is_horizontal);
+
+    // Balance: average middle two of 4 values per node
+    let mut result: HashMap<NodeIndex, f64> = HashMap::new();
+    for &idx in layers.iter().flat_map(|l| l.iter()) {
+        let mut vals: Vec<f64> = xss
             .iter()
-            .filter_map(|idx| positions.get(idx))
-            .map(|&(x, y)| if is_horizontal { y } else { x })
-            .sum();
-        let avg = sum / nodes.len() as f64;
+            .filter_map(|xs| xs.get(&idx).copied())
+            .collect();
+        vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let balanced = match vals.len() {
+            4 => (vals[1] + vals[2]) / 2.0,
+            3 => vals[1],
+            2 => (vals[0] + vals[1]) / 2.0,
+            1 => vals[0],
+            _ => 0.0,
+        };
+        result.insert(idx, balanced);
+    }
 
-        // Align all nodes to the average
-        for &idx in nodes {
-            if let Some(pos) = positions.get_mut(&idx) {
-                if is_horizontal {
-                    pos.1 = avg;
-                } else {
-                    pos.0 = avg;
+    result
+}
+
+/// Form vertical blocks by aligning each node with its median neighbor
+/// in the adjacent layer. Returns root map (node → block root).
+fn vertical_alignment(
+    graph: &DiGraph<NodeData, EdgeData>,
+    layers: &[Vec<NodeIndex>],
+    use_predecessors: bool,
+) -> HashMap<NodeIndex, NodeIndex> {
+    let mut root: HashMap<NodeIndex, NodeIndex> = HashMap::new();
+    let mut align: HashMap<NodeIndex, NodeIndex> = HashMap::new();
+    let mut pos: HashMap<NodeIndex, usize> = HashMap::new();
+
+    for layer in layers {
+        for (order, &v) in layer.iter().enumerate() {
+            root.insert(v, v);
+            align.insert(v, v);
+            pos.insert(v, order);
+        }
+    }
+
+    let dir = if use_predecessors {
+        petgraph::Direction::Incoming
+    } else {
+        petgraph::Direction::Outgoing
+    };
+
+    for li in 1..layers.len() {
+        let prev_set: HashSet<NodeIndex> = layers[li - 1].iter().copied().collect();
+        let mut prev_idx: i64 = -1;
+
+        for &v in &layers[li] {
+            // Neighbors in the immediately adjacent layer only
+            let mut ws: Vec<NodeIndex> = graph
+                .neighbors_directed(v, dir)
+                .filter(|n| prev_set.contains(n))
+                .collect();
+
+            if ws.is_empty() {
+                continue;
+            }
+
+            ws.sort_by_key(|n| pos.get(n).copied().unwrap_or(0));
+
+            // Median neighbor(s)
+            let mp = (ws.len() as f64 - 1.0) / 2.0;
+            let lo = mp.floor() as usize;
+            let hi = mp.ceil() as usize;
+
+            for i in lo..=hi {
+                let w = ws[i];
+                let w_pos = pos.get(&w).copied().unwrap_or(0) as i64;
+                if align[&v] == v && prev_idx < w_pos {
+                    // Form block: w → v, and v joins w's block
+                    align.insert(w, v);
+                    let rw = root[&w];
+                    root.insert(v, rw);
+                    align.insert(v, rw);
+                    prev_idx = w_pos;
                 }
             }
         }
     }
 
+    root
+}
+
+/// Assign cross-axis coordinates via block-graph compaction.
+/// Two passes: left-to-right placement, then right-to-left compaction.
+fn horizontal_compaction(
+    graph: &DiGraph<NodeData, EdgeData>,
+    layers: &[Vec<NodeIndex>],
+    root: &HashMap<NodeIndex, NodeIndex>,
+    is_horizontal: bool,
+    membership: &SubgraphMembership,
+    empty_path: &[String],
+) -> HashMap<NodeIndex, f64> {
+    // Build block graph: out_edges[from_root][to_root] = min_separation
+    let mut out_edges: HashMap<NodeIndex, HashMap<NodeIndex, f64>> = HashMap::new();
+    let mut block_set: HashSet<NodeIndex> = HashSet::new();
+
+    for layer in layers {
+        for &v in layer {
+            block_set.insert(root[&v]);
+        }
+        for pair in layer.windows(2) {
+            let u = pair[0];
+            let v = pair[1];
+            let ur = root[&u];
+            let vr = root[&v];
+            if ur != vr {
+                let sep =
+                    node_separation(graph, u, v, is_horizontal, membership, empty_path);
+                let w = out_edges.entry(ur).or_default().entry(vr).or_insert(0.0f64);
+                *w = w.max(sep);
+            }
+        }
+    }
+
+    // In-edges (reverse of out_edges)
+    let mut in_edges: HashMap<NodeIndex, HashMap<NodeIndex, f64>> = HashMap::new();
+    for (&from, tos) in &out_edges {
+        for (&to, &weight) in tos {
+            in_edges.entry(to).or_default().insert(from, weight);
+        }
+    }
+
+    // Topological sort (Kahn's algorithm)
+    let mut in_degree: HashMap<NodeIndex, usize> = HashMap::new();
+    for &b in &block_set {
+        in_degree.insert(b, 0);
+    }
+    for tos in out_edges.values() {
+        for &to in tos.keys() {
+            *in_degree.entry(to).or_insert(0) += 1;
+        }
+    }
+
+    let mut queue: VecDeque<NodeIndex> = in_degree
+        .iter()
+        .filter(|(_, &d)| d == 0)
+        .map(|(&n, _)| n)
+        .collect();
+    let mut topo: Vec<NodeIndex> = Vec::with_capacity(block_set.len());
+
+    while let Some(n) = queue.pop_front() {
+        topo.push(n);
+        if let Some(tos) = out_edges.get(&n) {
+            for &to in tos.keys() {
+                let d = in_degree.get_mut(&to).unwrap();
+                *d -= 1;
+                if *d == 0 {
+                    queue.push_back(to);
+                }
+            }
+        }
+    }
+
+    // Handle any blocks not reached by Kahn's (cycles)
+    let topo_set: HashSet<NodeIndex> = topo.iter().copied().collect();
+    for &b in &block_set {
+        if !topo_set.contains(&b) {
+            topo.push(b);
+        }
+    }
+
+    // Pass 1: left-to-right (smallest coordinates)
+    let mut xs: HashMap<NodeIndex, f64> = HashMap::new();
+    for &block in &topo {
+        let x = in_edges
+            .get(&block)
+            .map(|preds| {
+                preds
+                    .iter()
+                    .map(|(&p, &sep)| xs.get(&p).copied().unwrap_or(0.0) + sep)
+                    .fold(0.0f64, f64::max)
+            })
+            .unwrap_or(0.0);
+        xs.insert(block, x);
+    }
+
+    // Pass 2: right-to-left compaction
+    for &block in topo.iter().rev() {
+        if let Some(succs) = out_edges.get(&block) {
+            let min_succ = succs
+                .iter()
+                .map(|(&s, &sep)| xs.get(&s).copied().unwrap_or(f64::INFINITY) - sep)
+                .fold(f64::INFINITY, f64::min);
+            if min_succ.is_finite() {
+                let cur = xs[&block];
+                xs.insert(block, cur.max(min_succ));
+            }
+        }
+    }
+
+    // Map all nodes to their block root's coordinate
+    let mut result: HashMap<NodeIndex, f64> = HashMap::new();
+    for layer in layers {
+        for &v in layer {
+            result.insert(v, xs.get(&root[&v]).copied().unwrap_or(0.0));
+        }
+    }
+
+    result
+}
+
+/// Minimum separation between adjacent nodes in the cross-axis.
+fn node_separation(
+    graph: &DiGraph<NodeData, EdgeData>,
+    u: NodeIndex,
+    v: NodeIndex,
+    is_horizontal: bool,
+    membership: &SubgraphMembership,
+    empty_path: &[String],
+) -> f64 {
+    let un = &graph[u];
+    let vn = &graph[v];
+
+    let u_size = if is_horizontal { un.height } else { un.width };
+    let v_size = if is_horizontal { vn.height } else { vn.width };
+
+    let u_path = membership
+        .get(&un.id)
+        .map(|p| p.as_slice())
+        .unwrap_or(empty_path);
+    let v_path = membership
+        .get(&vn.id)
+        .map(|p| p.as_slice())
+        .unwrap_or(empty_path);
+
+    let gap = if u_path != v_path {
+        let common = u_path
+            .iter()
+            .zip(v_path.iter())
+            .take_while(|(a, b)| a == b)
+            .count();
+        let divergence = u_path.len().max(v_path.len()) - common;
+        SUBGRAPH_GROUP_GAP * divergence as f64
+    } else {
+        0.0
+    };
+
+    u_size / 2.0 + NODE_SEP + gap + v_size / 2.0
+}
+
+/// Find the alignment with the smallest total width.
+fn find_smallest_width(
+    xss: &[HashMap<NodeIndex, f64>],
+    graph: &DiGraph<NodeData, EdgeData>,
+    is_horizontal: bool,
+) -> usize {
+    let mut best_idx = 0;
+    let mut best_width = f64::INFINITY;
+
+    for (i, xs) in xss.iter().enumerate() {
+        let mut lo = f64::INFINITY;
+        let mut hi = f64::NEG_INFINITY;
+        for (&n, &x) in xs {
+            let half =
+                if is_horizontal { graph[n].height } else { graph[n].width } / 2.0;
+            lo = lo.min(x - half);
+            hi = hi.max(x + half);
+        }
+        let w = hi - lo;
+        if w < best_width {
+            best_width = w;
+            best_idx = i;
+        }
+    }
+
+    best_idx
+}
+
+/// Shift each alignment so left-biased ones match the smallest's min
+/// and right-biased ones match the smallest's max.
+fn align_to_smallest(
+    xss: &mut [HashMap<NodeIndex, f64>],
+    smallest: usize,
+    graph: &DiGraph<NodeData, EdgeData>,
+    is_horizontal: bool,
+) {
+    let (align_min, align_max) = {
+        let xs = &xss[smallest];
+        let mut lo = f64::INFINITY;
+        let mut hi = f64::NEG_INFINITY;
+        for (&n, &x) in xs {
+            let half =
+                if is_horizontal { graph[n].height } else { graph[n].width } / 2.0;
+            lo = lo.min(x - half);
+            hi = hi.max(x + half);
+        }
+        (lo, hi)
+    };
+
+    for i in 0..xss.len() {
+        if i == smallest {
+            continue;
+        }
+
+        let mut xs_lo = f64::INFINITY;
+        let mut xs_hi = f64::NEG_INFINITY;
+        for (&n, &x) in &xss[i] {
+            let half =
+                if is_horizontal { graph[n].height } else { graph[n].width } / 2.0;
+            xs_lo = xs_lo.min(x - half);
+            xs_hi = xs_hi.max(x + half);
+        }
+
+        // Even indices (0, 2) are left-biased; odd (1, 3) are right-biased
+        let delta = if i % 2 == 0 {
+            align_min - xs_lo
+        } else {
+            align_max - xs_hi
+        };
+
+        for v in xss[i].values_mut() {
+            *v += delta;
+        }
+    }
 }
