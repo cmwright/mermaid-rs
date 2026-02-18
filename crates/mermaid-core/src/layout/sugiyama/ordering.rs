@@ -83,17 +83,30 @@ fn sort_layer_by_barycenter(
         })
         .collect();
 
-    // Group nodes by subgraph membership path, preserving order
+    // Group nodes by subgraph membership path, preserving order.
+    // Dummy nodes get unique paths so each is an independent singleton —
+    // this prevents all dummies from clumping into one block, letting each
+    // be placed freely at its individual barycenter position.
     let mut groups: Vec<(Vec<String>, Vec<NodeIndex>)> = Vec::new();
     for &node in layer.iter() {
-        let path = membership
-            .get(&graph[node].id)
-            .unwrap_or(empty_path)
-            .clone();
-
-        if let Some(group) = groups.iter_mut().find(|(p, _)| *p == path) {
-            group.1.push(node);
+        let is_dummy = graph[node].id.starts_with("__dummy_");
+        let path = if is_dummy {
+            vec![graph[node].id.clone()]
         } else {
+            membership
+                .get(&graph[node].id)
+                .unwrap_or(empty_path)
+                .clone()
+        };
+
+        if !is_dummy {
+            if let Some(group) = groups.iter_mut().find(|(p, _)| *p == path) {
+                group.1.push(node);
+            } else {
+                groups.push((path, vec![node]));
+            }
+        } else {
+            // Each dummy is its own group
             groups.push((path, vec![node]));
         }
     }
