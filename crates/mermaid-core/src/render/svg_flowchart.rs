@@ -442,8 +442,8 @@ fn render_edge(edge: &PositionedEdge, theme: &Theme) -> String {
     let line_color = theme.line_color.to_css();
     let mut s = String::new();
 
-    // Build path
-    let path_d = build_rounded_edge_path(&edge.points, 6.0);
+    // Build path using B-spline interpolation (same as d3.curveBasis)
+    let path_d = build_basis_curve_path(&edge.points);
 
     let mut attrs = format!(
         r#"d="{}" fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round""#,
@@ -511,7 +511,10 @@ fn render_edge(edge: &PositionedEdge, theme: &Theme) -> String {
     s
 }
 
-fn build_rounded_edge_path(points: &[(f64, f64)], radius: f64) -> String {
+/// Build an SVG path using cubic B-spline interpolation (matches d3.curveBasis).
+/// The curve starts and ends exactly at the first/last points, but smoothly
+/// approximates (doesn't pass through) intermediate control points.
+fn build_basis_curve_path(points: &[(f64, f64)]) -> String {
     if points.is_empty() {
         return String::new();
     }
@@ -527,60 +530,54 @@ fn build_rounded_edge_path(points: &[(f64, f64)], radius: f64) -> String {
 
     let mut path = format!("M {} {}", points[0].0, points[0].1);
 
-    for i in 1..points.len() - 1 {
-        let prev = points[i - 1];
-        let curr = points[i];
-        let next = points[i + 1];
+    // d3.curveBasis state: x0/y0 = two points ago, x1/y1 = one point ago
+    let mut x0 = points[0].0;
+    let mut y0 = points[0].1;
+    let mut x1 = points[1].0;
+    let mut y1 = points[1].1;
 
-        let dx1 = curr.0 - prev.0;
-        let dy1 = curr.1 - prev.1;
-        let dx2 = next.0 - curr.0;
-        let dy2 = next.1 - curr.1;
+    // After point 0 (MoveTo) and point 1 (stored), process point 2:
+    // Line to weighted position near the start, then first bezier
+    path.push_str(&format!(
+        " L {} {}",
+        (5.0 * x0 + x1) / 6.0,
+        (5.0 * y0 + y1) / 6.0
+    ));
+    basis_bezier(&mut path, x0, y0, x1, y1, points[2].0, points[2].1);
+    x0 = x1;
+    y0 = y1;
+    x1 = points[2].0;
+    y1 = points[2].1;
 
-        // Check if this is a clear orthogonal turn (one direction changes significantly, other doesn't)
-        let is_horizontal1 = dy1.abs() < 1e-3;
-        let is_vertical1 = dx1.abs() < 1e-3;
-        let is_horizontal2 = dy2.abs() < 1e-3;
-        let is_vertical2 = dx2.abs() < 1e-3;
-
-        let is_orthogonal_turn =
-            (is_horizontal1 && is_vertical2) || (is_vertical1 && is_horizontal2);
-
-        if !is_orthogonal_turn {
-            // Not a clean corner, just draw a line to the point
-            path.push_str(&format!(" L {} {}", curr.0, curr.1));
-            continue;
-        }
-
-        // Calculate segment lengths
-        let len1 = (dx1 * dx1 + dy1 * dy1).sqrt();
-        let len2 = (dx2 * dx2 + dy2 * dy2).sqrt();
-
-        // Only round if both segments are long enough
-        if len1 < 2.0 * radius || len2 < 2.0 * radius {
-            path.push_str(&format!(" L {} {}", curr.0, curr.1));
-            continue;
-        }
-
-        // Calculate the corner radius (don't exceed half the shorter segment)
-        let r = radius.min(len1 / 2.0).min(len2 / 2.0);
-
-        // Calculate points where rounding starts and ends
-        // Move back r distance from curr along the first segment
-        let t1 = r / len1;
-        let p1 = (curr.0 - dx1 * t1, curr.1 - dy1 * t1);
-
-        // Move forward r distance from curr along the second segment
-        let t2 = r / len2;
-        let p2 = (curr.0 + dx2 * t2, curr.1 + dy2 * t2);
-
-        path.push_str(&format!(" L {} {}", p1.0, p1.1));
-        path.push_str(&format!(" Q {} {} {} {}", curr.0, curr.1, p2.0, p2.1));
+    // Process remaining intermediate points
+    for i in 3..points.len() {
+        basis_bezier(&mut path, x0, y0, x1, y1, points[i].0, points[i].1);
+        x0 = x1;
+        y0 = y1;
+        x1 = points[i].0;
+        y1 = points[i].1;
     }
 
-    let last = points[points.len() - 1];
-    path.push_str(&format!(" L {} {}", last.0, last.1));
+    // Final bezier closing toward the last point, then line to exact endpoint
+    basis_bezier(&mut path, x0, y0, x1, y1, x1, y1);
+    path.push_str(&format!(" L {} {}", x1, y1));
+
     path
+}
+
+/// Emit one cubic bezier segment for the B-spline basis function.
+/// Control points are weighted averages of three consecutive input points.
+#[inline]
+fn basis_bezier(path: &mut String, x0: f64, y0: f64, x1: f64, y1: f64, x: f64, y: f64) {
+    path.push_str(&format!(
+        " C {} {} {} {} {} {}",
+        (2.0 * x0 + x1) / 3.0,
+        (2.0 * y0 + y1) / 3.0,
+        (x0 + 2.0 * x1) / 3.0,
+        (y0 + 2.0 * y1) / 3.0,
+        (x0 + 4.0 * x1 + x) / 6.0,
+        (y0 + 4.0 * y1 + y) / 6.0,
+    ));
 }
 
 fn render_subgraph(sg: &PositionedSubgraph, theme: &Theme) -> String {
