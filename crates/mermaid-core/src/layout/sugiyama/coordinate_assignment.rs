@@ -15,6 +15,7 @@ pub fn assign_coordinates(
     layers: &[Vec<NodeIndex>],
     direction: Direction,
     membership: &SubgraphMembership,
+    rank_sep: f64,
 ) -> HashMap<NodeIndex, (f64, f64)> {
     let is_horizontal = matches!(direction, Direction::LeftToRight | Direction::RightToLeft);
     let empty_path: Vec<String> = Vec::new();
@@ -36,7 +37,7 @@ pub fn assign_coordinates(
         for &idx in layer {
             main_pos.insert(idx, rank_offset + max_thick / 2.0);
         }
-        rank_offset += max_thick + RANK_SEP;
+        rank_offset += max_thick + rank_sep;
     }
 
     // ── Cross-axis: Brandes-Köpf 4-pass ──

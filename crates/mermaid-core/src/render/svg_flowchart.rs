@@ -487,9 +487,9 @@ fn render_edge(edge: &PositionedEdge, theme: &Theme) -> String {
 
     // Edge label
     if let (Some(label), Some(lx), Some(ly)) = (&edge.label, edge.label_x, edge.label_y) {
-        // Background for readability
-        let label_w = label.len() as f64 * 8.0 + 10.0;
-        let label_h = 20.0;
+        // Use measured dimensions if available, otherwise fall back to rough approximation
+        let label_w = edge.label_width.unwrap_or_else(|| label.len() as f64 * 8.0 + 10.0);
+        let label_h = edge.label_height.unwrap_or(20.0);
         s.push_str(&format!(
             r#"<rect x="{}" y="{}" width="{}" height="{}" rx="3" fill="rgba(232,232,232,0.8)"/>"#,
             lx - label_w / 2.0,

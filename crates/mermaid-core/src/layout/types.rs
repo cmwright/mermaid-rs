@@ -36,6 +36,8 @@ pub struct PositionedEdge {
     pub label: Option<String>,
     pub label_x: Option<f64>,
     pub label_y: Option<f64>,
+    pub label_width: Option<f64>,
+    pub label_height: Option<f64>,
     pub points: Vec<(f64, f64)>,
 }
 
@@ -76,4 +78,6 @@ pub struct NodeData {
 pub struct EdgeData {
     pub label: Option<String>,
     pub edge_type: EdgeType,
+    pub label_width: f64,
+    pub label_height: f64,
 }

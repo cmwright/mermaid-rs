@@ -44,6 +44,13 @@ pub fn layout(
     // Phase 2b: Align sibling subgraph ranks
     rank_assignment::align_sibling_subgraph_ranks(graph, &mut ranks, ast);
 
+    // Phase 2c: Double all ranks to create interstitial label ranks.
+    // This ensures every edge spans ≥2 ranks and gets at least 1 dummy node,
+    // so labeled edges always have a midpoint dummy to host the label.
+    for rank in ranks.values_mut() {
+        *rank *= 2;
+    }
+
     // Phase 3: Insert dummy nodes for long edges
     let dummy_chains = dummy_nodes::insert_dummy_nodes(graph, &mut ranks);
 
@@ -54,8 +61,9 @@ pub fn layout(
     // Phase 5: Coordinate assignment — dummy nodes participate fully (like dagre).
     // Dummies get real positions via Brandes-Köpf with EDGE_SEP separation,
     // and their coordinates become edge waypoints.
+    // Use halved RANK_SEP because ranks were doubled to create interstitial label ranks.
     let positions =
-        coordinate_assignment::assign_coordinates(graph, &layers, direction, membership);
+        coordinate_assignment::assign_coordinates(graph, &layers, direction, membership, RANK_SEP / 2.0);
 
     // Restore reversed edges (doesn't affect positions)
     cycle_removal::restore_cycles(graph, &reversed);

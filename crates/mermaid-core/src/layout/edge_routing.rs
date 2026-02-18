@@ -9,6 +9,8 @@ pub fn route_edges(
     edges: &[EdgeDef],
     is_horizontal: bool,
     bend_points: &HashMap<(String, String), Vec<(f64, f64)>>,
+    label_positions: &HashMap<(String, String), (f64, f64)>,
+    label_dimensions: &HashMap<(String, String), (f64, f64)>,
 ) -> Vec<PositionedEdge> {
     let node_pos: HashMap<&str, &PositionedNode> = positioned_nodes
         .iter()
@@ -30,15 +32,29 @@ pub fn route_edges(
                 route_short_edge(from, to, positioned_nodes, is_horizontal)
             };
 
-            let label_anchor = edge_label_anchor(&points);
+            // Use pre-computed label position from label dummy if available,
+            // otherwise fall back to edge_label_anchor
+            let (label_x, label_y, label_width, label_height) = if edge.label.is_some() {
+                if let Some(&(lx, ly)) = label_positions.get(&key) {
+                    let (lw, lh) = label_dimensions.get(&key).copied().unwrap_or((0.0, 0.0));
+                    (Some(lx), Some(ly), Some(lw), Some(lh))
+                } else {
+                    let anchor = edge_label_anchor(&points);
+                    (Some(anchor.0), Some(anchor.1), None, None)
+                }
+            } else {
+                (None, None, None, None)
+            };
 
             Some(PositionedEdge {
                 from_id: edge.from.clone(),
                 to_id: edge.to.clone(),
                 edge_type: edge.edge_type,
                 label: edge.label.clone(),
-                label_x: edge.label.as_ref().map(|_| label_anchor.0),
-                label_y: edge.label.as_ref().map(|_| label_anchor.1),
+                label_x,
+                label_y,
+                label_width,
+                label_height,
                 points,
             })
         })

@@ -64,13 +64,20 @@ pub fn layout_flowchart(
     positioned_subgraphs =
         compound::position_subgraphs(&ast.subgraphs, &positioned_nodes, &ast.style_overrides);
 
-    // 10. Extract bend points from dummy node positions and route edges
-    let bend_points = build_edge_bend_points(
+    // 10. Extract bend points and label positions from dummy node positions, then route edges
+    let extraction = build_edge_bend_points(
         &graph,
         &result.dummy_chains,
         &result.positions,
     );
-    let mut positioned_edges = edge_routing::route_edges(&positioned_nodes, &all_edges, is_horizontal, &bend_points);
+    let mut positioned_edges = edge_routing::route_edges(
+        &positioned_nodes,
+        &all_edges,
+        is_horizontal,
+        &extraction.bend_points,
+        &extraction.label_positions,
+        &extraction.label_dimensions,
+    );
 
     // 11. Normalize coordinates and compute bounding box
     let (width, height) = normalize::normalize_and_compute_bounds(
@@ -117,7 +124,15 @@ fn build_positioned_nodes(
         .collect()
 }
 
-/// Build a map from (source_id, target_id) → bend points for long edges.
+/// Result of extracting bend points and label positions from dummy chains.
+struct DummyExtractionResult {
+    bend_points: HashMap<(String, String), Vec<(f64, f64)>>,
+    label_positions: HashMap<(String, String), (f64, f64)>,
+    label_dimensions: HashMap<(String, String), (f64, f64)>,
+}
+
+/// Build a map from (source_id, target_id) → bend points for long edges,
+/// and extract label positions from label dummy nodes.
 ///
 /// Dummy nodes now participate in coordinate assignment (like dagre),
 /// so we simply extract their positions as edge waypoints.
@@ -125,8 +140,11 @@ fn build_edge_bend_points(
     graph: &petgraph::graph::DiGraph<NodeData, EdgeData>,
     dummy_chains: &[DummyChain],
     positions: &HashMap<petgraph::graph::NodeIndex, (f64, f64)>,
-) -> HashMap<(String, String), Vec<(f64, f64)>> {
-    let mut result = HashMap::new();
+) -> DummyExtractionResult {
+    let mut bend_points = HashMap::new();
+    let mut label_positions = HashMap::new();
+    let mut label_dimensions = HashMap::new();
+
     for chain in dummy_chains {
         let src_id = graph[chain.original_source].id.clone();
         let tgt_id = graph[chain.original_target].id.clone();
@@ -139,13 +157,32 @@ fn build_edge_bend_points(
 
         if !bps.is_empty() {
             // Store under both directions for reversed-edge lookup
-            result.insert((src_id.clone(), tgt_id.clone()), bps.clone());
+            bend_points.insert((src_id.clone(), tgt_id.clone()), bps.clone());
             let rev: Vec<_> = bps.into_iter().rev().collect();
-            result.insert((tgt_id, src_id), rev);
+            bend_points.insert((tgt_id.clone(), src_id.clone()), rev);
+        }
+
+        // Extract label position from the label dummy node
+        if let Some(label_dummy) = chain.label_node {
+            if let Some(&pos) = positions.get(&label_dummy) {
+                let key = (src_id.clone(), tgt_id.clone());
+                label_positions.insert(key.clone(), pos);
+                // Also store for reversed-edge lookup
+                label_positions.insert((tgt_id.clone(), src_id.clone()), pos);
+                // Store label dimensions
+                let lw = chain.edge_data.label_width;
+                let lh = chain.edge_data.label_height;
+                label_dimensions.insert(key, (lw, lh));
+                label_dimensions.insert((tgt_id, src_id), (lw, lh));
+            }
         }
     }
 
-    result
+    DummyExtractionResult {
+        bend_points,
+        label_positions,
+        label_dimensions,
+    }
 }
 
 #[cfg(test)]

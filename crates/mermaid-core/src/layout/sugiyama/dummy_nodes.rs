@@ -14,6 +14,8 @@ pub struct DummyChain {
     pub edge_data: EdgeData,
     /// Dummy node indices in order from source to target.
     pub dummy_nodes: Vec<NodeIndex>,
+    /// The dummy node that carries the edge label (if any).
+    pub label_node: Option<NodeIndex>,
 }
 
 /// For edges spanning >1 rank, remove the original edge and insert a chain
@@ -43,20 +45,39 @@ pub fn insert_dummy_nodes(
     for (edge_idx, src, tgt, src_rank, tgt_rank) in long_edges {
         let edge_data = graph.remove_edge(edge_idx).unwrap();
 
+        // Determine the label rank (midpoint) for labeled edges
+        let label_rank = if edge_data.label.is_some() {
+            Some((src_rank + tgt_rank) / 2)
+        } else {
+            None
+        };
+
         let mut dummy_nodes = Vec::new();
+        let mut label_node = None;
         let mut prev = src;
 
         for rank in (src_rank + 1)..tgt_rank {
+            // Give the midpoint dummy the label's dimensions
+            let (w, h) = if label_rank == Some(rank) {
+                (edge_data.label_width, edge_data.label_height)
+            } else {
+                (0.0, 0.0)
+            };
+
             let dummy = graph.add_node(NodeData {
                 id: format!("__dummy_{}_{}", chains.len(), rank),
                 label: String::new(),
                 shape: NodeShape::Rectangle,
                 style: Default::default(),
-                width: 0.0,
-                height: 0.0,
+                width: w,
+                height: h,
             });
             ranks.insert(dummy, rank);
             dummy_nodes.push(dummy);
+
+            if label_rank == Some(rank) {
+                label_node = Some(dummy);
+            }
 
             // Add edge from previous node to this dummy
             graph.add_edge(
@@ -65,6 +86,8 @@ pub fn insert_dummy_nodes(
                 EdgeData {
                     label: None,
                     edge_type: edge_data.edge_type,
+                    label_width: 0.0,
+                    label_height: 0.0,
                 },
             );
             prev = dummy;
@@ -75,8 +98,10 @@ pub fn insert_dummy_nodes(
             prev,
             tgt,
             EdgeData {
-                label: edge_data.label.clone(),
+                label: None,
                 edge_type: edge_data.edge_type,
+                label_width: 0.0,
+                label_height: 0.0,
             },
         );
 
@@ -85,6 +110,7 @@ pub fn insert_dummy_nodes(
             original_target: tgt,
             edge_data,
             dummy_nodes,
+            label_node,
         });
     }
 

@@ -226,12 +226,21 @@ pub fn build_petgraph(
             .get(&edge.to)
             .ok_or_else(|| MermaidError::Layout(format!("Unknown target node: {}", edge.to)))?;
 
+        let (label_width, label_height) = if let Some(ref label_text) = edge.label {
+            let metrics = measurer.measure(label_text);
+            (metrics.width + 10.0, metrics.height + 6.0)
+        } else {
+            (0.0, 0.0)
+        };
+
         graph.add_edge(
             *from_idx,
             *to_idx,
             EdgeData {
                 label: edge.label.clone(),
                 edge_type: edge.edge_type,
+                label_width,
+                label_height,
             },
         );
     }
