@@ -284,17 +284,21 @@ fn horizontal_compaction(
         }
     }
 
-    let mut queue: VecDeque<NodeIndex> = in_degree
+    let mut initial_queue: Vec<NodeIndex> = in_degree
         .iter()
         .filter(|(_, &d)| d == 0)
         .map(|(&n, _)| n)
         .collect();
+    initial_queue.sort_by_key(|n| n.index()); // deterministic order
+    let mut queue: VecDeque<NodeIndex> = initial_queue.into_iter().collect();
     let mut topo: Vec<NodeIndex> = Vec::with_capacity(block_set.len());
 
     while let Some(n) = queue.pop_front() {
         topo.push(n);
         if let Some(tos) = out_edges.get(&n) {
-            for &to in tos.keys() {
+            let mut sorted_tos: Vec<NodeIndex> = tos.keys().copied().collect();
+            sorted_tos.sort_by_key(|n| n.index()); // deterministic order
+            for to in sorted_tos {
                 let d = in_degree.get_mut(&to).unwrap();
                 *d -= 1;
                 if *d == 0 {
@@ -306,11 +310,9 @@ fn horizontal_compaction(
 
     // Handle any blocks not reached by Kahn's (cycles)
     let topo_set: HashSet<NodeIndex> = topo.iter().copied().collect();
-    for &b in &block_set {
-        if !topo_set.contains(&b) {
-            topo.push(b);
-        }
-    }
+    let mut remaining: Vec<NodeIndex> = block_set.iter().filter(|b| !topo_set.contains(b)).copied().collect();
+    remaining.sort_by_key(|n| n.index()); // deterministic order
+    topo.extend(remaining);
 
     // Pass 1: left-to-right (smallest coordinates)
     let mut xs: HashMap<NodeIndex, f64> = HashMap::new();

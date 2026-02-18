@@ -192,7 +192,11 @@ pub fn build_petgraph(
     let mut graph = DiGraph::new();
     let mut index_map: HashMap<String, NodeIndex> = HashMap::new();
 
-    for (id, (node_def, style)) in all_nodes {
+    // Sort nodes by ID to ensure deterministic NodeIndex assignment.
+    let mut sorted_nodes: Vec<_> = all_nodes.iter().collect();
+    sorted_nodes.sort_by_key(|(id, _)| id.as_str());
+
+    for (id, (node_def, style)) in sorted_nodes {
         let label = node_def.label.clone().unwrap_or_else(|| id.clone());
 
         let measure_text = crate::render::html_util::strip_html_tags(

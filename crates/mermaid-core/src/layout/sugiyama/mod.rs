@@ -55,7 +55,7 @@ pub fn layout(
     let dummy_chains = dummy_nodes::insert_dummy_nodes(graph, &mut ranks);
 
     // Phase 4: Convert ranks to layers and minimize crossings (with dummy nodes)
-    let mut layers = rank_assignment::ranks_to_layers(&ranks);
+    let mut layers = rank_assignment::ranks_to_layers(graph, &ranks);
     ordering::minimize_crossings(graph, &mut layers, membership, 24);
 
     // Phase 5: Coordinate assignment — dummy nodes participate fully (like dagre).

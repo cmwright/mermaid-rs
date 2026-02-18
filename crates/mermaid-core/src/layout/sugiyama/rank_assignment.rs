@@ -36,7 +36,12 @@ pub fn assign_ranks(graph: &DiGraph<NodeData, EdgeData>) -> HashMap<NodeIndex, u
 }
 
 /// Convert rank map to layers: Vec<Vec<NodeIndex>> indexed by rank.
-pub fn ranks_to_layers(ranks: &HashMap<NodeIndex, usize>) -> Vec<Vec<NodeIndex>> {
+/// Nodes are inserted in stable topological order to keep layout quality while
+/// remaining deterministic across runs.
+pub fn ranks_to_layers(
+    graph: &DiGraph<NodeData, EdgeData>,
+    ranks: &HashMap<NodeIndex, usize>,
+) -> Vec<Vec<NodeIndex>> {
     if ranks.is_empty() {
         return Vec::new();
     }
@@ -44,8 +49,11 @@ pub fn ranks_to_layers(ranks: &HashMap<NodeIndex, usize>) -> Vec<Vec<NodeIndex>>
     let max_rank = *ranks.values().max().unwrap();
     let mut layers = vec![Vec::new(); max_rank + 1];
 
-    for (&node, &rank) in ranks {
-        layers[rank].push(node);
+    let topo_order = topological_sort(graph);
+    for node in topo_order {
+        if let Some(&rank) = ranks.get(&node) {
+            layers[rank].push(node);
+        }
     }
 
     layers
@@ -222,6 +230,10 @@ fn compute_dependency_tiers(
     let mut adj: Vec<Vec<usize>> = vec![Vec::new(); n];
     for &(src, tgt) in &has_edge {
         adj[src].push(tgt);
+    }
+    for deps in &mut adj {
+        deps.sort_unstable();
+        deps.dedup();
     }
 
     let mut tiers: Vec<Vec<usize>> = Vec::new();
