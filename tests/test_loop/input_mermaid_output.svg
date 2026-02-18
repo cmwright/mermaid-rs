@@ -1,0 +1,91 @@
+<svg width="1375.68701171875" height="558" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="black" />
+    </marker>
+  </defs>
+  <path d="M 516.2696551154642 25.5 L 479.49034932080434 33.3125 C 457.29594065161314 33.3125, 457.29594065161314 50.5, 435.1015319824219 50.5 C 412.9071233132306 50.5, 412.9071233132306 67.6875, 390.71271464403935 67.6875 C 372.32306174670947 67.6875, 372.32306174670947 75.5, 353.9334088493796 75.5" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrowhead)" />
+  <text x="435.1015319824219" y="50.5" text-anchor="middle" font-size="12" fill="black">HAS_CHILD_OU</text>
+  <path d="M 669.8760693120021 25.5 L 732.5294869927799 33.3125 C 770.3375838691113 33.3125, 770.3375838691113 50.5, 808.1456807454426 50.5 C 845.9537776217741 50.5, 845.9537776217741 67.6875, 883.7618744981055 67.6875 C 915.0885833384943 67.6875, 915.0885833384943 75.5, 946.4152921788832 75.5" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrowhead)" />
+  <text x="808.1456807454426" y="50.5" text-anchor="middle" font-size="12" fill="black">HAS_CHILD_OU</text>
+  <path d="M 733.8905436197917 110.5 L 733.8905436197917 118.546875 C 733.8905436197917 118.546875, 733.8905436197917 136.25, 733.8905436197917 136.25 C 733.8905436197917 136.25, 733.8905436197917 153.953125, 733.8905436197917 153.953125 C 733.8905436197917 153.953125, 733.8905436197917 162, 733.8905436197917 162" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrowhead)" />
+  <text x="733.8905436197917" y="136.25" text-anchor="middle" font-size="12" fill="black">OWNS_DOMAIN</text>
+  <path d="M 237.99853515625 195.5 L 237.99853515625 203.546875 C 237.99853515625 203.546875, 237.99853515625 221.25, 237.99853515625 221.25 C 237.99853515625 221.25, 237.99853515625 238.953125, 237.99853515625 238.953125 C 237.99853515625 238.953125, 237.99853515625 247, 237.99853515625 247" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrowhead)" />
+  <text x="237.99853515625" y="221.25" text-anchor="middle" font-size="12" fill="black">OWNS_DOMAIN</text>
+  <path d="M 1101.5752024931066 110.5 L 1081.5193395951214 118.546875 C 1069.4166637084063 118.546875, 1069.4166637084063 136.25, 1057.3139878216912 136.25 C 1045.211311934976 136.25, 1045.211311934976 153.953125, 1033.108636048261 153.953125 C 1023.0807045992683 153.953125, 1023.0807045992683 162, 1013.0527731502757 162" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrowhead)" />
+  <text x="1057.3139878216912" y="136.25" text-anchor="middle" font-size="12" fill="black">OWNS_DOMAIN</text>
+  <path d="M 606.1938829608993 25.5 L 627.6244567983291 33.3125 C 640.5566996312609 33.3125, 640.5566996312609 50.5, 653.4889424641926 50.5 C 666.4211852971246 50.5, 666.4211852971246 67.6875, 679.3534281300564 67.6875 C 690.0687150487713 67.6875, 690.0687150487713 75.5, 700.7840019674862 75.5" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrowhead)" />
+  <text x="653.4889424641927" y="50.50000000000006" text-anchor="middle" font-size="12" fill="black">REPRESENTS</text>
+  <path d="M 284.9445369944853 110.5 L 277.0658677045037 118.3125 C 272.31149830537686 118.3125, 272.31149830537686 135.5, 267.55712890625 135.5 C 262.80275950712314 135.5, 262.80275950712314 152.6875, 258.0483901079963 152.6875 C 254.1090554630055 152.6875, 254.1090554630055 160.5, 250.1697208180147 160.5" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrowhead)" />
+  <text x="267.55712890625" y="135.5" text-anchor="middle" font-size="12" fill="black">REPRESENTS</text>
+  <path d="M 925.1231079101563 25.5 L 959.7842388153076 33.3125 C 980.7004384994507 33.3125, 980.7004384994507 50.5, 1001.6166381835938 50.5 C 1022.5328378677368 50.5, 1022.5328378677368 67.6875, 1043.4490375518799 67.6875 C 1060.7796030044556 67.6875, 1060.7796030044556 75.5, 1078.1101684570313 75.5" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrowhead)" />
+  <text x="1001.6166381835938" y="50.5" text-anchor="middle" font-size="12" fill="black">REPRESENTS</text>
+  <path d="M 795.9067837584253 280.5 L 771.7676490297505 288.390625 C 757.2009297969295 288.390625, 757.2009297969295 305.75, 742.6342105641085 305.75 C 728.0674913312876 305.75, 728.0674913312876 323.109375, 713.5007720984665 323.109375 C 701.4312047341291 323.109375, 701.4312047341291 331, 689.3616373697917 331" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrowhead)" />
+  <text x="742.6342105641085" y="305.75" text-anchor="middle" font-size="12" fill="black">SSO provider</text>
+  <path d="M 870.3856296913297 280.5 L 894.6972492442411 288.3125 C 909.3680541468601 288.3125, 909.3680541468601 305.5, 924.0388590494791 305.5 C 938.709663952098 305.5, 938.709663952098 322.6875, 953.380468854717 322.6875 C 965.5362786311728 322.6875, 965.5362786311728 330.5, 977.6920884076286 330.5" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrowhead)" />
+  <text x="924.0388590494791" y="305.5" text-anchor="middle" font-size="12" fill="black">member</text>
+  <path d="M 883.0406087239584 280.5 L 915.5440673828125 288.3125 C 935.1582234700521 288.3125, 935.1582234700521 305.5, 954.7723795572917 305.5 C 974.3865356445313 305.5, 974.3865356445313 322.6875, 994.0006917317709 322.6875 C 1010.252421061198 322.6875, 1010.252421061198 330.5, 1026.504150390625 330.5" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrowhead)" />
+  <text x="954.7723795572917" y="305.5" text-anchor="middle" font-size="12" fill="black">member</text>
+  <path d="M 283.3379911534926 365.5 L 274.3301841062658 373.390625 C 268.8944384743186 373.390625, 268.8944384743186 390.75, 263.4586928423713 390.75 C 258.0229472104241 390.75, 258.0229472104241 408.109375, 252.58720157847685 408.109375 C 248.0832980548634 408.109375, 248.0832980548634 416, 243.57939453125 416" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrowhead)" />
+  <text x="263.4586928423713" y="390.75" text-anchor="middle" font-size="12" fill="black">SSO provider</text>
+  <path d="M 331.5308478860294 365.5 L 353.80849591423487 373.3125 C 367.25190420711743 373.3125, 367.25190420711743 390.5, 380.6953125 390.5 C 394.1387207928826 390.5, 394.1387207928826 407.6875, 407.5821290857652 407.6875 C 418.72095309986787 407.6875, 418.72095309986787 415.5, 429.8597771139706 415.5" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrowhead)" />
+  <text x="380.6953125" y="390.5" text-anchor="middle" font-size="12" fill="black">member</text>
+  <path d="M 1039.7253382065717 280.5 L 1038.4757337009207 288.3125 C 1037.7216620164759 288.3125, 1037.7216620164759 305.5, 1036.9675903320313 305.5 C 1036.2135186475866 305.5, 1036.2135186475866 322.6875, 1035.459446963142 322.6875 C 1034.8346447103163 322.6875, 1034.8346447103163 330.5, 1034.2098424574908 330.5" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrowhead)" />
+  <text x="1036.9675903320313" y="305.5" text-anchor="middle" font-size="12" fill="black">member</text>
+  <path d="M 1051.7413581399358 280.5 L 1058.2699808232926 288.3125 C 1062.2096669253183 288.3125, 1062.2096669253183 305.5, 1066.1493530273438 305.5 C 1070.0890391293692 305.5, 1070.0890391293692 322.6875, 1074.028725231395 322.6875 C 1077.2930365730733 322.6875, 1077.2930365730733 330.5, 1080.5573479147517 330.5" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrowhead)" />
+  <text x="1066.1493530273438" y="305.5" text-anchor="middle" font-size="12" fill="black">member</text>
+  <path d="M 230.1953125 450 L 230.1953125 457.890625 C 230.1953125 457.890625, 230.1953125 475.25, 230.1953125 475.25 C 230.1953125 475.25, 230.1953125 492.609375, 230.1953125 492.609375 C 230.1953125 492.609375, 230.1953125 500.5, 230.1953125 500.5" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrowhead)" />
+  <text x="230.1953125" y="475.25" text-anchor="middle" font-size="12" fill="black">OIDC /authorize</text>
+  <path d="M 752.5141343060662 194 L 766.0953514398313 202.046875 C 774.2909135033103 202.046875, 774.2909135033103 219.75, 782.4864755667892 219.75 C 790.6820376302682 219.75, 790.6820376302682 237.453125, 798.8775996937471 237.453125 C 805.6682082606296 237.453125, 805.6682082606296 245.5, 812.4588168275122 245.5" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrowhead)" />
+  <text x="782.4864755667892" y="219.75000000000003" text-anchor="middle" font-size="12" fill="black">configures domain</text>
+  <path d="M 249.12647633272059 279 L 257.24150570140165 287.046875 C 262.1385061825023 287.046875, 262.1385061825023 304.75, 267.035506663603 304.75 C 271.9325071447036 304.75, 271.9325071447036 322.453125, 276.82950762580424 322.453125 C 280.88702231014474 322.453125, 280.88702231014474 330.5, 284.9445369944853 330.5" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrowhead)" />
+  <text x="267.035506663603" y="304.75" text-anchor="middle" font-size="12" fill="black">configures domain</text>
+  <path d="M 996.1116196576287 194 L 1003.8131794592913 202.046875 C 1008.4606724430532 202.046875, 1008.4606724430532 219.75, 1013.1081654268153 219.75 C 1017.7556584105772 219.75, 1017.7556584105772 237.453125, 1022.4031513943391 237.453125 C 1026.2539312951703 237.453125, 1026.2539312951703 245.5, 1030.1047111960017 245.5" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrowhead)" />
+  <text x="1013.1081654268153" y="219.74999999999997" text-anchor="middle" font-size="12" fill="black">configures domain</text>
+  <path d="M 641.9524739583333 365 L 633.9533652511296 373.125 C 629.1263168933344 373.125, 629.1263168933344 391, 624.2992685355391 391 C 619.4722201777438 391, 619.4722201777438 408.875, 614.6451718199485 408.875 C 610.6456174663467 408.875, 610.6456174663467 417, 606.646063112745 417" fill="none" stroke="black" stroke-width="2" marker-end="url(#arrowhead)" />
+  <text x="624.2992685355391" y="391" text-anchor="middle" font-size="12" fill="black">SAML AuthnRequest</text>
+  <rect x="266.08636474609375" y="-9.5" width="614.001953125" height="35" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="573.0873413085938" y="8" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;&lt;b&gt;Root OU: Acme US&lt;/b&gt;&lt;br/&gt;id = ou-root-456&lt;br/&gt;geo = US&lt;br/&gt;ory_org_id = ory-org-aaa&quot;</text>
+  <rect x="-13.38525390625" y="75.5" width="621.001953125" height="35" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="297.11572265625" y="93" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;&lt;b&gt;Child OU: Acme EU&lt;/b&gt;&lt;br/&gt;id = ou-child-789&lt;br/&gt;geo = EU&lt;br/&gt;ory_org_id = ory-org-bbb&quot;</text>
+  <rect x="748.6512858072915" y="75.5" width="589.10546875" height="35" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="1043.2040201822915" y="93" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;&lt;b&gt;Child OU: Acme APAC&lt;/b&gt;&lt;br/&gt;id = ou-child-012&lt;br/&gt;geo = US&lt;br/&gt;ory_org_id = null&quot;</text>
+  <rect x="570.42138671875" y="-9.5" width="602.3125" height="35" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="871.57763671875" y="8" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;&lt;b&gt;Root OU: Smallco&lt;/b&gt;&lt;br/&gt;id = ou-root-999&lt;br/&gt;geo = US&lt;br/&gt;ory_org_id = ory-org-ccc&quot;</text>
+  <rect x="474.57706705729174" y="75.5" width="518.626953125" height="35" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="733.8905436197917" y="93" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;&lt;b&gt;Acme Holdings Inc.&lt;/b&gt;&lt;br/&gt;id = le-001&lt;br/&gt;entityType = CORPORATION&quot;</text>
+  <rect x="686.6346842447917" y="162" width="94.51171875" height="32" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="733.8905436197917" y="178" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;acme.com&quot;</text>
+  <rect x="26.52978515625" y="160.5" width="422.9375" height="35" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="237.99853515625" y="178" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;&lt;b&gt;Acme EU GmbH&lt;/b&gt;&lt;br/&gt;id = le-002&lt;br/&gt;entityType = LLC&quot;</text>
+  <rect x="196.1806640625" y="247" width="83.6357421875" height="32" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="237.99853515625" y="263" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;acme.eu&quot;</text>
+  <rect x="932.2352294921875" y="75.5" width="398.8408203125" height="35" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="1131.6556396484375" y="93" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;&lt;b&gt;Smallco LLC&lt;/b&gt;&lt;br/&gt;id = le-003&lt;br/&gt;entityType = LLC&quot;</text>
+  <rect x="939.4603271484375" y="162" width="92.1806640625" height="32" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="985.5506591796875" y="178" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;smallco.io&quot;</text>
+  <rect x="521.172119140625" y="245.5" width="623.3125" height="35" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="832.828369140625" y="263" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;&lt;b&gt;Ory Organization&lt;/b&gt;&lt;br/&gt;id = ory-org-aaa&lt;br/&gt;label = Acme US&lt;br/&gt;domains = acme.com&quot;</text>
+  <rect x="491.62776692708326" y="331" width="323.734375" height="34" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="653.4949544270833" y="348" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;&lt;b&gt;SAML Connection&lt;/b&gt;&lt;br/&gt;provider = Okta&quot;</text>
+  <rect x="920.0325520833333" y="330.5" width="190.43359375" height="35" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="1015.2493489583333" y="348" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;Identity: alice@acme.com&quot;</text>
+  <rect x="984.2168782552083" y="330.5" width="184.9990234375" height="35" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="1076.7163899739583" y="348" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;Identity: bob@acme.com&quot;</text>
+  <rect x="-9.1025390625" y="330.5" width="612.4365234375" height="35" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="297.11572265625" y="348" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;&lt;b&gt;Ory Organization&lt;/b&gt;&lt;br/&gt;id = ory-org-bbb&lt;br/&gt;label = Acme EU&lt;br/&gt;domains = acme.eu&quot;</text>
+  <rect x="54.7177734375" y="416" width="350.955078125" height="34" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="230.1953125" y="433" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;&lt;b&gt;OIDC Connection&lt;/b&gt;&lt;br/&gt;provider = Azure AD&quot;</text>
+  <rect x="373.72021484375" y="415.5" width="181.109375" height="35" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="464.27490234375" y="433" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;Identity: carol@acme.eu&quot;</text>
+  <rect x="737.009765625" y="245.5" width="609.2919921875" height="35" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="1041.65576171875" y="263" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;&lt;b&gt;Ory Organization&lt;/b&gt;&lt;br/&gt;id = ory-org-ccc&lt;br/&gt;label = Smallco&lt;br/&gt;domains = smallco.io&quot;</text>
+  <rect x="940.9454345703125" y="330.5" width="182.66796875" height="35" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="1032.2794189453125" y="348" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;Identity: dan@smallco.io&quot;</text>
+  <rect x="999.7020263671875" y="330.5" width="181.8818359375" height="35" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="1090.6429443359375" y="348" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;Identity: eve@smallco.io&quot;</text>
+  <rect x="553.5784505208333" y="417" width="84.408203125" height="32" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="595.7825520833333" y="433" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;Okta IdP&quot;</text>
+  <rect x="185.2705078125" y="500.5" width="89.849609375" height="32" fill="white" stroke="black" stroke-width="2" rx="5" />
+  <text x="230.1953125" y="516.5" text-anchor="middle" dominant-baseline="middle" font-size="14" fill="black">&quot;Azure AD&quot;</text>
+</svg>

@@ -1,9 +1,9 @@
 use crate::ast::flowchart::{EdgeType, NodeShape};
-use crate::render::html_util;
 use crate::error::Result;
 use crate::layout::flowchart_layout::{
     PositionedEdge, PositionedGraph, PositionedNode, PositionedSubgraph,
 };
+use crate::render::html_util;
 use crate::render::theme::Theme;
 
 const SVG_PADDING: f64 = 8.0;
@@ -250,12 +250,18 @@ fn draw_shape(
             let offset = hh * 0.5;
             let points = format!(
                 "{},{} {},{} {},{} {},{} {},{} {},{}",
-                -hw + offset, -hh,
-                hw - offset, -hh,
-                hw, 0.0,
-                hw - offset, hh,
-                -hw + offset, hh,
-                -hw, 0.0,
+                -hw + offset,
+                -hh,
+                hw - offset,
+                -hh,
+                hw,
+                0.0,
+                hw - offset,
+                hh,
+                -hw + offset,
+                hh,
+                -hw,
+                0.0,
             );
             format!(
                 r#"  <polygon points="{}" fill="{}" stroke="{}" stroke-width="{}"/>"#,
@@ -271,12 +277,22 @@ fn draw_shape(
             ) + "\n";
             s += &format!(
                 r#"  <line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}"/>"#,
-                -hw + inset, -hh, -hw + inset, hh, stroke, stroke_width,
+                -hw + inset,
+                -hh,
+                -hw + inset,
+                hh,
+                stroke,
+                stroke_width,
             );
             s.push('\n');
             s += &format!(
                 r#"  <line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}"/>"#,
-                hw - inset, -hh, hw - inset, hh, stroke, stroke_width,
+                hw - inset,
+                -hh,
+                hw - inset,
+                hh,
+                stroke,
+                stroke_width,
             );
             s.push('\n');
             s
@@ -290,7 +306,11 @@ fn draw_shape(
             // Body rectangle
             s += &format!(
                 r#"  <rect x="{}" y="{}" width="{}" height="{}" fill="{}" stroke="none"/>"#,
-                -hw, body_top, w, body_bot - body_top, fill,
+                -hw,
+                body_top,
+                w,
+                body_bot - body_top,
+                fill,
             );
             s.push('\n');
             // Left and right edges
@@ -323,11 +343,16 @@ fn draw_shape(
             let notch = hh * 0.6;
             let points = format!(
                 "{},{} {},{} {},{} {},{} {},{}",
-                -hw, -hh,
-                hw - notch, -hh,
-                hw, 0.0,
-                hw - notch, hh,
-                -hw, hh,
+                -hw,
+                -hh,
+                hw - notch,
+                -hh,
+                hw,
+                0.0,
+                hw - notch,
+                hh,
+                -hw,
+                hh,
             );
             format!(
                 r#"  <polygon points="{}" fill="{}" stroke="{}" stroke-width="{}"/>"#,
@@ -338,10 +363,14 @@ fn draw_shape(
             let offset = hw * 0.2;
             let points = format!(
                 "{},{} {},{} {},{} {},{}",
-                -hw + offset, -hh,
-                hw - offset, -hh,
-                hw, hh,
-                -hw, hh,
+                -hw + offset,
+                -hh,
+                hw - offset,
+                -hh,
+                hw,
+                hh,
+                -hw,
+                hh,
             );
             format!(
                 r#"  <polygon points="{}" fill="{}" stroke="{}" stroke-width="{}"/>"#,
@@ -352,10 +381,14 @@ fn draw_shape(
             let offset = hw * 0.2;
             let points = format!(
                 "{},{} {},{} {},{} {},{}",
-                -hw, -hh,
-                hw, -hh,
-                hw - offset, hh,
-                -hw + offset, hh,
+                -hw,
+                -hh,
+                hw,
+                -hh,
+                hw - offset,
+                hh,
+                -hw + offset,
+                hh,
             );
             format!(
                 r#"  <polygon points="{}" fill="{}" stroke="{}" stroke-width="{}"/>"#,
@@ -366,10 +399,14 @@ fn draw_shape(
             let offset = hw * 0.2;
             let points = format!(
                 "{},{} {},{} {},{} {},{}",
-                -hw + offset, -hh,
-                hw, -hh,
-                hw - offset, hh,
-                -hw, hh,
+                -hw + offset,
+                -hh,
+                hw,
+                -hh,
+                hw - offset,
+                hh,
+                -hw,
+                hh,
             );
             format!(
                 r#"  <polygon points="{}" fill="{}" stroke="{}" stroke-width="{}"/>"#,
@@ -380,10 +417,14 @@ fn draw_shape(
             let offset = hw * 0.2;
             let points = format!(
                 "{},{} {},{} {},{} {},{}",
-                -hw, -hh,
-                hw - offset, -hh,
-                hw, hh,
-                -hw + offset, hh,
+                -hw,
+                -hh,
+                hw - offset,
+                -hh,
+                hw,
+                hh,
+                -hw + offset,
+                hh,
             );
             format!(
                 r#"  <polygon points="{}" fill="{}" stroke="{}" stroke-width="{}"/>"#,
@@ -477,8 +518,15 @@ fn build_rounded_edge_path(points: &[(f64, f64)], radius: f64) -> String {
     if points.len() == 1 {
         return format!("M {} {}", points[0].0, points[0].1);
     }
+    if points.len() == 2 {
+        return format!(
+            "M {} {} L {} {}",
+            points[0].0, points[0].1, points[1].0, points[1].1
+        );
+    }
 
     let mut path = format!("M {} {}", points[0].0, points[0].1);
+
     for i in 1..points.len() - 1 {
         let prev = points[i - 1];
         let curr = points[i];
@@ -489,29 +537,47 @@ fn build_rounded_edge_path(points: &[(f64, f64)], radius: f64) -> String {
         let dx2 = next.0 - curr.0;
         let dy2 = next.1 - curr.1;
 
-        let orthogonal_turn =
-            (dx1.abs() < 1e-6 && dy2.abs() < 1e-6) || (dy1.abs() < 1e-6 && dx2.abs() < 1e-6);
-        if !orthogonal_turn {
+        // Check if this is a clear orthogonal turn (one direction changes significantly, other doesn't)
+        let is_horizontal1 = dy1.abs() < 1e-3;
+        let is_vertical1 = dx1.abs() < 1e-3;
+        let is_horizontal2 = dy2.abs() < 1e-3;
+        let is_vertical2 = dx2.abs() < 1e-3;
+
+        let is_orthogonal_turn =
+            (is_horizontal1 && is_vertical2) || (is_vertical1 && is_horizontal2);
+
+        if !is_orthogonal_turn {
+            // Not a clean corner, just draw a line to the point
             path.push_str(&format!(" L {} {}", curr.0, curr.1));
             continue;
         }
 
-        let len1 = (dx1.abs() + dy1.abs()).max(1e-6);
-        let len2 = (dx2.abs() + dy2.abs()).max(1e-6);
+        // Calculate segment lengths
+        let len1 = (dx1 * dx1 + dy1 * dy1).sqrt();
+        let len2 = (dx2 * dx2 + dy2 * dy2).sqrt();
+
+        // Only round if both segments are long enough
+        if len1 < 2.0 * radius || len2 < 2.0 * radius {
+            path.push_str(&format!(" L {} {}", curr.0, curr.1));
+            continue;
+        }
+
+        // Calculate the corner radius (don't exceed half the shorter segment)
         let r = radius.min(len1 / 2.0).min(len2 / 2.0);
 
-        let p1 = (
-            curr.0 - dx1.signum() * r,
-            curr.1 - dy1.signum() * r,
-        );
-        let p2 = (
-            curr.0 + dx2.signum() * r,
-            curr.1 + dy2.signum() * r,
-        );
+        // Calculate points where rounding starts and ends
+        // Move back r distance from curr along the first segment
+        let t1 = r / len1;
+        let p1 = (curr.0 - dx1 * t1, curr.1 - dy1 * t1);
+
+        // Move forward r distance from curr along the second segment
+        let t2 = r / len2;
+        let p2 = (curr.0 + dx2 * t2, curr.1 + dy2 * t2);
 
         path.push_str(&format!(" L {} {}", p1.0, p1.1));
         path.push_str(&format!(" Q {} {} {} {}", curr.0, curr.1, p2.0, p2.1));
     }
+
     let last = points[points.len() - 1];
     path.push_str(&format!(" L {} {}", last.0, last.1));
     path
@@ -521,10 +587,16 @@ fn render_subgraph(sg: &PositionedSubgraph, theme: &Theme) -> String {
     let mut s = String::new();
 
     // Resolve fill/stroke from subgraph style overrides or theme defaults
-    let fill = sg.style.fill.as_ref()
+    let fill = sg
+        .style
+        .fill
+        .as_ref()
         .map(|c| c.to_css())
         .unwrap_or_else(|| theme.subgraph_fill.to_css());
-    let stroke = sg.style.stroke.as_ref()
+    let stroke = sg
+        .style
+        .stroke
+        .as_ref()
         .map(|c| c.to_css())
         .unwrap_or_else(|| theme.subgraph_border.to_css());
 

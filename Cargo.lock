@@ -164,15 +164,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dagre-rs"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a7120333db4517d8b5e2fbab761d35c0cd25e5932057aa65dfb317bc4b128a39"
-dependencies = [
- "petgraph",
-]
-
-[[package]]
 name = "diff"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -334,7 +325,6 @@ name = "mermaid-core"
 version = "0.1.0"
 dependencies = [
  "ab_glyph",
- "dagre-rs",
  "log",
  "pest",
  "pest_derive",
