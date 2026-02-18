@@ -7,11 +7,14 @@ pub use crate::layout::types::{
     PositionedEdge, PositionedGraph, PositionedNode, PositionedSubgraph,
 };
 
+use std::collections::HashMap;
+
 use crate::layout::compound;
 use crate::layout::edge_routing;
 use crate::layout::graph_builder;
 use crate::layout::normalize;
 use crate::layout::sugiyama;
+use crate::layout::sugiyama::dummy_nodes::DummyChain;
 use crate::layout::types::*;
 
 /// Compute layout positions for a flowchart AST.
@@ -61,8 +64,13 @@ pub fn layout_flowchart(
     positioned_subgraphs =
         compound::position_subgraphs(&ast.subgraphs, &positioned_nodes, &ast.style_overrides);
 
-    // 10. Route edges after final node positions
-    let mut positioned_edges = edge_routing::route_edges(&positioned_nodes, &all_edges, is_horizontal);
+    // 10. Extract bend points from dummy node positions and route edges
+    let bend_points = build_edge_bend_points(
+        &graph,
+        &result.dummy_chains,
+        &result.positions,
+    );
+    let mut positioned_edges = edge_routing::route_edges(&positioned_nodes, &all_edges, is_horizontal, &bend_points);
 
     // 11. Normalize coordinates and compute bounding box
     let (width, height) = normalize::normalize_and_compute_bounds(
@@ -107,6 +115,37 @@ fn build_positioned_nodes(
             })
         })
         .collect()
+}
+
+/// Build a map from (source_id, target_id) → bend points for long edges.
+///
+/// Dummy nodes now participate in coordinate assignment (like dagre),
+/// so we simply extract their positions as edge waypoints.
+fn build_edge_bend_points(
+    graph: &petgraph::graph::DiGraph<NodeData, EdgeData>,
+    dummy_chains: &[DummyChain],
+    positions: &HashMap<petgraph::graph::NodeIndex, (f64, f64)>,
+) -> HashMap<(String, String), Vec<(f64, f64)>> {
+    let mut result = HashMap::new();
+    for chain in dummy_chains {
+        let src_id = graph[chain.original_source].id.clone();
+        let tgt_id = graph[chain.original_target].id.clone();
+
+        let bps: Vec<(f64, f64)> = chain
+            .dummy_nodes
+            .iter()
+            .filter_map(|&dummy| positions.get(&dummy).copied())
+            .collect();
+
+        if !bps.is_empty() {
+            // Store under both directions for reversed-edge lookup
+            result.insert((src_id.clone(), tgt_id.clone()), bps.clone());
+            let rev: Vec<_> = bps.into_iter().rev().collect();
+            result.insert((tgt_id, src_id), rev);
+        }
+    }
+
+    result
 }
 
 #[cfg(test)]

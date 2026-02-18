@@ -8,6 +8,7 @@ pub const NODE_PADDING_V: f64 = 8.0;
 pub const MIN_NODE_WIDTH: f64 = 0.0;
 pub const MIN_NODE_HEIGHT: f64 = 0.0;
 pub const NODE_SEP: f64 = 50.0;
+pub const EDGE_SEP: f64 = 20.0;
 pub const RANK_SEP: f64 = 80.0;
 pub const SUBGRAPH_PADDING: f64 = 8.0;
 pub const SUBGRAPH_TITLE_HEIGHT: f64 = 18.0;

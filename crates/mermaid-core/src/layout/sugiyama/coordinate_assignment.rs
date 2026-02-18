@@ -352,6 +352,7 @@ fn horizontal_compaction(
 }
 
 /// Minimum separation between adjacent nodes in the cross-axis.
+/// Uses EDGE_SEP for dummy nodes (like dagre's edgesep) and NODE_SEP for real nodes.
 fn node_separation(
     graph: &DiGraph<NodeData, EdgeData>,
     u: NodeIndex,
@@ -363,31 +364,44 @@ fn node_separation(
     let un = &graph[u];
     let vn = &graph[v];
 
+    let u_is_dummy = un.id.starts_with("__dummy_");
+    let v_is_dummy = vn.id.starts_with("__dummy_");
+
     let u_size = if is_horizontal { un.height } else { un.width };
     let v_size = if is_horizontal { vn.height } else { vn.width };
 
-    let u_path = membership
-        .get(&un.id)
-        .map(|p| p.as_slice())
-        .unwrap_or(empty_path);
-    let v_path = membership
-        .get(&vn.id)
-        .map(|p| p.as_slice())
-        .unwrap_or(empty_path);
+    // Dagre uses edgesep for dummy nodes, nodesep for real nodes
+    let u_sep = if u_is_dummy { EDGE_SEP } else { NODE_SEP };
+    let v_sep = if v_is_dummy { EDGE_SEP } else { NODE_SEP };
+    let base_sep = (u_sep + v_sep) / 2.0;
 
-    let gap = if u_path != v_path {
-        let common = u_path
-            .iter()
-            .zip(v_path.iter())
-            .take_while(|(a, b)| a == b)
-            .count();
-        let divergence = u_path.len().max(v_path.len()) - common;
-        SUBGRAPH_GROUP_GAP * divergence as f64
-    } else {
+    // Skip subgraph gap for dummy nodes (they have no membership)
+    let gap = if u_is_dummy || v_is_dummy {
         0.0
+    } else {
+        let u_path = membership
+            .get(&un.id)
+            .map(|p| p.as_slice())
+            .unwrap_or(empty_path);
+        let v_path = membership
+            .get(&vn.id)
+            .map(|p| p.as_slice())
+            .unwrap_or(empty_path);
+
+        if u_path != v_path {
+            let common = u_path
+                .iter()
+                .zip(v_path.iter())
+                .take_while(|(a, b)| a == b)
+                .count();
+            let divergence = u_path.len().max(v_path.len()) - common;
+            SUBGRAPH_GROUP_GAP * divergence as f64
+        } else {
+            0.0
+        }
     };
 
-    u_size / 2.0 + NODE_SEP + gap + v_size / 2.0
+    u_size / 2.0 + base_sep + gap + v_size / 2.0
 }
 
 /// Find the alignment with the smallest total width.

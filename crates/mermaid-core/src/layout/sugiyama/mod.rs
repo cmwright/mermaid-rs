@@ -4,7 +4,7 @@ pub mod dummy_nodes;
 pub mod ordering;
 pub mod rank_assignment;
 
-use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
+use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::HashMap;
 
 use crate::ast::flowchart::{Direction, FlowchartAst};
@@ -51,41 +51,11 @@ pub fn layout(
     let mut layers = rank_assignment::ranks_to_layers(&ranks);
     ordering::minimize_crossings(graph, &mut layers, membership, 24);
 
-    // Phase 5: Position real nodes only — dummy nodes helped with crossing
-    // minimization but shouldn't influence node placement.
-    //
-    // Add direct edges for long-edge endpoints so they still attract each other
-    // during barycenter refinement, then strip dummies from layers.
-    let direct_edges: Vec<EdgeIndex> = dummy_chains
-        .iter()
-        .map(|chain| {
-            graph.add_edge(
-                chain.original_source,
-                chain.original_target,
-                chain.edge_data.clone(),
-            )
-        })
-        .collect();
-
-    let real_layers: Vec<Vec<NodeIndex>> = layers
-        .iter()
-        .map(|layer| {
-            layer
-                .iter()
-                .filter(|&&idx| !graph[idx].id.starts_with("__dummy_"))
-                .copied()
-                .collect()
-        })
-        .filter(|layer: &Vec<NodeIndex>| !layer.is_empty())
-        .collect();
-
+    // Phase 5: Coordinate assignment — dummy nodes participate fully (like dagre).
+    // Dummies get real positions via Brandes-Köpf with EDGE_SEP separation,
+    // and their coordinates become edge waypoints.
     let positions =
-        coordinate_assignment::assign_coordinates(graph, &real_layers, direction, membership);
-
-    // Clean up temporary edges
-    for ei in direct_edges.into_iter().rev() {
-        graph.remove_edge(ei);
-    }
+        coordinate_assignment::assign_coordinates(graph, &layers, direction, membership);
 
     // Restore reversed edges (doesn't affect positions)
     cycle_removal::restore_cycles(graph, &reversed);
