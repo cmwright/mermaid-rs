@@ -104,8 +104,7 @@ fn route_orthogonal_with_avoidance(
 ) -> Vec<(f64, f64)> {
     let eps = 1e-6;
 
-    // Only use a direct line when source and target are axis-aligned
-    // (the line is already perpendicular to both node faces).
+    // Straight line for axis-aligned edges
     let aligned = if is_horizontal {
         (start.1 - end.1).abs() < eps
     } else {
@@ -116,50 +115,86 @@ fn route_orthogonal_with_avoidance(
         return vec![start, end];
     }
 
-    // Z-routes: always perpendicular at both source and target.
-    // For TB: vertical → horizontal → vertical
-    // For LR: horizontal → vertical → horizontal
-    let offsets = [0.0, 30.0, -30.0, 60.0, -60.0, 100.0, -100.0, 150.0, -150.0, 200.0, -200.0];
+    // Generate smooth curve with many intermediate waypoints.
+    // Uses smoothstep on the cross-axis so the edge departs/arrives
+    // perpendicular to the node face, with a gradual S-curve in between.
+    // Many closely-spaced points keep the B-spline tight (like mermaid/dagre).
+    let step = 30.0;
 
-    for off in offsets {
-        let points = if is_horizontal {
-            let mid_x = (start.0 + end.0) / 2.0 + off;
-            vec![start, (mid_x, start.1), (mid_x, end.1), end]
-        } else {
-            let mid_y = (start.1 + end.1) / 2.0 + off;
-            vec![start, (start.0, mid_y), (end.0, mid_y), end]
-        };
+    let (main_s, cross_s, main_e, cross_e) = if is_horizontal {
+        (start.0, start.1, end.0, end.1)
+    } else {
+        (start.1, start.0, end.1, end.0)
+    };
+
+    let main_dist = (main_e - main_s).abs();
+    let num_steps = (main_dist / step).ceil().max(6.0) as usize;
+
+    // Try smooth curve with optional cross-axis offset for avoidance
+    let offsets = [0.0, 30.0, -30.0, 60.0, -60.0, 100.0, -100.0];
+
+    for &off in &offsets {
+        let points = build_smooth_waypoints(
+            start, end, main_s, cross_s, main_e, cross_e, num_steps, off, is_horizontal,
+        );
 
         if path_avoids_nodes(&points, from_id, to_id, nodes) {
-            return dedupe_adjacent_points(points);
+            return points;
         }
     }
 
-    // Last resort: Z-route at midpoint without collision check
-    let points = if is_horizontal {
-        let mid_x = (start.0 + end.0) / 2.0;
-        vec![start, (mid_x, start.1), (mid_x, end.1), end]
-    } else {
-        let mid_y = (start.1 + end.1) / 2.0;
-        vec![start, (start.0, mid_y), (end.0, mid_y), end]
-    };
-    dedupe_adjacent_points(points)
+    // Last resort: smooth curve without avoidance check
+    build_smooth_waypoints(
+        start, end, main_s, cross_s, main_e, cross_e, num_steps, 0.0, is_horizontal,
+    )
 }
 
-fn dedupe_adjacent_points(points: Vec<(f64, f64)>) -> Vec<(f64, f64)> {
-    let mut out: Vec<(f64, f64)> = Vec::with_capacity(points.len());
-    for p in points {
-        if out
-            .last()
-            .map(|q| (q.0 - p.0).abs() < 1e-6 && (q.1 - p.1).abs() < 1e-6)
-            .unwrap_or(false)
-        {
-            continue;
+/// Build waypoints along a smooth curve between start and end.
+/// The edge turns quickly to the target's cross-axis position near the
+/// start, then goes straight down to the target — matching how dagre's
+/// dummy nodes settle near the target x through barycenter ordering.
+/// `offset` adds a parabolic bulge to the cross-axis for node avoidance.
+fn build_smooth_waypoints(
+    start: (f64, f64),
+    end: (f64, f64),
+    main_s: f64,
+    cross_s: f64,
+    main_e: f64,
+    cross_e: f64,
+    num_steps: usize,
+    offset: f64,
+    is_horizontal: bool,
+) -> Vec<(f64, f64)> {
+    let mut points = Vec::with_capacity(num_steps + 1);
+    points.push(start);
+
+    // Turn from source_x to target_x in the first ~25% of the path,
+    // then go straight at target_x for the remaining ~75%.
+    let turn_frac = 0.25;
+
+    for i in 1..num_steps {
+        let t = i as f64 / num_steps as f64;
+        let main = main_s + (main_e - main_s) * t;
+
+        let cross = if t <= turn_frac {
+            let u = t / turn_frac;
+            let su = u * u * (3.0 - 2.0 * u);
+            cross_s + (cross_e - cross_s) * su
+        } else {
+            cross_e
+        } + offset * 4.0 * t * (1.0 - t);
+
+        if is_horizontal {
+            points.push((main, cross));
+        } else {
+            points.push((cross, main));
         }
-        out.push(p);
     }
-    out
+
+    points.push(end);
+    points
 }
+
 
 fn path_avoids_nodes(
     points: &[(f64, f64)],
