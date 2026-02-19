@@ -11,6 +11,10 @@ struct Example {
 
 const EXAMPLES: &[Example] = &[
     Example {
+        name: "Test Loop - Complex Organization Flowchart",
+        source: include_str!("../tests/test_loop/input_mermaid.mmd"),
+    },
+    Example {
         name: "Basic Pie Chart (Netflix)",
         source: r#"pie title NETFLIX
          "Time spent looking for movie" : 90

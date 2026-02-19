@@ -124,6 +124,13 @@ fn measure_subgraph_title_width(label: &str, measurer: &TextMeasurer<'_>) -> f64
 }
 
 /// Ensure sibling subgraphs do not overlap.
+///
+/// Two passes:
+/// 1. Main-axis pass: when sibling subgraphs have a small main-axis overlap
+///    (i.e. they are mostly stacked), push the lower/right one further along
+///    the main axis so their bounding boxes no longer intersect.
+/// 2. Cross-axis pass: for subgraphs that still overlap on the main axis
+///    (i.e. they live at overlapping ranks), push on the cross axis.
 pub fn separate_overlapping_sibling_subgraphs(
     ast: &FlowchartAst,
     membership: &SubgraphMembership,
@@ -132,6 +139,7 @@ pub fn separate_overlapping_sibling_subgraphs(
     all_edges: &[EdgeDef],
     is_horizontal: bool,
 ) {
+    let gap = 8.0;
     let overlap_epsilon = 1e-6;
 
     let mut parent_children: HashMap<Option<String>, Vec<String>> = HashMap::new();
@@ -213,6 +221,91 @@ pub fn separate_overlapping_sibling_subgraphs(
             sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
         });
 
+        // --- Pass 1: resolve main-axis overlaps ---
+        // Track cumulative main-axis shifts per subgraph so we can apply them.
+        let mut main_shifts: HashMap<&str, f64> = HashMap::new();
+
+        // Sort siblings by main-axis start for this pass.
+        let mut by_main: Vec<&str> = siblings.clone();
+        by_main.sort_by(|a, b| {
+            let ma = bounds
+                .get(a)
+                .map(|sg| if is_horizontal { sg.x } else { sg.y })
+                .unwrap_or(0.0);
+            let mb = bounds
+                .get(b)
+                .map(|sg| if is_horizontal { sg.x } else { sg.y })
+                .unwrap_or(0.0);
+            ma.partial_cmp(&mb).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        for (i, &id) in by_main.iter().enumerate() {
+            let Some(sg) = bounds.get(id) else { continue };
+            let my_main_start = if is_horizontal { sg.x } else { sg.y }
+                + main_shifts.get(id).copied().unwrap_or(0.0);
+            let my_main_end = my_main_start + if is_horizontal { sg.width } else { sg.height };
+            let my_cross_start = if is_horizontal { sg.y } else { sg.x };
+            let my_cross_end = my_cross_start + if is_horizontal { sg.height } else { sg.width };
+
+            for &prev_id in &by_main[..i] {
+                let Some(prev_sg) = bounds.get(prev_id) else {
+                    continue;
+                };
+                let prev_main_start = if is_horizontal { prev_sg.x } else { prev_sg.y }
+                    + main_shifts.get(prev_id).copied().unwrap_or(0.0);
+                let prev_main_end = prev_main_start
+                    + if is_horizontal {
+                        prev_sg.width
+                    } else {
+                        prev_sg.height
+                    };
+                let prev_cross_start = if is_horizontal { prev_sg.y } else { prev_sg.x };
+                let prev_cross_end = prev_cross_start
+                    + if is_horizontal {
+                        prev_sg.height
+                    } else {
+                        prev_sg.width
+                    };
+
+                // Check for 2D overlap (both axes)
+                let main_overlap = my_main_start < prev_main_end - overlap_epsilon
+                    && my_main_end > prev_main_start + overlap_epsilon;
+                let cross_overlap = my_cross_start < prev_cross_end - overlap_epsilon
+                    && my_cross_end > prev_cross_start + overlap_epsilon;
+
+                if main_overlap && cross_overlap {
+                    // Determine the smaller fix: push on main or cross axis.
+                    // If the main-axis overlap is small relative to the total main span,
+                    // push on the main axis (they're mostly stacked).
+                    let main_overlap_amount =
+                        my_main_end.min(prev_main_end) - my_main_start.max(prev_main_start);
+                    let my_main_size = my_main_end - my_main_start;
+                    let prev_main_size = prev_main_end - prev_main_start;
+                    let smaller_main = my_main_size.min(prev_main_size);
+
+                    // If overlap is less than half the smaller subgraph's main size,
+                    // it's a stacking situation — resolve on main axis.
+                    if main_overlap_amount < smaller_main * 0.5 {
+                        let needed = prev_main_end + gap - my_main_start;
+                        if needed > 0.0 {
+                            let cur = main_shifts.entry(id).or_insert(0.0);
+                            *cur = cur.max(needed);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Apply main-axis shifts
+        for (&sg_id, &delta) in &main_shifts {
+            if delta > overlap_epsilon {
+                shift_nodes_in_subgraph_main(nodes, membership, sg_id, delta, is_horizontal);
+            }
+        }
+
+        // --- Pass 2: resolve cross-axis overlaps (original logic) ---
+        // Recompute bounds after main-axis shifts by adjusting in-memory.
+        // We adjust the placed tracking to account for main shifts.
         let mut placed: Vec<(&str, f64, f64)> = Vec::new();
 
         for id in siblings {
@@ -221,33 +314,32 @@ pub fn separate_overlapping_sibling_subgraphs(
             let cross_size = if is_horizontal { sg.height } else { sg.width };
             let cross_end = cross_start + cross_size;
 
-            let main_start = if is_horizontal { sg.x } else { sg.y };
-            let main_end = if is_horizontal {
-                sg.x + sg.width
-            } else {
-                sg.y + sg.height
-            };
+            let main_shift = main_shifts.get(id).copied().unwrap_or(0.0);
+            let main_start = (if is_horizontal { sg.x } else { sg.y }) + main_shift;
+            let main_end = main_start + if is_horizontal { sg.width } else { sg.height };
 
             let mut required_cross_start = cross_start;
             for (placed_id, _placed_cross_start, placed_cross_end) in &placed {
                 let Some(placed_sg) = bounds.get(placed_id) else {
                     continue;
                 };
-                let placed_main_start = if is_horizontal {
+                let placed_main_shift = main_shifts.get(placed_id).copied().unwrap_or(0.0);
+                let placed_main_start = (if is_horizontal {
                     placed_sg.x
                 } else {
                     placed_sg.y
-                };
-                let placed_main_end = if is_horizontal {
-                    placed_sg.x + placed_sg.width
-                } else {
-                    placed_sg.y + placed_sg.height
-                };
+                }) + placed_main_shift;
+                let placed_main_end = placed_main_start
+                    + if is_horizontal {
+                        placed_sg.width
+                    } else {
+                        placed_sg.height
+                    };
 
                 let main_overlap = main_start < placed_main_end - overlap_epsilon
                     && main_end > placed_main_start + overlap_epsilon;
                 if main_overlap {
-                    required_cross_start = required_cross_start.max(*placed_cross_end + 8.0);
+                    required_cross_start = required_cross_start.max(*placed_cross_end + gap);
                 }
             }
 
@@ -290,6 +382,29 @@ fn shift_nodes_in_subgraph(
                 node.y += delta;
             } else {
                 node.x += delta;
+            }
+        }
+    }
+}
+
+/// Shift nodes in a subgraph along the main axis (y in TD, x in LR).
+fn shift_nodes_in_subgraph_main(
+    nodes: &mut [PositionedNode],
+    membership: &SubgraphMembership,
+    subgraph_id: &str,
+    delta: f64,
+    is_horizontal: bool,
+) {
+    for node in nodes {
+        let in_subgraph = membership
+            .get(&node.id)
+            .map(|path| path.iter().any(|sg| sg == subgraph_id))
+            .unwrap_or(false);
+        if in_subgraph {
+            if is_horizontal {
+                node.x += delta;
+            } else {
+                node.y += delta;
             }
         }
     }

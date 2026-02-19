@@ -1,32 +1,32 @@
 graph TD
     subgraph Platform
-        subgraph OrgPkg["Organization: Acme Holdings<br/>(id=org-123, plan=enterprise)"]
-            RootOU["<b>Root OU: Acme US</b><br/>id = ou-root-456<br/>geo = US<br/>ory_org_id = ory-org-aaa"]
-            EUOU["<b>Child OU: Acme EU</b><br/>id = ou-child-789<br/>geo = EU<br/>ory_org_id = ory-org-bbb"]
-            APACOU["<b>Child OU: Acme APAC</b><br/>id = ou-child-012<br/>geo = US<br/>ory_org_id = null"]
+        subgraph OrgPkg["Organization: Lorem Corp<br/>(id=org-001, plan=enterprise)"]
+            RootOU["<b>Root OU: Lorem US</b><br/>id = ou-root-001<br/>geo = US<br/>org_id = org-aaa"]
+            EUOU["<b>Child OU: Lorem EU</b><br/>id = ou-child-001<br/>geo = EU<br/>org_id = org-bbb"]
+            APACOU["<b>Child OU: Lorem APAC</b><br/>id = ou-child-002<br/>geo = US<br/>org_id = null"]
             RootOU -->|HAS_CHILD_OU| EUOU
             RootOU -->|HAS_CHILD_OU| APACOU
         end
 
-        subgraph OrgPkg2["Organization: Smallco<br/>(id=org-456, plan=free)"]
-            SmallOU["<b>Root OU: Smallco</b><br/>id = ou-root-999<br/>geo = US<br/>ory_org_id = ory-org-ccc"]
+        subgraph OrgPkg2["Organization: Ipsum Inc<br/>(id=org-002, plan=free)"]
+            SmallOU["<b>Root OU: Ipsum Inc</b><br/>id = ou-root-002<br/>geo = US<br/>org_id = org-ccc"]
         end
 
-        subgraph LEPkg1["Legal Entity: Acme Holdings Inc."]
-            LE1["<b>Acme Holdings Inc.</b><br/>id = le-001<br/>entityType = CORPORATION"]
-            D1["acme.com"]
+        subgraph LEPkg1["Legal Entity: Lorem Corp Holdings"]
+            LE1["<b>Lorem Corp Holdings</b><br/>id = le-001<br/>entityType = CORPORATION"]
+            D1["lorem.com"]
             LE1 -->|OWNS_DOMAIN| D1
         end
 
-        subgraph LEPkg2["Legal Entity: Acme EU GmbH"]
-            LE2["<b>Acme EU GmbH</b><br/>id = le-002<br/>entityType = LLC"]
-            D2["acme.eu"]
+        subgraph LEPkg2["Legal Entity: Lorem EU GmbH"]
+            LE2["<b>Lorem EU GmbH</b><br/>id = le-002<br/>entityType = LLC"]
+            D2["lorem.eu"]
             LE2 -->|OWNS_DOMAIN| D2
         end
 
-        subgraph LEPkg3["Legal Entity: Smallco LLC"]
-            LE3["<b>Smallco LLC</b><br/>id = le-003<br/>entityType = LLC"]
-            D3["smallco.io"]
+        subgraph LEPkg3["Legal Entity: Ipsum LLC"]
+            LE3["<b>Ipsum LLC</b><br/>id = le-003<br/>entityType = LLC"]
+            D3["ipsum.io"]
             LE3 -->|OWNS_DOMAIN| D3
         end
 
@@ -35,44 +35,44 @@ graph TD
         SmallOU -.->|REPRESENTS| LE3
     end
 
-    subgraph OryNetwork["Ory Network"]
-        subgraph OryUS["Ory Org: Acme US (ory-org-aaa)"]
-            OO1["<b>Ory Organization</b><br/>id = ory-org-aaa<br/>label = Acme US<br/>domains = acme.com"]
-            SSO1["<b>SAML Connection</b><br/>provider = Okta"]
-            ID1["Identity: alice@acme.com"]
-            ID2["Identity: bob@acme.com"]
+    subgraph OryNetwork["Identity Platform"]
+        subgraph OryUS["Org: Lorem US (org-aaa)"]
+            OO1["<b>Organization</b><br/>id = org-aaa<br/>label = Lorem US<br/>domains = lorem.com"]
+            SSO1["<b>SAML Connection</b><br/>provider = Provider A"]
+            ID1["Identity: user1@lorem.com"]
+            ID2["Identity: user2@lorem.com"]
             OO1 -->|SSO provider| SSO1
             OO1 -->|member| ID1
             OO1 -->|member| ID2
         end
 
-        subgraph OryEU["Ory Org: Acme EU (ory-org-bbb)"]
-            OO2["<b>Ory Organization</b><br/>id = ory-org-bbb<br/>label = Acme EU<br/>domains = acme.eu"]
-            SSO2["<b>OIDC Connection</b><br/>provider = Azure AD"]
-            ID3["Identity: carol@acme.eu"]
+        subgraph OryEU["Org: Lorem EU (org-bbb)"]
+            OO2["<b>Organization</b><br/>id = org-bbb<br/>label = Lorem EU<br/>domains = lorem.eu"]
+            SSO2["<b>OIDC Connection</b><br/>provider = Provider B"]
+            ID3["Identity: user3@lorem.eu"]
             OO2 -->|SSO provider| SSO2
             OO2 -->|member| ID3
         end
 
-        subgraph OrySmall["Ory Org: Smallco (ory-org-ccc)"]
-            OO3["<b>Ory Organization</b><br/>id = ory-org-ccc<br/>label = Smallco<br/>domains = smallco.io"]
-            ID4["Identity: dan@smallco.io"]
-            ID5["Identity: eve@smallco.io"]
+        subgraph OrySmall["Org: Ipsum Inc (org-ccc)"]
+            OO3["<b>Organization</b><br/>id = org-ccc<br/>label = Ipsum Inc<br/>domains = ipsum.io"]
+            ID4["Identity: user4@ipsum.io"]
+            ID5["Identity: user5@ipsum.io"]
             OO3 -->|member| ID4
             OO3 -->|member| ID5
         end
     end
 
     subgraph ExtIdPs["External Identity Providers"]
-        OktaIdP["Okta IdP"]
-        AzureIdP["Azure AD"]
+        OktaIdP["Provider A IdP"]
+        AzureIdP["Provider B IdP"]
     end
 
     %% Cross-references
-    RootOU ==>|ory_org_id| OO1
-    EUOU ==>|ory_org_id| OO2
+    RootOU ==>|org_id| OO1
+    EUOU ==>|org_id| OO2
     APACOU -.->|inherits from parent| OO1
-    SmallOU ==>|ory_org_id| OO3
+    SmallOU ==>|org_id| OO3
 
     D1 -->|configures domain| OO1
     D2 -->|configures domain| OO2
