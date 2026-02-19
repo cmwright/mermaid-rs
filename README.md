@@ -70,3 +70,14 @@ make clean-svgs    # Clean test output
 ```
 
 Test fixtures live in `tests/integration/fixtures/`.
+
+### Examples Comparison
+
+Generate an HTML page that compares mermaid-rs output against mermaid.js side by side:
+
+```bash
+make test-examples
+open target/examples-comparison.html
+```
+
+This renders a set of example diagrams and produces a three-column view (input, mermaid-rs, mermaid.js) so you can visually compare the results in your browser.
