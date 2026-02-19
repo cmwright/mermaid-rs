@@ -317,7 +317,12 @@ fn widen_for_messages(
                     if msg.from == msg.to {
                         continue; // self-messages don't affect gaps
                     }
-                    let label_w = measurer.measure(&msg.label).width + 20.0;
+                    let normalized = html_util::normalize_br(&msg.label);
+                    let label_w = if normalized.contains('\n') {
+                        measurer.measure_multiline(&normalized, 2.0).width + 20.0
+                    } else {
+                        measurer.measure(&normalized).width + 20.0
+                    };
                     if let (Some(&from_idx), Some(&to_idx)) = (
                         actor_idx.get(msg.from.as_str()),
                         actor_idx.get(msg.to.as_str()),
@@ -407,6 +412,14 @@ fn layout_statements(
                     .map(|&i| actor_infos[i].center_x)
                     .unwrap_or(0.0);
                 let is_self = msg.from == msg.to;
+                let normalized_label = html_util::normalize_br(&msg.label);
+
+                // Add extra vertical space for multiline labels
+                let label_lines: Vec<&str> = normalized_label.split('\n').collect();
+                if label_lines.len() > 1 {
+                    let extra_lines = (label_lines.len() - 1) as f64;
+                    *cursor_y += extra_lines * 14.0; // ~14px per extra line
+                }
 
                 *msg_number += 1;
                 let number = if autonumber { Some(*msg_number) } else { None };
@@ -416,7 +429,7 @@ fn layout_statements(
                     to_x,
                     y: *cursor_y,
                     arrow: msg.arrow,
-                    label: msg.label.clone(),
+                    label: normalized_label,
                     is_self,
                     self_width: SELF_MSG_WIDTH,
                     self_height: SELF_MSG_HEIGHT,
@@ -660,7 +673,12 @@ fn compute_block_bounds(
                         // For self-messages, calculate left and right extents including centered label
                         if msg.from == msg.to {
                             if let Some(actor) = actor_infos.get(i) {
-                                let label_width = measurer.measure(&msg.label).width;
+                                let normalized = html_util::normalize_br(&msg.label);
+                                let label_width = if normalized.contains('\n') {
+                                    measurer.measure_multiline(&normalized, 2.0).width
+                                } else {
+                                    measurer.measure(&normalized).width
+                                };
                                 // Label is centered above the self-message arrow
                                 // Self-message spans from actor.center_x to actor.center_x + SELF_MSG_WIDTH
                                 // Label is centered at actor.center_x + SELF_MSG_WIDTH / 2

@@ -444,33 +444,59 @@ fn render_message_line(svg: &mut String, msg: &PositionedMessage, theme: &Theme)
 }
 
 fn render_message_label(svg: &mut String, msg: &PositionedMessage, theme: &Theme) {
-    if msg.is_self {
-        // Self-message label centered above the self-message
-        let x = msg.from_x;
-        let sw = msg.self_width;
-        let y1 = msg.y;
-        let mid_x = x + sw / 2.0;
+    let mid_x = if msg.is_self {
+        msg.from_x + msg.self_width / 2.0
+    } else {
+        (msg.from_x + msg.to_x) / 2.0
+    };
+    let base_y = msg.y - 5.0;
+    let text_color = theme.text_color.to_css();
+
+    // Label is already normalized (br -> \n) in the layout phase
+    let lines: Vec<&str> = msg.label.split('\n').collect();
+
+    if lines.len() == 1 {
         let _ = write!(
             svg,
             r#"<text class="seq-label" x="{}" y="{}" text-anchor="middle" dominant-baseline="auto" fill="{}">{}</text>"#,
             mid_x,
-            y1 - 5.0,
-            theme.text_color.to_css(),
-            escape_xml(&msg.label),
+            base_y,
+            text_color,
+            escape_xml(lines[0]),
         );
         svg.push('\n');
     } else {
-        // Regular message label centered above the arrow
-        let mid_x = (msg.from_x + msg.to_x) / 2.0;
+        let line_height = 1.2_f64;
+        // Position so that the last line sits at base_y (just above the arrow)
+        let start_dy = -((lines.len() as f64 - 1.0) * line_height);
+
         let _ = write!(
             svg,
-            r#"<text class="seq-label" x="{}" y="{}" text-anchor="middle" dominant-baseline="auto" fill="{}">{}</text>"#,
-            mid_x,
-            msg.y - 5.0,
-            theme.text_color.to_css(),
-            escape_xml(&msg.label),
+            r#"<text class="seq-label" x="{}" y="{}" text-anchor="middle" fill="{}">"#,
+            mid_x, base_y, text_color,
         );
         svg.push('\n');
+        for (i, line) in lines.iter().enumerate() {
+            if i == 0 {
+                let _ = write!(
+                    svg,
+                    r#"  <tspan x="{}" dy="{}em">{}</tspan>"#,
+                    mid_x,
+                    start_dy,
+                    escape_xml(line),
+                );
+            } else {
+                let _ = write!(
+                    svg,
+                    r#"  <tspan x="{}" dy="{}em">{}</tspan>"#,
+                    mid_x,
+                    line_height,
+                    escape_xml(line),
+                );
+            }
+            svg.push('\n');
+        }
+        svg.push_str("</text>\n");
     }
 }
 

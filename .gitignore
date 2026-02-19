@@ -1,3 +1,4 @@
 target/
 .opencode.json
 tmp/
+.DS_Store

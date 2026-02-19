@@ -1,4 +1,5 @@
 pub mod flowchart;
+pub mod gantt;
 pub mod gitgraph;
 pub mod mindmap;
 pub mod pie;
@@ -10,6 +11,7 @@ use crate::error::{MermaidError, Result};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagramKind {
     Flowchart,
+    Gantt,
     GitGraph,
     Mindmap,
     Pie,
@@ -27,6 +29,10 @@ pub fn detect_diagram_kind(source: &str) -> Result<DiagramKind> {
         // Skip directives (but don't skip lines starting with %%{ that aren't on their own line)
         if trimmed.starts_with("%%{") {
             continue;
+        }
+
+        if trimmed.starts_with("gantt") {
+            return Ok(DiagramKind::Gantt);
         }
 
         if trimmed.starts_with("gitGraph") {
@@ -98,6 +104,14 @@ mod tests {
         assert_eq!(
             detect_diagram_kind("sequenceDiagram\n    A->>B: Hello").unwrap(),
             DiagramKind::Sequence
+        );
+    }
+
+    #[test]
+    fn test_detect_gantt() {
+        assert_eq!(
+            detect_diagram_kind("gantt\n    title Test\n    dateFormat YYYY-MM-DD").unwrap(),
+            DiagramKind::Gantt
         );
     }
 

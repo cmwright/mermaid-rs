@@ -1,6 +1,6 @@
 use crate::error::Result;
 use crate::layout::mindmap::*;
-use crate::render::svg_util::{build_basis_curve_path, escape_xml};
+use crate::render::svg_util::escape_xml;
 use crate::render::theme::Theme;
 
 use crate::ast::mindmap::MindmapNodeShape;
@@ -50,7 +50,8 @@ pub fn render_svg(layout: &MindmapLayout, theme: &Theme) -> Result<String> {
         r#"<style>
   svg {{ background: {}; }}
   .mindmap-node text {{ font-family: {}; font-size: {}px; fill: {}; }}
-  .mindmap-edge {{ fill: none; stroke-width: 2; }}
+  .mindmap-root text {{ fill: white; }}
+  .mindmap-edge {{ fill: none; }}
 </style>"#,
         theme.background.to_css(),
         theme.font_family,
@@ -82,28 +83,44 @@ pub fn render_svg(layout: &MindmapLayout, theme: &Theme) -> Result<String> {
     Ok(svg)
 }
 
+fn edge_stroke_width(depth: usize) -> f64 {
+    // Thicker near root, tapering toward leaves (matches mermaid.js)
+    match depth {
+        0 => 6.0,
+        1 => 4.0,
+        2 => 2.5,
+        _ => 1.5,
+    }
+}
+
 fn render_edge(edge: &MindmapEdge) -> String {
     let stroke = section_stroke(edge.section);
-    let path = build_basis_curve_path(&edge.points);
+    let width = edge_stroke_width(edge.depth);
+    let (x1, y1) = edge.points[0];
+    let (x2, y2) = *edge.points.last().unwrap();
     format!(
-        r##"<path class="mindmap-edge" d="{}" stroke="{}" stroke-opacity="0.5"/>"##,
-        path, stroke,
+        r##"<line class="mindmap-edge" x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="{}" stroke-opacity="0.7"/>"##,
+        x1, y1, x2, y2, stroke, width,
     ) + "\n"
 }
 
 fn render_node(node: &PositionedMindmapNode) -> String {
     let mut s = String::new();
 
+    let class = if node.depth == 0 {
+        "mindmap-node mindmap-root"
+    } else {
+        "mindmap-node"
+    };
     s.push_str(&format!(
-        r#"<g class="mindmap-node" transform="translate({}, {})">"#,
-        node.x, node.y,
+        r#"<g class="{}" transform="translate({}, {})">"#,
+        class, node.x, node.y,
     ));
     s.push('\n');
 
-    // Draw shape
+    // Draw shape — root uses dark fill (stroke color) for prominence
     let fill = if node.depth == 0 {
-        // Root gets a distinct fill
-        section_fill(0)
+        section_stroke(0)
     } else {
         section_fill(node.section)
     };
@@ -115,7 +132,8 @@ fn render_node(node: &PositionedMindmapNode) -> String {
 
     match node.shape {
         MindmapNodeShape::Default => {
-            s.push_str(&render_default(node, stroke));
+            // In mindmaps, bare text nodes get a rounded rect (matches mermaid.js)
+            s.push_str(&render_rounded_rect(node, fill, stroke));
         }
         MindmapNodeShape::Rect => {
             s.push_str(&render_rect(node, fill, stroke));
@@ -142,20 +160,6 @@ fn render_node(node: &PositionedMindmapNode) -> String {
 
     s.push_str("</g>\n");
     s
-}
-
-fn render_default(node: &PositionedMindmapNode, stroke: &str) -> String {
-    // No background, just a bottom line
-    let w = node.width;
-    let h = node.height;
-    format!(
-        r##"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="2"/>"##,
-        -w / 2.0,
-        h / 2.0,
-        w / 2.0,
-        h / 2.0,
-        stroke,
-    ) + "\n"
 }
 
 fn render_rect(node: &PositionedMindmapNode, fill: &str, stroke: &str) -> String {

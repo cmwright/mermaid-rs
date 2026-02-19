@@ -4,13 +4,18 @@ use crate::layout::text_measure::TextMeasurer;
 use crate::render::html_util::normalize_br;
 use crate::render::theme::Theme;
 
+use std::f64::consts::PI;
+
 // ── Constants ──────────────────────────────────────────────────────────
 
-const H_SPACING: f64 = 60.0;
-const V_SPACING: f64 = 20.0;
-const NODE_PAD_H: f64 = 16.0;
+const LEVEL1_RADIUS: f64 = 130.0; // Distance from root center to first-level children
+const LEVEL_GAP: f64 = 30.0; // Minimum gap between parent and child edges
+const SIBLING_GAP: f64 = 20.0; // Gap between siblings perpendicular to outward direction
+const NODE_PAD_H: f64 = 21.0;
 const NODE_PAD_V: f64 = 10.0;
 const DIAGRAM_PADDING: f64 = 30.0;
+const ROOT_MIN_DIM: f64 = 70.0; // Minimum dimension for root circle
+const MAX_TEXT_WIDTH: f64 = 190.0; // Max text width before word-wrapping
 
 // ── Output types ───────────────────────────────────────────────────────
 
@@ -43,6 +48,7 @@ pub struct MindmapEdge {
     pub to_id: String,
     pub points: Vec<(f64, f64)>,
     pub section: usize,
+    pub depth: usize, // depth of the parent node (0 = from root)
 }
 
 // ── Internal sizing ────────────────────────────────────────────────────
@@ -53,7 +59,7 @@ struct SizedNode {
     shape: MindmapNodeShape,
     width: f64,
     height: f64,
-    subtree_height: f64,
+    subtree_span: f64, // perpendicular span needed for this subtree
     icon: Option<String>,
     css_class: Option<String>,
     children: Vec<SizedNode>,
@@ -66,23 +72,25 @@ pub fn layout_mindmap(
     measurer: &TextMeasurer,
     _theme: &Theme,
 ) -> Result<MindmapLayout> {
-    // Phase 1: measure all nodes and compute subtree sizes
-    let sized = measure_node(&ast.root, measurer);
+    // Phase 1: measure all nodes and compute subtree spans
+    let mut sized = measure_node(&ast.root, measurer);
 
-    // Phase 2: position nodes using left-right balanced tree
+    // Make root node larger and circular (prominent center circle)
+    let root_dim = sized.width.max(sized.height).max(ROOT_MIN_DIM);
+    sized.width = root_dim;
+    sized.height = root_dim;
+
+    // Phase 2: radial positioning
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
 
-    // Root at origin (we'll normalize later)
-    let root_x = 0.0;
-    let root_y = 0.0;
-
+    // Root at origin
     nodes.push(PositionedMindmapNode {
         id: sized.id.clone(),
         label: sized.label.clone(),
         shape: sized.shape,
-        x: root_x,
-        y: root_y,
+        x: 0.0,
+        y: 0.0,
         width: sized.width,
         height: sized.height,
         section: 0,
@@ -91,36 +99,16 @@ pub fn layout_mindmap(
         css_class: sized.css_class.clone(),
     });
 
-    // Split first-level children into left and right groups
-    let child_count = sized.children.len();
-    let right_count = child_count.div_ceil(2); // more on right if odd
-    let (right_children, left_children) = sized.children.split_at(right_count);
-
-    // Position right-side children
-    position_children(
-        right_children,
-        &sized.id,
-        root_x,
-        root_y,
-        sized.width,
-        true, // right side
-        1,
-        &mut nodes,
-        &mut edges,
-    );
-
-    // Position left-side children
-    position_children(
-        left_children,
-        &sized.id,
-        root_x,
-        root_y,
-        sized.width,
-        false, // left side
-        right_count,
-        &mut nodes,
-        &mut edges,
-    );
+    if !sized.children.is_empty() {
+        // Distribute ALL children around the full 360° circle,
+        // each getting angular space proportional to its subtree weight.
+        position_first_level(
+            &sized.children,
+            &sized.id,
+            &mut nodes,
+            &mut edges,
+        );
+    }
 
     // Phase 3: normalize coordinates (shift so min x/y = DIAGRAM_PADDING)
     let min_x = nodes
@@ -166,6 +154,10 @@ pub fn layout_mindmap(
 
 fn measure_node(node: &MindmapNode, measurer: &TextMeasurer) -> SizedNode {
     let label = normalize_br(&node.label);
+
+    // Word-wrap long labels to keep nodes compact
+    let label = word_wrap(&label, measurer, MAX_TEXT_WIDTH);
+
     let text_metrics = measurer.measure_multiline(&label, 2.0);
 
     let (pad_h, pad_v) = shape_padding(node.shape);
@@ -178,12 +170,16 @@ fn measure_node(node: &MindmapNode, measurer: &TextMeasurer) -> SizedNode {
         .map(|c| measure_node(c, measurer))
         .collect();
 
-    let subtree_h = if children.is_empty() {
-        node_h
+    // Use the diagonal (max possible perpendicular extent) as the span estimate.
+    // Since branches can go in any direction around the circle, we can't assume
+    // perpendicular is purely vertical. The diagonal covers the worst case.
+    let node_diag = (node_w * node_w + node_h * node_h).sqrt();
+    let subtree_span = if children.is_empty() {
+        node_diag
     } else {
-        let children_total: f64 = children.iter().map(|c| c.subtree_height).sum::<f64>()
-            + V_SPACING * (children.len() as f64 - 1.0);
-        node_h.max(children_total)
+        let children_total: f64 = children.iter().map(|c| c.subtree_span).sum::<f64>()
+            + SIBLING_GAP * (children.len() as f64 - 1.0);
+        node_diag.max(children_total)
     };
 
     SizedNode {
@@ -192,11 +188,54 @@ fn measure_node(node: &MindmapNode, measurer: &TextMeasurer) -> SizedNode {
         shape: node.shape,
         width: node_w,
         height: node_h,
-        subtree_height: subtree_h,
+        subtree_span,
         icon: node.icon.clone(),
         css_class: node.css_class.clone(),
         children,
     }
+}
+
+/// Word-wrap text so no single line exceeds `max_width` pixels.
+/// Preserves existing line breaks and only splits at word boundaries.
+/// Uses incremental width tracking — each word is measured once.
+fn word_wrap(text: &str, measurer: &TextMeasurer, max_width: f64) -> String {
+    let space_width = measurer.measure(" ").width;
+    let mut result_lines: Vec<String> = Vec::new();
+
+    for line in text.lines() {
+        let words: Vec<&str> = line.split_whitespace().collect();
+        if words.is_empty() {
+            result_lines.push(String::new());
+            continue;
+        }
+
+        let mut current_line = String::new();
+        let mut current_width = 0.0_f64;
+
+        for word in &words {
+            let word_width = measurer.measure(word).width;
+            if current_line.is_empty() {
+                current_line.push_str(word);
+                current_width = word_width;
+            } else {
+                let new_width = current_width + space_width + word_width;
+                if new_width <= max_width {
+                    current_line.push(' ');
+                    current_line.push_str(word);
+                    current_width = new_width;
+                } else {
+                    result_lines.push(current_line);
+                    current_line = word.to_string();
+                    current_width = word_width;
+                }
+            }
+        }
+        if !current_line.is_empty() {
+            result_lines.push(current_line);
+        }
+    }
+
+    result_lines.join("\n")
 }
 
 fn shape_padding(shape: MindmapNodeShape) -> (f64, f64) {
@@ -209,17 +248,19 @@ fn shape_padding(shape: MindmapNodeShape) -> (f64, f64) {
     }
 }
 
-// ── Phase 2: Position ──────────────────────────────────────────────────
+// ── Phase 2: Radial Position ──────────────────────────────────────────
 
-#[allow(clippy::too_many_arguments)]
-fn position_children(
+fn count_descendants(node: &SizedNode) -> usize {
+    let mut count = node.children.len();
+    for child in &node.children {
+        count += count_descendants(child);
+    }
+    count
+}
+
+fn position_first_level(
     children: &[SizedNode],
-    parent_id: &str,
-    parent_x: f64,
-    parent_y: f64,
-    parent_w: f64,
-    right_side: bool,
-    section_offset: usize,
+    root_id: &str,
     nodes: &mut Vec<PositionedMindmapNode>,
     edges: &mut Vec<MindmapEdge>,
 ) {
@@ -227,34 +268,31 @@ fn position_children(
         return;
     }
 
-    // Total height of all children subtrees
-    let total_h: f64 = children.iter().map(|c| c.subtree_height).sum::<f64>()
-        + V_SPACING * (children.len() as f64 - 1.0);
+    // Distribute children around the full 2*PI circle.
+    // Weight by descendant count so branches with more nodes get more angular room.
+    let weights: Vec<f64> = children
+        .iter()
+        .map(|c| count_descendants(c) as f64 + 1.0)
+        .collect();
+    let total_weight: f64 = weights.iter().sum();
 
-    // Start y so children are centered around parent
-    let mut current_y = parent_y - total_h / 2.0;
+    // Start from upper-right and go clockwise
+    let mut current_angle = -PI / 2.0;
 
     for (i, child) in children.iter().enumerate() {
-        let section = if right_side {
-            i
-        } else {
-            section_offset + i
-        };
+        let sector = 2.0 * PI * weights[i] / total_weight;
+        let angle = current_angle + sector / 2.0;
 
-        let child_center_y = current_y + child.subtree_height / 2.0;
-
-        let child_x = if right_side {
-            parent_x + parent_w / 2.0 + H_SPACING + child.width / 2.0
-        } else {
-            parent_x - parent_w / 2.0 - H_SPACING - child.width / 2.0
-        };
+        let child_x = LEVEL1_RADIUS * angle.cos();
+        let child_y = LEVEL1_RADIUS * angle.sin();
+        let section = i;
 
         nodes.push(PositionedMindmapNode {
             id: child.id.clone(),
             label: child.label.clone(),
             shape: child.shape,
             x: child_x,
-            y: child_center_y,
+            y: child_y,
             width: child.width,
             height: child.height,
             section,
@@ -263,57 +301,43 @@ fn position_children(
             css_class: child.css_class.clone(),
         });
 
-        // Edge from parent to child
-        let edge_start_x = if right_side {
-            parent_x + parent_w / 2.0
-        } else {
-            parent_x - parent_w / 2.0
-        };
-        let edge_end_x = if right_side {
-            child_x - child.width / 2.0
-        } else {
-            child_x + child.width / 2.0
-        };
-        let mid_x = (edge_start_x + edge_end_x) / 2.0;
-
+        // Straight edge from root to child
         edges.push(MindmapEdge {
-            from_id: parent_id.to_string(),
+            from_id: root_id.to_string(),
             to_id: child.id.clone(),
-            points: vec![
-                (edge_start_x, parent_y),
-                (mid_x, parent_y),
-                (mid_x, child_center_y),
-                (edge_end_x, child_center_y),
-            ],
+            points: vec![(0.0, 0.0), (child_x, child_y)],
             section,
+            depth: 0,
         });
 
-        // Recurse into grandchildren
-        position_subtree(
+        // Recurse into subtree
+        position_subtree_radial(
             &child.children,
             &child.id,
             child_x,
-            child_center_y,
+            child_y,
             child.width,
-            right_side,
+            child.height,
+            angle,
             section,
             2,
             nodes,
             edges,
         );
 
-        current_y += child.subtree_height + V_SPACING;
+        current_angle += sector;
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn position_subtree(
+fn position_subtree_radial(
     children: &[SizedNode],
     parent_id: &str,
     parent_x: f64,
     parent_y: f64,
     parent_w: f64,
-    right_side: bool,
+    parent_h: f64,
+    outward_angle: f64,
     section: usize,
     depth: usize,
     nodes: &mut Vec<PositionedMindmapNode>,
@@ -323,26 +347,51 @@ fn position_subtree(
         return;
     }
 
-    let total_h: f64 = children.iter().map(|c| c.subtree_height).sum::<f64>()
-        + V_SPACING * (children.len() as f64 - 1.0);
+    // Outward and perpendicular unit vectors
+    let out_dx = outward_angle.cos();
+    let out_dy = outward_angle.sin();
+    let perp_dx = -outward_angle.sin();
+    let perp_dy = outward_angle.cos();
 
-    let mut current_y = parent_y - total_h / 2.0;
+    // Angle-aware perpendicular extent: the perpendicular direction depends on outward_angle.
+    // For each child, compute the actual perpendicular extent of its bounding box.
+    let cos_a = outward_angle.cos().abs();
+    let sin_a = outward_angle.sin().abs();
 
-    for child in children {
-        let child_center_y = current_y + child.subtree_height / 2.0;
+    // Compute effective perpendicular spans for each child
+    let effective_spans: Vec<f64> = children
+        .iter()
+        .map(|c| {
+            // Perpendicular extent of this node's bounding box
+            let node_perp = c.width * sin_a + c.height * cos_a;
+            // Use the larger of the pre-computed subtree span or the angle-aware extent
+            c.subtree_span.max(node_perp)
+        })
+        .collect();
 
-        let child_x = if right_side {
-            parent_x + parent_w / 2.0 + H_SPACING + child.width / 2.0
-        } else {
-            parent_x - parent_w / 2.0 - H_SPACING - child.width / 2.0
-        };
+    let total_span: f64 =
+        effective_spans.iter().sum::<f64>() + SIBLING_GAP * (children.len() as f64 - 1.0);
+
+    let mut current_perp = -total_span / 2.0;
+
+    for (idx, child) in children.iter().enumerate() {
+        let span = effective_spans[idx];
+        let child_perp_mid = current_perp + span / 2.0;
+
+        // Angle-aware clearance: compute half-extent of each rectangle in the outward direction
+        let parent_r = parent_w / 2.0 * cos_a + parent_h / 2.0 * sin_a;
+        let child_r = child.width / 2.0 * cos_a + child.height / 2.0 * sin_a;
+        let outward_dist = parent_r + LEVEL_GAP + child_r;
+
+        let child_x = parent_x + out_dx * outward_dist + perp_dx * child_perp_mid;
+        let child_y = parent_y + out_dy * outward_dist + perp_dy * child_perp_mid;
 
         nodes.push(PositionedMindmapNode {
             id: child.id.clone(),
             label: child.label.clone(),
             shape: child.shape,
             x: child_x,
-            y: child_center_y,
+            y: child_y,
             width: child.width,
             height: child.height,
             section,
@@ -351,45 +400,30 @@ fn position_subtree(
             css_class: child.css_class.clone(),
         });
 
-        // Edge
-        let edge_start_x = if right_side {
-            parent_x + parent_w / 2.0
-        } else {
-            parent_x - parent_w / 2.0
-        };
-        let edge_end_x = if right_side {
-            child_x - child.width / 2.0
-        } else {
-            child_x + child.width / 2.0
-        };
-        let mid_x = (edge_start_x + edge_end_x) / 2.0;
-
+        // Straight edge from parent to child
         edges.push(MindmapEdge {
             from_id: parent_id.to_string(),
             to_id: child.id.clone(),
-            points: vec![
-                (edge_start_x, parent_y),
-                (mid_x, parent_y),
-                (mid_x, child_center_y),
-                (edge_end_x, child_center_y),
-            ],
+            points: vec![(parent_x, parent_y), (child_x, child_y)],
             section,
+            depth,
         });
 
-        // Recurse
-        position_subtree(
+        // Recurse with same outward angle
+        position_subtree_radial(
             &child.children,
             &child.id,
             child_x,
-            child_center_y,
+            child_y,
             child.width,
-            right_side,
+            child.height,
+            outward_angle,
             section,
             depth + 1,
             nodes,
             edges,
         );
 
-        current_y += child.subtree_height + V_SPACING;
+        current_perp += span + SIBLING_GAP;
     }
 }

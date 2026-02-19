@@ -1,0 +1,50 @@
+// Mermaid Gantt Chart PEG Grammar
+// Task data fields are captured as raw strings and parsed programmatically
+// (tag/id/date/duration parsing is too context-sensitive for PEG alone)
+
+gantt_chart = {
+    SOI ~ NEWLINE* ~ "gantt" ~ NEWLINE ~
+    (line ~ NEWLINE)* ~ line? ~
+    NEWLINE* ~ EOI
+}
+
+line = _{ comment | directive | section_line | task_line | empty_line }
+
+empty_line = _{ "" }
+
+comment = { "%%" ~ comment_text }
+comment_text = @{ (!NEWLINE ~ ANY)* }
+
+directive = {
+    date_format_dir
+  | axis_format_dir
+  | title_dir
+  | excludes_dir
+  | includes_dir
+  | tick_interval_dir
+  | inclusive_end_dates_dir
+  | today_marker_dir
+}
+
+date_format_dir         = { "dateFormat" ~ dir_value }
+axis_format_dir         = { "axisFormat" ~ dir_value }
+title_dir               = { "title" ~ dir_value }
+excludes_dir            = { "excludes" ~ dir_value }
+includes_dir            = { "includes" ~ dir_value }
+tick_interval_dir       = { "tickInterval" ~ dir_value }
+inclusive_end_dates_dir  = { "inclusiveEndDates" }
+today_marker_dir        = { "todayMarker" ~ dir_value }
+
+dir_value = @{ (!NEWLINE ~ ANY)+ }
+
+section_line = { "section" ~ section_name }
+section_name = @{ (!NEWLINE ~ ANY)+ }
+
+task_line = { task_name ~ ":" ~ task_data }
+task_name = @{ (!":" ~ !NEWLINE ~ ANY)+ }
+task_data = @{ (!NEWLINE ~ ANY)* }
+
+// ── Primitives ──────────────────────────────────────────────
+
+WHITESPACE = _{ " " | "\t" }
+NEWLINE    = _{ "\r\n" | "\n" | "\r" }

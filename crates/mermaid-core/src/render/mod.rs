@@ -1,6 +1,7 @@
 pub mod html_util;
 pub mod png;
 pub mod svg_flowchart;
+pub mod svg_gantt;
 pub mod svg_gitgraph;
 pub mod svg_mindmap;
 pub mod svg_pie;

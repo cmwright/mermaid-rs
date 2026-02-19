@@ -8,6 +8,7 @@ pest = "2.7"
 pest_derive = "2.7"
 petgraph = "0.8"
 ab_glyph = "0.2"
+chrono = "0.4"
 thiserror.workspace = true
 log.workspace = true
 resvg = "0.44"
@@ -23,4 +24,8 @@ harness = false
 
 [[bench]]
 name = "sequence_bench"
+harness = false
+
+[[bench]]
+name = "gantt_bench"
 harness = false
