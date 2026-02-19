@@ -1,0 +1,58 @@
+// Mindmap grammar — operates on preprocessed input where indentation
+// has been converted to \x01 (INDENT) and \x02 (DEDENT) markers.
+// Newlines are in WHITESPACE since structure is purely marker-based.
+
+mindmap_doc = { SOI ~ block ~ EOI }
+
+block = { INDENT ~ statement* ~ DEDENT }
+
+statement = { decorator_line | node_line }
+
+decorator_line = { icon_decorator | class_decorator }
+
+node_line = { node_content ~ decorator* ~ block? }
+
+node_content = {
+    node_id? ~ (circle_node | bang_node | cloud_node | hexagon_node
+    | rounded_rect_node | rect_node)
+  | bare_node
+}
+
+// Node ID: alphanumeric identifier immediately before a shape delimiter
+node_id = @{ (ASCII_ALPHANUMERIC | "_")+ ~ &shape_start }
+shape_start = _{ "((" | "))" | "{{" | ")" | "(" | "[" }
+
+circle_node       = { "((" ~ circle_text ~ "))" }
+bang_node          = { "))" ~ bang_text ~ "((" }
+cloud_node         = { ")" ~ cloud_text ~ "(" }
+hexagon_node       = { "{{" ~ hex_text ~ "}}" }
+rounded_rect_node  = { "(" ~ rounded_text ~ ")" }
+rect_node          = { "[" ~ rect_text ~ "]" }
+
+// Shape-specific text captures — stop at closing delimiter, newlines, and markers
+circle_text   = @{ (!("))")  ~ !line_end ~ ANY)+ }
+bang_text      = @{ (!("((") ~ !line_end ~ ANY)+ }
+cloud_text     = @{ (!("(")  ~ !line_end ~ ANY)+ }
+hex_text       = @{ (!("}}")  ~ !line_end ~ ANY)+ }
+rounded_text   = @{ (!(")")  ~ !line_end ~ ANY)+ }
+rect_text      = @{ (!("]")  ~ !line_end ~ ANY)+ }
+bare_node      = @{ (!decorator_start ~ !line_end ~ ANY)+ }
+
+// Decorators
+icon_decorator  = { "::icon(" ~ icon_value ~ ")" }
+class_decorator = { ":::" ~ class_name }
+icon_value = @{ (!(")")  ~ !line_end ~ ANY)* }
+class_name = @{ (ASCII_ALPHANUMERIC | "_" | "-" | " ")+ }
+
+decorator = _{ icon_decorator | class_decorator }
+decorator_start = _{ "::icon(" | ":::" }
+
+// Helper for line boundaries (newlines and INDENT/DEDENT markers)
+line_end = _{ "\r\n" | "\n" | "\r" | "\x01" | "\x02" }
+
+// INDENT/DEDENT markers
+INDENT  = { "\x01" }
+DEDENT  = { "\x02" }
+
+// Auto-consumed whitespace (includes newlines since structure uses markers)
+WHITESPACE = _{ " " | "\t" | "\r\n" | "\n" | "\r" }

@@ -64,18 +64,19 @@ fn sort_layer_by_barycenter(
     membership: &SubgraphMembership,
     empty_path: &Vec<String>,
 ) {
-    // Compute barycenter for each node
+    // Compute barycenter for each node, using enumeration index as fallback
     let barycenters: HashMap<NodeIndex, f64> = layer
         .iter()
-        .map(|&node| {
+        .enumerate()
+        .map(|(idx, &node)| {
             let neighbors: Vec<usize> = graph
                 .neighbors_directed(node, direction)
                 .filter_map(|n| adjacent_positions.get(&n).copied())
                 .collect();
 
             let bc = if neighbors.is_empty() {
-                // Keep current relative position as fallback
-                layer.iter().position(|&n| n == node).unwrap_or(0) as f64
+                // Keep current relative position as fallback (use index directly)
+                idx as f64
             } else {
                 neighbors.iter().sum::<usize>() as f64 / neighbors.len() as f64
             };
@@ -100,6 +101,7 @@ fn sort_layer_by_barycenter(
         };
 
         if !is_dummy {
+            // Linear scan is typically fastest for small group counts (1-5 groups per layer)
             if let Some(group) = groups.iter_mut().find(|(p, _)| *p == path) {
                 group.1.push(node);
             } else {

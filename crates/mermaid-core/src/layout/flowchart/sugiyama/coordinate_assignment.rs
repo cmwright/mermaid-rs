@@ -19,9 +19,10 @@ pub fn assign_coordinates(
 ) -> HashMap<NodeIndex, (f64, f64)> {
     let is_horizontal = matches!(direction, Direction::LeftToRight | Direction::RightToLeft);
     let empty_path: Vec<String> = Vec::new();
+    let total_nodes: usize = layers.iter().map(|l| l.len()).sum();
 
     // ── Main-axis placement ──
-    let mut main_pos: HashMap<NodeIndex, f64> = HashMap::new();
+    let mut main_pos: HashMap<NodeIndex, f64> = HashMap::with_capacity(total_nodes);
     let mut rank_offset = 0.0;
     for layer in layers {
         let max_thick = layer
@@ -44,7 +45,7 @@ pub fn assign_coordinates(
     let cross_pos = brandes_kopf(graph, layers, is_horizontal, membership, &empty_path);
 
     // ── Combine ──
-    let mut positions: HashMap<NodeIndex, (f64, f64)> = HashMap::new();
+    let mut positions: HashMap<NodeIndex, (f64, f64)> = HashMap::with_capacity(total_nodes);
     for &idx in layers.iter().flat_map(|l| l.iter()) {
         let m = main_pos[&idx];
         let c = cross_pos.get(&idx).copied().unwrap_or(0.0);
@@ -97,32 +98,34 @@ fn brandes_kopf(
 ) -> HashMap<NodeIndex, f64> {
     let mut xss: Vec<HashMap<NodeIndex, f64>> = Vec::with_capacity(4);
 
+    // Pre-compute reversed layers once (instead of cloning in the loop)
+    let reversed_layers: Vec<Vec<NodeIndex>> = layers.iter().rev().cloned().collect();
+
     for vert in 0..2u8 {
         // vert=0: up (top-to-bottom layers, predecessors)
         // vert=1: down (bottom-to-top layers, successors)
-        let adjusted: Vec<Vec<NodeIndex>> = if vert == 0 {
-            layers.to_vec()
-        } else {
-            layers.iter().rev().cloned().collect()
-        };
+        let base_layers = if vert == 0 { layers } else { &reversed_layers };
 
         for horiz in 0..2u8 {
             // horiz=0: left (normal order), horiz=1: right (reversed)
-            let final_layers: Vec<Vec<NodeIndex>> = if horiz == 0 {
-                adjusted.clone()
+            // Build final_layers only when horiz=1 (reversed order within each layer)
+            let reversed_within: Vec<Vec<NodeIndex>>;
+            let final_layers: &[Vec<NodeIndex>] = if horiz == 0 {
+                base_layers
             } else {
-                adjusted
+                reversed_within = base_layers
                     .iter()
                     .map(|l| l.iter().rev().copied().collect())
-                    .collect()
+                    .collect();
+                &reversed_within
             };
 
             let use_preds = vert == 0;
-            let root = vertical_alignment(graph, &final_layers, use_preds);
+            let root = vertical_alignment(graph, final_layers, use_preds);
 
             let mut xs = horizontal_compaction(
                 graph,
-                &final_layers,
+                final_layers,
                 &root,
                 is_horizontal,
                 membership,
@@ -169,9 +172,10 @@ fn vertical_alignment(
     layers: &[Vec<NodeIndex>],
     use_predecessors: bool,
 ) -> HashMap<NodeIndex, NodeIndex> {
-    let mut root: HashMap<NodeIndex, NodeIndex> = HashMap::new();
-    let mut align: HashMap<NodeIndex, NodeIndex> = HashMap::new();
-    let mut pos: HashMap<NodeIndex, usize> = HashMap::new();
+    let total: usize = layers.iter().map(|l| l.len()).sum();
+    let mut root: HashMap<NodeIndex, NodeIndex> = HashMap::with_capacity(total);
+    let mut align: HashMap<NodeIndex, NodeIndex> = HashMap::with_capacity(total);
+    let mut pos: HashMap<NodeIndex, usize> = HashMap::with_capacity(total);
 
     for layer in layers {
         for (order, &v) in layer.iter().enumerate() {

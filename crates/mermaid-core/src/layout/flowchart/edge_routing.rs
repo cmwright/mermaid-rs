@@ -108,14 +108,45 @@ fn route_with_bend_points(
         points.push(last);
     }
 
+    // Compute bounding box of all points for early-rejection of distant nodes
+    let pad = 6.0;
+    let (mut bb_min_x, mut bb_min_y, mut bb_max_x, mut bb_max_y) = (
+        f64::INFINITY,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+        f64::NEG_INFINITY,
+    );
+    for &(px, py) in &points {
+        bb_min_x = bb_min_x.min(px);
+        bb_min_y = bb_min_y.min(py);
+        bb_max_x = bb_max_x.max(px);
+        bb_max_y = bb_max_y.max(py);
+    }
+    // Expand bounding box by padding to account for push distance
+    bb_min_x -= pad * 2.0;
+    bb_min_y -= pad * 2.0;
+    bb_max_x += pad * 2.0;
+    bb_max_y += pad * 2.0;
+
+    // Collect only nearby nodes that could actually overlap with the edge path
+    let nearby_nodes: Vec<&PositionedNode> = nodes
+        .iter()
+        .filter(|n| {
+            if n.id == from.id || n.id == to.id {
+                return false;
+            }
+            let n_min_x = n.x - n.width / 2.0 - pad;
+            let n_max_x = n.x + n.width / 2.0 + pad;
+            let n_min_y = n.y - n.height / 2.0 - pad;
+            let n_max_y = n.y + n.height / 2.0 + pad;
+            n_max_x > bb_min_x && n_min_x < bb_max_x && n_max_y > bb_min_y && n_min_y < bb_max_y
+        })
+        .collect();
+
     // Enforce clearance: push any control points that are inside or too close
     // to intermediate node boxes away to the nearest edge + padding.
-    let pad = 6.0;
     for pt in points.iter_mut() {
-        for n in nodes {
-            if n.id == from.id || n.id == to.id {
-                continue;
-            }
+        for n in &nearby_nodes {
             let min_x = n.x - n.width / 2.0 - pad;
             let max_x = n.x + n.width / 2.0 + pad;
             let min_y = n.y - n.height / 2.0 - pad;

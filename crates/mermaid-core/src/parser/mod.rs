@@ -1,5 +1,6 @@
 pub mod flowchart;
 pub mod gitgraph;
+pub mod mindmap;
 pub mod pie;
 pub mod sequence;
 
@@ -10,6 +11,7 @@ use crate::error::{MermaidError, Result};
 pub enum DiagramKind {
     Flowchart,
     GitGraph,
+    Mindmap,
     Pie,
     Sequence,
 }
@@ -33,6 +35,10 @@ pub fn detect_diagram_kind(source: &str) -> Result<DiagramKind> {
 
         if trimmed.starts_with("graph") || trimmed.starts_with("flowchart") {
             return Ok(DiagramKind::Flowchart);
+        }
+
+        if trimmed.starts_with("mindmap") {
+            return Ok(DiagramKind::Mindmap);
         }
 
         if trimmed.starts_with("pie") {

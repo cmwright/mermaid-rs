@@ -3,6 +3,7 @@ use crate::error::Result;
 use crate::font::FontProvider;
 use crate::layout::flowchart;
 use crate::layout::gitgraph;
+use crate::layout::mindmap;
 use crate::layout::pie;
 use crate::layout::sequence;
 use crate::layout::text_measure::TextMeasurer;
@@ -10,6 +11,7 @@ use crate::parser::{self, DiagramKind};
 use crate::render::png;
 use crate::render::svg_flowchart;
 use crate::render::svg_gitgraph;
+use crate::render::svg_mindmap;
 use crate::render::svg_pie;
 use crate::render::svg_sequence;
 use crate::render::theme::Theme;
@@ -103,6 +105,7 @@ pub fn render(source: &str, config: &RenderConfig) -> Result<RenderOutput> {
         DiagramKind::Flowchart => render_flowchart_svg(source, config)?,
         DiagramKind::GitGraph => render_gitgraph_svg(source, config)?,
         DiagramKind::Pie => render_pie_svg(source, config)?,
+        DiagramKind::Mindmap => render_mindmap_svg(source, config)?,
         DiagramKind::Sequence => render_sequence_svg(source, config)?,
     };
 
@@ -165,6 +168,21 @@ fn render_sequence_svg(source: &str, config: &RenderConfig) -> Result<String> {
 
     // 3. Render SVG
     let svg = svg_sequence::render_svg(&layout, &config.theme)?;
+
+    Ok(svg)
+}
+
+fn render_mindmap_svg(source: &str, config: &RenderConfig) -> Result<String> {
+    // 1. Parse
+    let ast = crate::parser::mindmap::parse_mindmap(source)?;
+
+    // 2. Layout
+    let font_ref = config.font_provider.font_ref()?;
+    let measurer = TextMeasurer::new(font_ref, config.theme.font_size as f32);
+    let layout = mindmap::layout_mindmap(&ast, &measurer, &config.theme)?;
+
+    // 3. Render SVG
+    let svg = svg_mindmap::render_svg(&layout, &config.theme)?;
 
     Ok(svg)
 }

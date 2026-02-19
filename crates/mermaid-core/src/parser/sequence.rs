@@ -47,6 +47,7 @@ fn process_seq_top_level(
         Rule::sequence_header => {}
         Rule::participant_stmt => {
             let p = parse_participant_stmt(pair, ParticipantKind::Participant)?;
+            // Use position-based check to avoid scanning (small N, but cleaner)
             if !ast.participants.iter().any(|x| x.id == p.id) {
                 ast.participants.push(p);
             }
@@ -58,51 +59,59 @@ fn process_seq_top_level(
             }
         }
         Rule::message_stmt => {
-            let msg = parse_message(pair)?;
-            ast.statements.push(SequenceStatement::Message(msg));
+            ast.statements
+                .push(SequenceStatement::Message(parse_message(pair)?));
         }
         Rule::activate_stmt => {
-            let id = extract_participant_id(pair);
-            ast.statements.push(SequenceStatement::Activate(id));
+            ast.statements
+                .push(SequenceStatement::Activate(extract_participant_id(pair)));
         }
         Rule::deactivate_stmt => {
-            let id = extract_participant_id(pair);
-            ast.statements.push(SequenceStatement::Deactivate(id));
+            ast.statements
+                .push(SequenceStatement::Deactivate(extract_participant_id(pair)));
         }
         Rule::autonumber_stmt => {
             ast.autonumber = true;
         }
         Rule::note_stmt => {
-            let note = parse_note(pair)?;
-            ast.statements.push(SequenceStatement::Note(note));
+            ast.statements
+                .push(SequenceStatement::Note(parse_note(pair)?));
         }
         Rule::block_alt => {
-            let block = parse_block(pair, BlockKind::Alt)?;
-            ast.statements.push(SequenceStatement::Block(block));
+            ast.statements
+                .push(SequenceStatement::Block(parse_block(pair, BlockKind::Alt)?));
         }
         Rule::block_loop => {
-            let block = parse_block(pair, BlockKind::Loop)?;
-            ast.statements.push(SequenceStatement::Block(block));
+            ast.statements.push(SequenceStatement::Block(parse_block(
+                pair,
+                BlockKind::Loop,
+            )?));
         }
         Rule::block_opt => {
-            let block = parse_block(pair, BlockKind::Opt)?;
-            ast.statements.push(SequenceStatement::Block(block));
+            ast.statements
+                .push(SequenceStatement::Block(parse_block(pair, BlockKind::Opt)?));
         }
         Rule::block_par => {
-            let block = parse_block(pair, BlockKind::Par)?;
-            ast.statements.push(SequenceStatement::Block(block));
+            ast.statements
+                .push(SequenceStatement::Block(parse_block(pair, BlockKind::Par)?));
         }
         Rule::block_critical => {
-            let block = parse_block(pair, BlockKind::Critical)?;
-            ast.statements.push(SequenceStatement::Block(block));
+            ast.statements.push(SequenceStatement::Block(parse_block(
+                pair,
+                BlockKind::Critical,
+            )?));
         }
         Rule::block_break => {
-            let block = parse_block(pair, BlockKind::Break)?;
-            ast.statements.push(SequenceStatement::Block(block));
+            ast.statements.push(SequenceStatement::Block(parse_block(
+                pair,
+                BlockKind::Break,
+            )?));
         }
         Rule::block_rect => {
-            let block = parse_block(pair, BlockKind::Rect)?;
-            ast.statements.push(SequenceStatement::Block(block));
+            ast.statements.push(SequenceStatement::Block(parse_block(
+                pair,
+                BlockKind::Rect,
+            )?));
         }
         _ => {}
     }
@@ -372,20 +381,66 @@ fn parse_section(
 
 fn parse_block_body(pair: pest::iterators::Pair<'_, Rule>) -> Result<Vec<SequenceStatement>> {
     let mut stmts = Vec::new();
-    // Create a temporary mini-AST to reuse the top-level parser
-    let mut temp_ast = SequenceAst::default();
 
     for inner in pair.into_inner() {
-        process_seq_top_level(&mut temp_ast, inner)?;
+        // Inline the statement processing instead of creating a temporary AST
+        match inner.as_rule() {
+            Rule::message_stmt => {
+                let msg = parse_message(inner)?;
+                stmts.push(SequenceStatement::Message(msg));
+            }
+            Rule::activate_stmt => {
+                let id = extract_participant_id(inner);
+                stmts.push(SequenceStatement::Activate(id));
+            }
+            Rule::deactivate_stmt => {
+                let id = extract_participant_id(inner);
+                stmts.push(SequenceStatement::Deactivate(id));
+            }
+            Rule::note_stmt => {
+                let note = parse_note(inner)?;
+                stmts.push(SequenceStatement::Note(note));
+            }
+            Rule::block_alt => {
+                let block = parse_block(inner, BlockKind::Alt)?;
+                stmts.push(SequenceStatement::Block(block));
+            }
+            Rule::block_loop => {
+                let block = parse_block(inner, BlockKind::Loop)?;
+                stmts.push(SequenceStatement::Block(block));
+            }
+            Rule::block_opt => {
+                let block = parse_block(inner, BlockKind::Opt)?;
+                stmts.push(SequenceStatement::Block(block));
+            }
+            Rule::block_par => {
+                let block = parse_block(inner, BlockKind::Par)?;
+                stmts.push(SequenceStatement::Block(block));
+            }
+            Rule::block_critical => {
+                let block = parse_block(inner, BlockKind::Critical)?;
+                stmts.push(SequenceStatement::Block(block));
+            }
+            Rule::block_break => {
+                let block = parse_block(inner, BlockKind::Break)?;
+                stmts.push(SequenceStatement::Block(block));
+            }
+            Rule::block_rect => {
+                let block = parse_block(inner, BlockKind::Rect)?;
+                stmts.push(SequenceStatement::Block(block));
+            }
+            _ => {}
+        }
     }
 
-    stmts.extend(temp_ast.statements);
     Ok(stmts)
 }
 
 /// Scan all messages for participant IDs not explicitly declared and add them
 /// in order of first appearance.
 fn resolve_implicit_participants(ast: &mut SequenceAst) {
+    // Use Vec for `seen` - participant counts are typically small (< 20),
+    // where linear scan outperforms HashSet due to lower overhead.
     let mut seen: Vec<String> = ast.participants.iter().map(|p| p.id.clone()).collect();
 
     fn scan_statements(

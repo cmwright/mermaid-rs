@@ -291,7 +291,8 @@ fn propagate_ranks_forward(
 }
 
 fn topological_sort(graph: &DiGraph<NodeData, EdgeData>) -> Vec<NodeIndex> {
-    let mut in_degree: HashMap<NodeIndex, usize> = HashMap::new();
+    let node_count = graph.node_count();
+    let mut in_degree: HashMap<NodeIndex, usize> = HashMap::with_capacity(node_count);
     for node in graph.node_indices() {
         in_degree.insert(node, 0);
     }
@@ -304,7 +305,7 @@ fn topological_sort(graph: &DiGraph<NodeData, EdgeData>) -> Vec<NodeIndex> {
         .node_indices()
         .filter(|n| *in_degree.get(n).unwrap_or(&0) == 0)
         .collect();
-    let mut result = Vec::new();
+    let mut result = Vec::with_capacity(node_count);
 
     while let Some(node) = queue.pop() {
         result.push(node);
@@ -319,9 +320,12 @@ fn topological_sort(graph: &DiGraph<NodeData, EdgeData>) -> Vec<NodeIndex> {
     }
 
     // Add any remaining nodes (in cycles — shouldn't happen after cycle removal)
-    for node in graph.node_indices() {
-        if !result.contains(&node) {
-            result.push(node);
+    if result.len() < node_count {
+        let visited: HashSet<NodeIndex> = result.iter().copied().collect();
+        for node in graph.node_indices() {
+            if !visited.contains(&node) {
+                result.push(node);
+            }
         }
     }
 
