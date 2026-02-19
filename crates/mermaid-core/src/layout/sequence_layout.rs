@@ -10,14 +10,16 @@ use std::collections::HashMap;
 const ACTOR_MARGIN: f64 = 50.0;
 const ACTOR_BOX_PAD_H: f64 = 16.0;
 const ACTOR_BOX_PAD_V: f64 = 8.0;
-const MESSAGE_SPACING: f64 = 40.0;
+const MESSAGE_SPACING: f64 = 20.0; // space before AND after each message arrow
 const SELF_MSG_WIDTH: f64 = 30.0;
 const SELF_MSG_HEIGHT: f64 = 28.0;
-const BLOCK_PADDING: f64 = 10.0;
-const BLOCK_HEADER_HEIGHT: f64 = 20.0;
+const BLOCK_PADDING: f64 = 10.0; // space at end of block
+const BLOCK_HEADER_HEIGHT: f64 = 25.0; // space for label tab area
+const BLOCK_SIDE_PADDING: f64 = 20.0;
+const BLOCK_NEST_INSET: f64 = 8.0;
 const NOTE_PADDING: f64 = 8.0;
 const NOTE_MAX_WIDTH: f64 = 200.0;
-const DIAGRAM_PADDING: f64 = 10.0;
+const DIAGRAM_PADDING: f64 = 30.0;
 const STICK_FIGURE_HEIGHT: f64 = 40.0;
 const STICK_FIGURE_LABEL_GAP: f64 = 4.0;
 
@@ -125,7 +127,7 @@ pub fn layout_sequence(
     // Phase C: Vertical layout
     let top_box_height = actor_infos.iter().map(|a| a.box_height).fold(0.0_f64, f64::max);
     let lifeline_start_y = DIAGRAM_PADDING + top_box_height;
-    let mut cursor_y = lifeline_start_y + 25.0;
+    let mut cursor_y = lifeline_start_y;
 
     let mut messages = Vec::new();
     let mut blocks: Vec<PositionedBlock> = Vec::new();
@@ -147,6 +149,7 @@ pub fn layout_sequence(
         &mut activations,
         &mut activation_stack,
         &mut msg_number,
+        0, // block_depth
     );
 
     // Close any unclosed activations
@@ -195,7 +198,7 @@ pub fn layout_sequence(
         });
     }
 
-    // Compute bounding box (consider actors and notes)
+    // Compute bounding box (consider actors, notes, and blocks)
     let rightmost_actor = actor_infos
         .iter()
         .map(|a| a.center_x + a.box_width / 2.0)
@@ -204,7 +207,11 @@ pub fn layout_sequence(
         .iter()
         .map(|n| n.x + n.width)
         .fold(0.0_f64, f64::max);
-    let width = rightmost_actor.max(rightmost_note) + DIAGRAM_PADDING;
+    let rightmost_block = blocks
+        .iter()
+        .map(|b| b.x + b.width)
+        .fold(0.0_f64, f64::max);
+    let width = rightmost_actor.max(rightmost_note).max(rightmost_block) + DIAGRAM_PADDING;
     let height = cursor_y;
 
     Ok(SequenceLayout {
@@ -379,10 +386,14 @@ fn layout_statements(
     activations: &mut Vec<PositionedActivation>,
     activation_stack: &mut HashMap<String, Vec<f64>>,
     msg_number: &mut usize,
+    block_depth: usize,
 ) {
     for stmt in statements {
         match stmt {
             SequenceStatement::Message(msg) => {
+                // Equal spacing before the arrow
+                *cursor_y += MESSAGE_SPACING;
+
                 let from_x = actor_idx
                     .get(msg.from.as_str())
                     .map(|&i| actor_infos[i].center_x)
@@ -430,10 +441,12 @@ fn layout_statements(
                     }
                 }
 
+                // Equal spacing after the arrow
+                *cursor_y += MESSAGE_SPACING;
+
+                // Self-messages need extra height for the loop
                 if is_self {
-                    *cursor_y += MESSAGE_SPACING + SELF_MSG_HEIGHT;
-                } else {
-                    *cursor_y += MESSAGE_SPACING;
+                    *cursor_y += SELF_MSG_HEIGHT;
                 }
             }
             SequenceStatement::Activate(id) => {
@@ -497,6 +510,7 @@ fn layout_statements(
                         activations,
                         activation_stack,
                         msg_number,
+                        block_depth + 1,
                     );
                 }
 
@@ -521,21 +535,26 @@ fn layout_statements(
                         activations,
                         activation_stack,
                         msg_number,
+                        block_depth + 1,
                     );
                 }
 
                 *cursor_y += BLOCK_PADDING;
 
-                // Compute block width from referenced actors
+                // Compute block width from referenced actors, inset by nesting depth
                 let (block_left, block_right) =
                     compute_block_bounds(block, actor_idx, actor_infos);
+
+                let inset = block_depth as f64 * BLOCK_NEST_INSET;
+                let block_x = (block_left - BLOCK_SIDE_PADDING + inset).max(2.0);
+                let block_w = (block_right + BLOCK_SIDE_PADDING - inset) - block_x;
 
                 blocks.push(PositionedBlock {
                     kind: block.kind,
                     label: block.label.clone(),
-                    x: block_left - BLOCK_PADDING,
+                    x: block_x,
                     y: block_start_y,
-                    width: (block_right - block_left) + BLOCK_PADDING * 2.0,
+                    width: block_w,
                     height: *cursor_y - block_start_y,
                     sections: dividers,
                 });

@@ -170,7 +170,6 @@ fn build_html(results: &[(&Example, Result<String, String>)]) -> String {
   .col-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #718096; margin-bottom: 8px; font-weight: 600; }
   pre.source { background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 10px; font-size: 12px; font-family: "SF Mono", "Fira Code", monospace; white-space: pre-wrap; word-break: break-word; overflow: auto; max-height: 500px; }
   .error { background: #fff5f5; border: 1px solid #fc8181; border-radius: 4px; padding: 10px; color: #c53030; font-size: 13px; font-family: monospace; white-space: pre-wrap; }
-  .svg-container { overflow: auto; max-height: 500px; }
   .svg-container svg { max-width: 100%; height: auto; }
 </style>
 </head>

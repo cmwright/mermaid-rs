@@ -9,8 +9,8 @@ const SVG_PADDING: f64 = 8.0;
 
 /// Render a positioned sequence diagram layout to an SVG string.
 pub fn render_svg(layout: &SequenceLayout, theme: &Theme) -> Result<String> {
-    let view_w = layout.width + 2.0 * SVG_PADDING;
-    let view_h = layout.height + 2.0 * SVG_PADDING;
+    let view_w = (layout.width + 2.0 * SVG_PADDING).ceil();
+    let view_h = (layout.height + 2.0 * SVG_PADDING).ceil();
 
     let mut svg = String::with_capacity(8192);
 
@@ -423,7 +423,7 @@ fn render_block(block: &PositionedBlock, theme: &Theme) -> String {
     ));
     s.push('\n');
 
-    // Block kind label tab
+    // Block kind label tab (just the kind keyword)
     let kind_text = match block.kind {
         BlockKind::Alt => "alt",
         BlockKind::Loop => "loop",
@@ -433,15 +433,10 @@ fn render_block(block: &PositionedBlock, theme: &Theme) -> String {
         BlockKind::Break => "break",
         BlockKind::Rect => "rect",
     };
-    let tab_text = if block.label.is_empty() {
-        kind_text.to_string()
-    } else {
-        format!("{} [{}]", kind_text, block.label)
-    };
-    let tab_w = tab_text.len() as f64 * 7.5 + 16.0;
-    let tab_h = 18.0;
+    let tab_w = kind_text.len() as f64 * 7.5 + 16.0;
+    let tab_h = 20.0;
 
-    // Label tab background
+    // Label tab background (polygon with angled bottom-right corner)
     s.push_str(&format!(
         r#"<polygon points="{},{} {},{} {},{} {},{} {},{}" fill="{}" stroke="{}" stroke-width="1"/>"#,
         block.x, block.y,
@@ -454,15 +449,29 @@ fn render_block(block: &PositionedBlock, theme: &Theme) -> String {
     ));
     s.push('\n');
 
-    // Label text
+    // Kind text inside tab
     s.push_str(&format!(
         r#"<text class="seq-label" x="{}" y="{}" text-anchor="start" dominant-baseline="central" fill="{}" font-weight="bold">{}</text>"#,
-        block.x + 4.0,
+        block.x + 6.0,
         block.y + tab_h / 2.0,
         theme.text_color.to_css(),
-        escape_xml(&tab_text),
+        escape_xml(kind_text),
     ));
     s.push('\n');
+
+    // Condition label centered in the block
+    if !block.label.is_empty() {
+        let condition_text = format!("[{}]", block.label);
+        let center_x = block.x + block.width / 2.0;
+        s.push_str(&format!(
+            r#"<text class="seq-label" x="{}" y="{}" text-anchor="middle" dominant-baseline="central" fill="{}">{}</text>"#,
+            center_x,
+            block.y + tab_h / 2.0,
+            theme.text_color.to_css(),
+            escape_xml(&condition_text),
+        ));
+        s.push('\n');
+    }
 
     // Section dividers
     for divider in &block.sections {
@@ -474,14 +483,14 @@ fn render_block(block: &PositionedBlock, theme: &Theme) -> String {
         ));
         s.push('\n');
 
-        // Divider label
+        // Divider label centered in the block
         if let Some(label) = &divider.label {
-            // Small label tab
             let div_text = format!("[{}]", label);
+            let center_x = block.x + block.width / 2.0;
             s.push_str(&format!(
-                r#"<text class="seq-label" x="{}" y="{}" text-anchor="start" dominant-baseline="auto" fill="{}" font-style="italic">{}</text>"#,
-                block.x + 8.0,
-                divider.y + 14.0,
+                r#"<text class="seq-label" x="{}" y="{}" text-anchor="middle" dominant-baseline="hanging" fill="{}">{}</text>"#,
+                center_x,
+                divider.y + 4.0,
                 theme.text_color.to_css(),
                 escape_xml(&div_text),
             ));

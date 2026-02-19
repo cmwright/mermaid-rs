@@ -294,3 +294,67 @@ fn shift_nodes_in_subgraph(
         }
     }
 }
+
+/// Post-processing step to compact subgraph nodes by shifting them toward
+the subgraph's centroid. This helps keep nodes in the same subgraph closer
+together after the Sugiyama layout has spread them across ranks.
+pub fn compact_subgraphs(
+    nodes: &mut [PositionedNode],
+    membership: &SubgraphMembership,
+    is_horizontal: bool,
+) {
+    use std::collections::HashMap;
+
+    // Group nodes by their immediate subgraph
+    let mut subgraph_nodes: HashMap<&str, Vec<&mut PositionedNode>> = HashMap::new();
+
+    for node in nodes.iter_mut() {
+        if let Some(path) = membership.get(&node.id) {
+            if let Some(sg_id) = path.first() {
+                subgraph_nodes.entry(sg_id).or_default().push(node);
+            }
+        }
+    }
+
+    // For each subgraph, shift nodes toward the median position
+    for (_sg_id, sg_nodes) in subgraph_nodes {
+        if sg_nodes.len() <= 1 {
+            continue;
+        }
+
+        // Calculate median position on the main axis
+        let mut positions: Vec<f64> = sg_nodes
+            .iter()
+            .map(|n| if is_horizontal { n.x } else { n.y })
+            .collect();
+        positions.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+        let median = if positions.len() % 2 == 1 {
+            positions[positions.len() / 2]
+        } else {
+            (positions[positions.len() / 2 - 1] + positions[positions.len() / 2]) / 2.0
+        };
+
+        // Calculate current centroid
+        let min_pos = *positions.first().unwrap();
+        let max_pos = *positions.last().unwrap();
+        let centroid = (min_pos + max_pos) / 2.0;
+
+        // Shift nodes toward median (but preserve relative ordering)
+        // Use a weighted approach: nodes further from centroid move more
+        for node in &mut sg_nodes {
+            let pos = if is_horizontal { node.x } else { node.y };
+            let dist_from_centroid = (pos - centroid).abs();
+            let max_dist = (max_pos - min_pos).max(1.0);
+            let factor = 0.4 * (dist_from_centroid / max_dist); // Move up to 40% toward median
+
+            let shift = (median - pos) * factor;
+
+            if is_horizontal {
+                node.x += shift;
+            } else {
+                node.y += shift;
+            }
+        }
+    }
+}

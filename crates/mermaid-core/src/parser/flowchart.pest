@@ -138,21 +138,23 @@ edge_operator = _{
 // Solid edges
 solid_arrow         = @{ "-" ~ "-"+ ~ ">" }
 solid_line          = @{ "-" ~ "-" ~ "-"+ }
-solid_arrow_labeled = { "--" ~ edge_inline_text ~ "-->" }
-solid_line_labeled  = { "--" ~ edge_inline_text ~ "---" }
+solid_arrow_labeled = { "--" ~ " "* ~ edge_inline_text ~ " "* ~ "-->" }
+solid_line_labeled  = { "--" ~ " "* ~ edge_inline_text ~ " "* ~ "---" }
 
 // Dotted edges
 dotted_arrow        = @{ "-" ~ "."+ ~ "-"+ ~ ">" }
 dotted_line         = @{ "-" ~ "."+ ~ "-"+ }
-dotted_arrow_labeled = { "-." ~ edge_inline_text ~ ".->" }
+dotted_arrow_labeled = { "-." ~ " "* ~ edge_inline_text ~ " "* ~ ".->" }
 
 // Thick edges
 thick_arrow         = @{ "=" ~ "="+ ~ ">" }
 thick_line          = @{ "=" ~ "=" ~ "="+ }
-thick_arrow_labeled = { "==" ~ edge_inline_text ~ "==>" }
+thick_arrow_labeled = { "==" ~ " "* ~ edge_inline_text ~ " "* ~ "==>" }
 
 // Edge label text — inline between edge delimiters (e.g., --text-->)
-edge_inline_text = @{ (!" " ~ !NEWLINE ~ ANY)+ | (!("-->" | "---" | ".->" | "==>") ~ ANY)+ }
+// Matches text that doesn't start with space, until the ending delimiter
+// Must not contain arrow patterns or newlines
+edge_inline_text = @{ (!(NEWLINE | "-" | ">" | "=" | ".") ~ ANY) ~ (!(NEWLINE | "-->" | "---" | ".->" | "==>") ~ ANY)* }
 
 // Pipe-style edge label: -->|text| (appears after the arrow)
 pipe_label = { "|" ~ pipe_text ~ "|" }
