@@ -8,8 +8,8 @@ use crate::ast::flowchart::{
     SubgraphDef,
 };
 use crate::error::{MermaidError, Result};
+use crate::layout::flowchart::types::*;
 use crate::layout::text_measure::{TextMeasurer, TextMetrics};
-use crate::layout::types::*;
 
 // ── Class map ───────────────────────────────────────────────
 
@@ -231,7 +231,13 @@ pub fn build_petgraph(
             .ok_or_else(|| MermaidError::Layout(format!("Unknown target node: {}", edge.to)))?;
 
         let (label_width, label_height) = if let Some(ref label_text) = edge.label {
-            let metrics = measurer.measure(label_text);
+            let clean = crate::render::html_util::normalize_br(label_text);
+            let clean = crate::render::html_util::strip_html_tags(&clean);
+            let metrics = if clean.contains('\n') {
+                measurer.measure_multiline(&clean, 4.0)
+            } else {
+                measurer.measure(&clean)
+            };
             (metrics.width + 10.0, metrics.height + 6.0)
         } else {
             (0.0, 0.0)
@@ -263,12 +269,24 @@ fn compute_node_size(shape: &NodeShape, text: &TextMetrics) -> (f64, f64) {
         | NodeShape::Stadium
         | NodeShape::Subroutine
         | NodeShape::Cylinder => (base_w + RECT_LABEL_EXTRA_WIDTH, base_h),
-        NodeShape::Diamond => (base_w * 1.42, base_h * 1.42),
+        NodeShape::Diamond => {
+            // Rotated square: to inscribe a rectangle W×H inside a 45°-rotated square,
+            // the half-diagonal must be (W + H) / 2. Both diagonals are equal.
+            let d = base_w + base_h;
+            (d, d)
+        }
         NodeShape::Circle | NodeShape::DoubleCircle => {
-            let diameter = base_w.max(base_h);
+            // Circle must fully contain the text rectangle: diameter = diagonal of the rect
+            let diameter = (base_w * base_w + base_h * base_h).sqrt();
             (diameter, diameter)
         }
         NodeShape::Hexagon => (base_w + base_h * 0.5, base_h),
+        NodeShape::Asymmetric => {
+            // The left V-notch eats into text area: notch = hh * 0.6 = base_h * 0.3
+            // Add full notch width (text is shifted right by notch/2, so both sides need room)
+            let notch = base_h * 0.3;
+            (base_w + 2.0 * notch + RECT_LABEL_EXTRA_WIDTH, base_h)
+        }
         _ => (base_w, base_h),
     }
 }

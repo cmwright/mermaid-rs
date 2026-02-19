@@ -1,19 +1,9 @@
 /// Top-level AST for a sequence diagram.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SequenceAst {
     pub participants: Vec<ParticipantDef>,
     pub statements: Vec<SequenceStatement>,
     pub autonumber: bool,
-}
-
-impl Default for SequenceAst {
-    fn default() -> Self {
-        Self {
-            participants: Vec::new(),
-            statements: Vec::new(),
-            autonumber: false,
-        }
-    }
 }
 
 /// Explicit participant/actor declaration.
@@ -53,12 +43,14 @@ pub struct MessageDef {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArrowType {
-    SolidArrow,   // ->>
-    DottedArrow,  // -->>
-    SolidOpen,    // ->
-    DottedOpen,   // -->
-    SolidCross,   // -x
-    DottedCross,  // --x
+    SolidArrow,  // ->>
+    DottedArrow, // -->>
+    SolidOpen,   // ->
+    DottedOpen,  // -->
+    SolidParen,  // -)
+    DottedParen, // --)
+    SolidCross,  // -x
+    DottedCross, // --x
 }
 
 /// A block (alt/loop/opt/par/critical/break/rect).

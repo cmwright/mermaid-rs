@@ -2,7 +2,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::flowchart::{FlowchartAst, SubgraphDef};
-use crate::layout::types::*;
+use crate::layout::flowchart::types::*;
 
 /// Longest-path rank assignment.
 /// Process nodes in topological order: rank[n] = max(rank[predecessor] + 1).

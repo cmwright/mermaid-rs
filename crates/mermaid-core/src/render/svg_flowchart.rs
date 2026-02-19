@@ -1,6 +1,6 @@
 use crate::ast::flowchart::{EdgeType, NodeShape};
 use crate::error::Result;
-use crate::layout::flowchart_layout::{
+use crate::layout::flowchart::{
     PositionedEdge, PositionedGraph, PositionedNode, PositionedSubgraph,
 };
 use crate::render::html_util;
@@ -71,7 +71,7 @@ pub fn render_svg(graph: &PositionedGraph, theme: &Theme) -> Result<String> {
 
 fn build_defs(theme: &Theme) -> String {
     let line_color = theme.line_color.to_css();
-    let sz = theme.arrowhead_size.max(8.0);
+    let sz = theme.flowchart.arrowhead_size.max(8.0);
 
     format!(
         r#"<defs>
@@ -94,20 +94,23 @@ fn render_node(node: &PositionedNode, theme: &Theme) -> String {
         .fill
         .as_ref()
         .map(|c| c.to_css())
-        .unwrap_or_else(|| theme.primary_color.to_css());
+        .unwrap_or_else(|| theme.flowchart.primary_color.to_css());
     let stroke = node
         .style
         .stroke
         .as_ref()
         .map(|c| c.to_css())
-        .unwrap_or_else(|| theme.primary_border.to_css());
-    let stroke_width = node.style.stroke_width.unwrap_or(theme.node_border_width);
+        .unwrap_or_else(|| theme.flowchart.primary_border.to_css());
+    let stroke_width = node
+        .style
+        .stroke_width
+        .unwrap_or(theme.flowchart.node_border_width);
     let text_color = node
         .style
         .color
         .as_ref()
         .map(|c| c.to_css())
-        .unwrap_or_else(|| theme.primary_text.to_css());
+        .unwrap_or_else(|| theme.flowchart.primary_text.to_css());
 
     let mut s = format!(r#"<g transform="translate({}, {})">"#, node.x, node.y);
     s.push('\n');
@@ -123,6 +126,14 @@ fn render_node(node: &PositionedNode, theme: &Theme) -> String {
     ));
 
     // Draw label text
+    // For asymmetric shape, offset text right to center in the flat area
+    let text_x_offset = if node.shape == NodeShape::Asymmetric {
+        let notch = (node.height / 2.0) * 0.6;
+        notch / 2.0
+    } else {
+        0.0
+    };
+
     let label_lines: Vec<String> = html_util::normalize_br(&node.label)
         .lines()
         .map(|l| l.to_string())
@@ -130,11 +141,20 @@ fn render_node(node: &PositionedNode, theme: &Theme) -> String {
 
     if label_lines.len() <= 1 && !html_util::has_html(&node.label) {
         // Simple single-line text (fast path)
-        s.push_str(&format!(
-            r#"  <text class="node-text" text-anchor="middle" dominant-baseline="central" fill="{}">{}</text>"#,
-            text_color,
-            escape_xml(&node.label),
-        ));
+        if text_x_offset.abs() < 0.01 {
+            s.push_str(&format!(
+                r#"  <text class="node-text" text-anchor="middle" dominant-baseline="central" fill="{}">{}</text>"#,
+                text_color,
+                escape_xml(&node.label),
+            ));
+        } else {
+            s.push_str(&format!(
+                r#"  <text class="node-text" x="{}" text-anchor="middle" dominant-baseline="central" fill="{}">{}</text>"#,
+                text_x_offset,
+                text_color,
+                escape_xml(&node.label),
+            ));
+        }
         s.push('\n');
     } else {
         // Multi-line or HTML-formatted text
@@ -148,6 +168,12 @@ fn render_node(node: &PositionedNode, theme: &Theme) -> String {
         ));
         s.push('\n');
 
+        let tspan_x = if text_x_offset.abs() < 0.01 {
+            "0".to_string()
+        } else {
+            format!("{}", text_x_offset)
+        };
+
         for (i, line) in label_lines.iter().enumerate() {
             let dy = if i == 0 {
                 format!("{}em", start_dy)
@@ -158,8 +184,8 @@ fn render_node(node: &PositionedNode, theme: &Theme) -> String {
             let segments = html_util::parse_segments(line);
             if segments.is_empty() {
                 s.push_str(&format!(
-                    r#"    <tspan x="0" dy="{}" dominant-baseline="central">&#160;</tspan>"#,
-                    dy,
+                    r#"    <tspan x="{}" dy="{}" dominant-baseline="central">&#160;</tspan>"#,
+                    tspan_x, dy,
                 ));
                 s.push('\n');
             } else {
@@ -167,7 +193,7 @@ fn render_node(node: &PositionedNode, theme: &Theme) -> String {
                 for seg in &segments {
                     let mut attrs = String::new();
                     if first_in_line {
-                        attrs.push_str(&format!(r#" x="0" dy="{}""#, dy));
+                        attrs.push_str(&format!(r#" x="{}" dy="{}""#, tspan_x, dy));
                         first_in_line = false;
                     }
                     attrs.push_str(r#" dominant-baseline="central""#);
@@ -340,20 +366,20 @@ fn draw_shape(
             s
         }
         NodeShape::Asymmetric => {
-            // Flag-like shape: rectangle with pointed right edge
+            // Flag/banner shape: rectangle with V-notch cut into left side
             let notch = hh * 0.6;
             let points = format!(
                 "{},{} {},{} {},{} {},{} {},{}",
                 -hw,
-                -hh,
-                hw - notch,
-                -hh,
-                hw,
-                0.0,
-                hw - notch,
-                hh,
+                -hh, // top left corner
+                -hw + notch,
+                0.0, // center left (inward notch)
                 -hw,
-                hh,
+                hh, // bottom left corner
+                hw,
+                hh, // bottom right corner
+                hw,
+                -hh, // top right corner
             );
             format!(
                 r#"  <polygon points="{}" fill="{}" stroke="{}" stroke-width="{}"/>"#,
@@ -450,7 +476,7 @@ fn render_edge(edge: &PositionedEdge, theme: &Theme) -> String {
         r#"d="{}" fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round""#,
         path_d,
         line_color,
-        theme.edge_width.max(1.75),
+        theme.flowchart.edge_width.max(1.75),
     );
 
     // Edge type styling
@@ -467,7 +493,7 @@ fn render_edge(edge: &PositionedEdge, theme: &Theme) -> String {
                 r#"d="{}" fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)""#,
                 path_d,
                 line_color,
-                theme.edge_width * 2.0,
+                theme.flowchart.edge_width * 2.0,
             );
         }
         EdgeType::SolidLine => {}
@@ -479,7 +505,7 @@ fn render_edge(edge: &PositionedEdge, theme: &Theme) -> String {
                 r#"d="{}" fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round""#,
                 path_d,
                 line_color,
-                theme.edge_width * 2.0,
+                theme.flowchart.edge_width * 2.0,
             );
         }
     }
@@ -489,7 +515,7 @@ fn render_edge(edge: &PositionedEdge, theme: &Theme) -> String {
     // Edge label
     if let (Some(label), Some(lx), Some(ly)) = (&edge.label, edge.label_x, edge.label_y) {
         // Use measured dimensions if available, otherwise fall back to rough approximation
-        let label_w = edge.label_width.unwrap_or_else(|| label.len() as f64 * 8.0 + 10.0);
+        let label_w = edge.label_width.unwrap_or(label.len() as f64 * 8.0 + 10.0);
         let label_h = edge.label_height.unwrap_or(20.0);
         s.push_str(&format!(
             r#"<rect x="{}" y="{}" width="{}" height="{}" rx="3" fill="rgba(232,232,232,0.8)"/>"#,
@@ -499,13 +525,40 @@ fn render_edge(edge: &PositionedEdge, theme: &Theme) -> String {
             label_h,
         ));
         s.push('\n');
-        s.push_str(&format!(
-            r#"<text class="edge-label" x="{}" y="{}" text-anchor="middle" dominant-baseline="central" fill="{}">{}</text>"#,
-            lx,
-            ly,
-            theme.text_color.to_css(),
-            escape_xml(label),
-        ));
+
+        // Handle <br/> line breaks in edge labels
+        let clean = html_util::normalize_br(label);
+        let lines: Vec<&str> = clean.lines().collect();
+        if lines.len() <= 1 {
+            s.push_str(&format!(
+                r#"<text class="edge-label" x="{}" y="{}" text-anchor="middle" dominant-baseline="central" fill="{}">{}</text>"#,
+                lx,
+                ly,
+                theme.text_color.to_css(),
+                escape_xml(&html_util::strip_html_tags(&clean)),
+            ));
+        } else {
+            let line_height = 1.2_f64;
+            let start_dy = -((lines.len() as f64 - 1.0) / 2.0) * line_height;
+            s.push_str(&format!(
+                r#"<text class="edge-label" x="{}" y="{}" text-anchor="middle" dominant-baseline="central" fill="{}">"#,
+                lx, ly, theme.text_color.to_css(),
+            ));
+            for (i, line) in lines.iter().enumerate() {
+                let dy = if i == 0 {
+                    format!("{}em", start_dy)
+                } else {
+                    format!("{}em", line_height)
+                };
+                s.push_str(&format!(
+                    r#"<tspan x="{}" dy="{}">{}</tspan>"#,
+                    lx,
+                    dy,
+                    escape_xml(&html_util::strip_html_tags(line)),
+                ));
+            }
+            s.push_str("</text>");
+        }
         s.push('\n');
     }
 
@@ -521,13 +574,13 @@ fn render_subgraph(sg: &PositionedSubgraph, theme: &Theme) -> String {
         .fill
         .as_ref()
         .map(|c| c.to_css())
-        .unwrap_or_else(|| theme.subgraph_fill.to_css());
+        .unwrap_or_else(|| theme.flowchart.subgraph_fill.to_css());
     let stroke = sg
         .style
         .stroke
         .as_ref()
         .map(|c| c.to_css())
-        .unwrap_or_else(|| theme.subgraph_border.to_css());
+        .unwrap_or_else(|| theme.flowchart.subgraph_border.to_css());
 
     // Background rectangle
     s.push_str(&format!(
@@ -544,14 +597,14 @@ fn render_subgraph(sg: &PositionedSubgraph, theme: &Theme) -> String {
         let label_x = sg.x + sg.width / 2.0;
         let label_y = sg.y + 18.0;
         if lines.len() == 1 {
-            let text = html_util::strip_html_tags(&lines[0]);
+            let text = html_util::strip_html_tags(lines[0]);
             s.push_str(&format!(
                 r#"<text x="{}" y="{}" text-anchor="middle" font-family="{}" font-size="{}" font-weight="bold" fill="{}">{}</text>"#,
                 label_x,
                 label_y,
                 theme.font_family,
                 theme.font_size,
-                theme.subgraph_text.to_css(),
+                theme.flowchart.subgraph_text.to_css(),
                 escape_xml(&text),
             ));
         } else {
@@ -561,7 +614,7 @@ fn render_subgraph(sg: &PositionedSubgraph, theme: &Theme) -> String {
                 label_y,
                 theme.font_family,
                 theme.font_size,
-                theme.subgraph_text.to_css(),
+                theme.flowchart.subgraph_text.to_css(),
             ));
             for (i, line) in lines.iter().enumerate() {
                 let text = html_util::strip_html_tags(line);
@@ -586,4 +639,3 @@ fn render_subgraph(sg: &PositionedSubgraph, theme: &Theme) -> String {
 
     s
 }
-

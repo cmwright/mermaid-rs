@@ -13,7 +13,7 @@ const ACTOR_BOX_PAD_V: f64 = 8.0;
 const MESSAGE_SPACING: f64 = 20.0; // space before AND after each message arrow
 const SELF_MSG_WIDTH: f64 = 30.0;
 const SELF_MSG_HEIGHT: f64 = 28.0;
-const BLOCK_PADDING: f64 = 10.0; // space at end of block
+const BLOCK_PADDING: f64 = 8.0; // space at end of block (reduced to match nested inset spacing)
 const BLOCK_HEADER_HEIGHT: f64 = 25.0; // space for label tab area
 const BLOCK_SIDE_PADDING: f64 = 20.0;
 const BLOCK_NEST_INSET: f64 = 8.0;
@@ -22,6 +22,8 @@ const NOTE_MAX_WIDTH: f64 = 200.0;
 const DIAGRAM_PADDING: f64 = 30.0;
 const STICK_FIGURE_HEIGHT: f64 = 40.0;
 const STICK_FIGURE_LABEL_GAP: f64 = 4.0;
+const ACTOR_TO_FIRST_MSG_PADDING: f64 = 30.0; // Extra padding between top actors and first message
+const LAST_MSG_TO_ACTOR_PADDING: f64 = 10.0; // Reduced padding between last message and bottom actors
 
 // ── Positioned output types ─────────────────────────────────
 
@@ -125,8 +127,11 @@ pub fn layout_sequence(
     widen_for_messages(ast, measurer, &actor_idx, &mut actor_infos);
 
     // Phase C: Vertical layout
-    let top_box_height = actor_infos.iter().map(|a| a.box_height).fold(0.0_f64, f64::max);
-    let lifeline_start_y = DIAGRAM_PADDING + top_box_height;
+    let top_box_height = actor_infos
+        .iter()
+        .map(|a| a.box_height)
+        .fold(0.0_f64, f64::max);
+    let lifeline_start_y = DIAGRAM_PADDING + top_box_height + ACTOR_TO_FIRST_MSG_PADDING;
     let mut cursor_y = lifeline_start_y;
 
     let mut messages = Vec::new();
@@ -168,7 +173,7 @@ pub fn layout_sequence(
     }
 
     // Phase D: Finalize
-    cursor_y += 15.0;
+    cursor_y += LAST_MSG_TO_ACTOR_PADDING;
     let bottom_box_y = cursor_y;
     cursor_y += top_box_height + DIAGRAM_PADDING;
 
@@ -187,14 +192,16 @@ pub fn layout_sequence(
         });
     }
 
-    // Build lifelines
+    // Build lifelines - extend from bottom of top actors to top of bottom actors
+    let lifeline_y_start = DIAGRAM_PADDING + top_box_height;
+    let lifeline_y_end = bottom_box_y;
     let mut lifelines: Vec<Lifeline> = Vec::new();
     for info in &actor_infos {
         lifelines.push(Lifeline {
             actor_id: info.id.clone(),
             x: info.center_x,
-            y_start: lifeline_start_y,
-            y_end: bottom_box_y,
+            y_start: lifeline_y_start,
+            y_end: lifeline_y_end,
         });
     }
 
@@ -203,14 +210,8 @@ pub fn layout_sequence(
         .iter()
         .map(|a| a.center_x + a.box_width / 2.0)
         .fold(0.0_f64, f64::max);
-    let rightmost_note = notes
-        .iter()
-        .map(|n| n.x + n.width)
-        .fold(0.0_f64, f64::max);
-    let rightmost_block = blocks
-        .iter()
-        .map(|b| b.x + b.width)
-        .fold(0.0_f64, f64::max);
+    let rightmost_note = notes.iter().map(|n| n.x + n.width).fold(0.0_f64, f64::max);
+    let rightmost_block = blocks.iter().map(|b| b.x + b.width).fold(0.0_f64, f64::max);
     let width = rightmost_actor.max(rightmost_note).max(rightmost_block) + DIAGRAM_PADDING;
     let height = cursor_y;
 
@@ -248,10 +249,7 @@ fn build_actor_map<'a>(
     let mut actor_idx: HashMap<&'a str, usize> = HashMap::new();
 
     for p in &ast.participants {
-        let display = p
-            .display_name
-            .as_deref()
-            .unwrap_or(&p.id);
+        let display = p.display_name.as_deref().unwrap_or(&p.id);
         let clean = html_util::strip_html_tags(&html_util::normalize_br(display));
         let metrics = measurer.measure_multiline(&clean, 2.0);
 
@@ -302,7 +300,7 @@ fn widen_for_messages(
     ast: &SequenceAst,
     measurer: &TextMeasurer,
     actor_idx: &HashMap<&str, usize>,
-    actor_infos: &mut Vec<ActorInfo>,
+    actor_infos: &mut [ActorInfo],
 ) {
     // Collect required gap widths between adjacent actor pairs
     let mut required_gaps: HashMap<(usize, usize), f64> = HashMap::new();
@@ -320,9 +318,10 @@ fn widen_for_messages(
                         continue; // self-messages don't affect gaps
                     }
                     let label_w = measurer.measure(&msg.label).width + 20.0;
-                    if let (Some(&from_idx), Some(&to_idx)) =
-                        (actor_idx.get(msg.from.as_str()), actor_idx.get(msg.to.as_str()))
-                    {
+                    if let (Some(&from_idx), Some(&to_idx)) = (
+                        actor_idx.get(msg.from.as_str()),
+                        actor_idx.get(msg.to.as_str()),
+                    ) {
                         let lo = from_idx.min(to_idx);
                         let hi = from_idx.max(to_idx);
                         // This message spans from lo to hi; it needs label_w space
@@ -334,7 +333,12 @@ fn widen_for_messages(
                 }
                 SequenceStatement::Block(block) => {
                     for section in &block.sections {
-                        collect_message_gaps(&section.statements, measurer, actor_idx, required_gaps);
+                        collect_message_gaps(
+                            &section.statements,
+                            measurer,
+                            actor_idx,
+                            required_gaps,
+                        );
                     }
                 }
                 _ => {}
@@ -354,9 +358,9 @@ fn widen_for_messages(
         if *needed > current_span {
             let gap_count = (hi - lo) as f64;
             let extra = (*needed - current_span) / gap_count;
-            for g in *lo..*hi {
-                if extra > extra_per_gap[g] {
-                    extra_per_gap[g] = extra;
+            for item in extra_per_gap.iter_mut().take(*hi).skip(*lo) {
+                if extra > *item {
+                    *item = extra;
                 }
             }
         }
@@ -421,9 +425,7 @@ fn layout_statements(
 
                 // Handle activation modifiers
                 if msg.activate_target {
-                    let stack = activation_stack
-                        .entry(msg.to.clone())
-                        .or_insert_with(Vec::new);
+                    let stack = activation_stack.entry(msg.to.clone()).or_default();
                     stack.push(*cursor_y);
                 }
                 if msg.deactivate_source {
@@ -450,9 +452,7 @@ fn layout_statements(
                 }
             }
             SequenceStatement::Activate(id) => {
-                let stack = activation_stack
-                    .entry(id.clone())
-                    .or_insert_with(Vec::new);
+                let stack = activation_stack.entry(id.clone()).or_default();
                 stack.push(*cursor_y);
             }
             SequenceStatement::Deactivate(id) => {
@@ -474,7 +474,8 @@ fn layout_statements(
                 }
             }
             SequenceStatement::Note(note) => {
-                let (note_x, note_w) = compute_note_position(note, actor_idx, actor_infos, measurer);
+                let (note_x, note_w) =
+                    compute_note_position(note, actor_idx, actor_infos, measurer);
                 let normalized = html_util::normalize_br(&note.text);
                 let text_metrics = measurer.measure_multiline(&normalized, 2.0);
                 let note_h = text_metrics.height + NOTE_PADDING * 2.0;
@@ -539,11 +540,16 @@ fn layout_statements(
                     );
                 }
 
+                // Add internal padding to complete block content area
                 *cursor_y += BLOCK_PADDING;
+                let block_end_y = *cursor_y;
+
+                // Add spacing AFTER the block for subsequent elements
+                *cursor_y += MESSAGE_SPACING;
 
                 // Compute block width from referenced actors, inset by nesting depth
                 let (block_left, block_right) =
-                    compute_block_bounds(block, actor_idx, actor_infos);
+                    compute_block_bounds(block, actor_idx, actor_infos, measurer);
 
                 let inset = block_depth as f64 * BLOCK_NEST_INSET;
                 let block_x = (block_left - BLOCK_SIDE_PADDING + inset).max(2.0);
@@ -555,7 +561,7 @@ fn layout_statements(
                     x: block_x,
                     y: block_start_y,
                     width: block_w,
-                    height: *cursor_y - block_start_y,
+                    height: block_end_y - block_start_y,
                     sections: dividers,
                 });
             }
@@ -576,7 +582,7 @@ fn compute_note_position(
         .map(|line| measurer.measure(line).width)
         .fold(0.0_f64, f64::max);
     let text_w = max_line_w + NOTE_PADDING * 2.0;
-    let note_w = text_w.min(NOTE_MAX_WIDTH).max(40.0);
+    let note_w = text_w.clamp(40.0, NOTE_MAX_WIDTH);
 
     if note.participants.is_empty() {
         return (DIAGRAM_PADDING, note_w);
@@ -626,15 +632,23 @@ fn compute_block_bounds(
     block: &BlockDef,
     actor_idx: &HashMap<&str, usize>,
     actor_infos: &[ActorInfo],
+    measurer: &TextMeasurer,
 ) -> (f64, f64) {
     let mut min_idx = usize::MAX;
     let mut max_idx = 0;
+    let mut min_left_with_label = f64::MAX;
+    let mut max_right_with_label = 0.0_f64;
 
-    fn scan_for_actors(
+    #[allow(clippy::too_many_arguments)]
+    fn scan_for_actors_and_self_messages(
         stmts: &[SequenceStatement],
         actor_idx: &HashMap<&str, usize>,
+        actor_infos: &[ActorInfo],
+        measurer: &TextMeasurer,
         min_idx: &mut usize,
         max_idx: &mut usize,
+        min_left_with_label: &mut f64,
+        max_right_with_label: &mut f64,
     ) {
         for stmt in stmts {
             match stmt {
@@ -642,15 +656,41 @@ fn compute_block_bounds(
                     if let Some(&i) = actor_idx.get(msg.from.as_str()) {
                         *min_idx = (*min_idx).min(i);
                         *max_idx = (*max_idx).max(i);
+
+                        // For self-messages, calculate left and right extents including centered label
+                        if msg.from == msg.to {
+                            if let Some(actor) = actor_infos.get(i) {
+                                let label_width = measurer.measure(&msg.label).width;
+                                // Label is centered above the self-message arrow
+                                // Self-message spans from actor.center_x to actor.center_x + SELF_MSG_WIDTH
+                                // Label is centered at actor.center_x + SELF_MSG_WIDTH / 2
+                                let label_center = actor.center_x + SELF_MSG_WIDTH / 2.0;
+                                let left_extent = label_center - label_width / 2.0 - 10.0;
+                                let right_extent = label_center + label_width / 2.0 + 10.0;
+                                *min_left_with_label = min_left_with_label.min(left_extent);
+                                *max_right_with_label = max_right_with_label.max(right_extent);
+                            }
+                        }
                     }
-                    if let Some(&i) = actor_idx.get(msg.to.as_str()) {
-                        *min_idx = (*min_idx).min(i);
-                        *max_idx = (*max_idx).max(i);
+                    if msg.from != msg.to {
+                        if let Some(&i) = actor_idx.get(msg.to.as_str()) {
+                            *min_idx = (*min_idx).min(i);
+                            *max_idx = (*max_idx).max(i);
+                        }
                     }
                 }
                 SequenceStatement::Block(inner_block) => {
                     for section in &inner_block.sections {
-                        scan_for_actors(&section.statements, actor_idx, min_idx, max_idx);
+                        scan_for_actors_and_self_messages(
+                            &section.statements,
+                            actor_idx,
+                            actor_infos,
+                            measurer,
+                            min_idx,
+                            max_idx,
+                            min_left_with_label,
+                            max_right_with_label,
+                        );
                     }
                 }
                 _ => {}
@@ -659,19 +699,40 @@ fn compute_block_bounds(
     }
 
     for section in &block.sections {
-        scan_for_actors(&section.statements, actor_idx, &mut min_idx, &mut max_idx);
+        scan_for_actors_and_self_messages(
+            &section.statements,
+            actor_idx,
+            actor_infos,
+            measurer,
+            &mut min_idx,
+            &mut max_idx,
+            &mut min_left_with_label,
+            &mut max_right_with_label,
+        );
     }
 
     if min_idx == usize::MAX || max_idx == 0 {
         // Fallback: use first and last actors
-        let left = actor_infos.first().map(|a| a.center_x - a.box_width / 2.0).unwrap_or(0.0);
-        let right = actor_infos.last().map(|a| a.center_x + a.box_width / 2.0).unwrap_or(100.0);
-        return (left, right);
+        let left = actor_infos
+            .first()
+            .map(|a| a.center_x - a.box_width / 2.0)
+            .unwrap_or(0.0);
+        let right = actor_infos
+            .last()
+            .map(|a| a.center_x + a.box_width / 2.0)
+            .unwrap_or(100.0);
+        return (
+            left.min(min_left_with_label),
+            right.max(max_right_with_label),
+        );
     }
 
     let left = actor_infos[min_idx].center_x - actor_infos[min_idx].box_width / 2.0;
     let right = actor_infos[max_idx].center_x + actor_infos[max_idx].box_width / 2.0;
-    (left, right)
+    (
+        left.min(min_left_with_label),
+        right.max(max_right_with_label),
+    )
 }
 
 #[cfg(test)]

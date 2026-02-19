@@ -1,4 +1,4 @@
-use crate::layout::types::*;
+use crate::layout::flowchart::types::*;
 
 /// Shift all positioned elements so everything has positive coordinates,
 /// then compute the total bounding box.

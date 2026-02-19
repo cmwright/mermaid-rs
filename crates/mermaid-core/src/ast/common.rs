@@ -69,20 +69,14 @@ pub fn parse_style_string(s: &str) -> StyleProperties {
                 "fill" => props.fill = Some(parse_color(value)),
                 "stroke" => props.stroke = Some(parse_color(value)),
                 "stroke-width" => {
-                    props.stroke_width = value
-                        .trim_end_matches("px")
-                        .parse::<f64>()
-                        .ok();
+                    props.stroke_width = value.trim_end_matches("px").parse::<f64>().ok();
                 }
                 "stroke-dasharray" => {
                     props.stroke_dasharray = Some(value.to_string());
                 }
                 "color" => props.color = Some(parse_color(value)),
                 "font-size" => {
-                    props.font_size = value
-                        .trim_end_matches("px")
-                        .parse::<f64>()
-                        .ok();
+                    props.font_size = value.trim_end_matches("px").parse::<f64>().ok();
                 }
                 _ => {
                     props.extra.push((key.to_string(), value.to_string()));

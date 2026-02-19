@@ -8,8 +8,8 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::HashMap;
 
 use crate::ast::flowchart::{Direction, FlowchartAst};
-use crate::layout::graph_builder::SubgraphMembership;
-use crate::layout::types::*;
+use crate::layout::flowchart::graph_builder::SubgraphMembership;
+use crate::layout::flowchart::types::*;
 
 use self::dummy_nodes::DummyChain;
 
@@ -62,8 +62,13 @@ pub fn layout(
     // Dummies get real positions via Brandes-Köpf with EDGE_SEP separation,
     // and their coordinates become edge waypoints.
     // Use halved RANK_SEP because ranks were doubled to create interstitial label ranks.
-    let positions =
-        coordinate_assignment::assign_coordinates(graph, &layers, direction, membership, RANK_SEP / 2.0);
+    let positions = coordinate_assignment::assign_coordinates(
+        graph,
+        &layers,
+        direction,
+        membership,
+        RANK_SEP / 2.0,
+    );
 
     // Restore reversed edges (doesn't affect positions)
     cycle_removal::restore_cycles(graph, &reversed);

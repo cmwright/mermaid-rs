@@ -2,7 +2,7 @@ use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
 use std::collections::HashMap;
 
 use crate::ast::flowchart::NodeShape;
-use crate::layout::types::*;
+use crate::layout::flowchart::types::*;
 
 /// Information about a chain of dummy nodes inserted for a long edge.
 #[derive(Debug, Clone)]
@@ -118,6 +118,7 @@ pub fn insert_dummy_nodes(
 }
 
 /// Remove dummy nodes from positions map and return bend points for long edges.
+#[allow(clippy::type_complexity)]
 pub fn extract_dummy_positions(
     chains: &[DummyChain],
     positions: &HashMap<NodeIndex, (f64, f64)>,

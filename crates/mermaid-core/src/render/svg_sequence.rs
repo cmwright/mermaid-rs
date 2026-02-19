@@ -1,6 +1,6 @@
 use crate::ast::sequence::{ArrowType, BlockKind, ParticipantKind};
 use crate::error::Result;
-use crate::layout::sequence_layout::*;
+use crate::layout::sequence::*;
 use crate::render::html_util;
 use crate::render::svg_util::escape_xml;
 use crate::render::theme::Theme;
@@ -51,7 +51,7 @@ pub fn render_svg(layout: &SequenceLayout, theme: &Theme) -> Result<String> {
 
     // 1. Block backgrounds
     for block in &layout.blocks {
-        svg.push_str(&render_block(block, theme));
+        svg.push_str(&render_block_bg(block, theme));
     }
 
     // 2. Lifelines
@@ -69,9 +69,9 @@ pub fn render_svg(layout: &SequenceLayout, theme: &Theme) -> Result<String> {
         svg.push_str(&render_note(note, theme));
     }
 
-    // 5. Message arrows and labels
+    // 5. Message arrows (lines only, no labels yet)
     for msg in &layout.messages {
-        svg.push_str(&render_message(msg, theme));
+        svg.push_str(&render_message_line(msg, theme));
     }
 
     // 6. Top actor boxes/figures
@@ -82,6 +82,16 @@ pub fn render_svg(layout: &SequenceLayout, theme: &Theme) -> Result<String> {
     // 7. Bottom actor boxes/figures
     for actor in &layout.actors {
         svg.push_str(&render_actor(actor, actor.bottom_y, theme));
+    }
+
+    // 8. Block labels (rendered after actors so they appear on top)
+    for block in &layout.blocks {
+        svg.push_str(&render_block_label(block, theme));
+    }
+
+    // 9. Message labels (rendered last so they appear on top)
+    for msg in &layout.messages {
+        svg.push_str(&render_message_label(msg, theme));
     }
 
     svg.push_str("</g>\n");
@@ -120,8 +130,8 @@ fn render_actor(actor: &PositionedActor, y: f64, theme: &Theme) -> String {
             s.push_str(&format!(
                 r#"<rect x="{}" y="{}" width="{}" height="{}" fill="{}" stroke="{}" stroke-width="2"/>"#,
                 x, y, actor.box_width, actor.box_height,
-                theme.actor_fill.to_css(),
-                theme.actor_border.to_css(),
+                theme.sequence.actor_fill.to_css(),
+                theme.sequence.actor_border.to_css(),
             ));
             s.push('\n');
 
@@ -136,7 +146,7 @@ fn render_actor(actor: &PositionedActor, y: f64, theme: &Theme) -> String {
                     r#"<text class="seq-text" x="{}" y="{}" text-anchor="middle" dominant-baseline="central" fill="{}">{}</text>"#,
                     actor.center_x,
                     text_y,
-                    theme.actor_text.to_css(),
+                    theme.sequence.actor_text.to_css(),
                     escape_xml(&clean),
                 ));
                 s.push('\n');
@@ -145,7 +155,9 @@ fn render_actor(actor: &PositionedActor, y: f64, theme: &Theme) -> String {
                 let start_dy = -((lines.len() as f64 - 1.0) / 2.0) * line_height;
                 s.push_str(&format!(
                     r#"<text class="seq-text" x="{}" y="{}" text-anchor="middle" fill="{}">"#,
-                    actor.center_x, text_y, theme.actor_text.to_css(),
+                    actor.center_x,
+                    text_y,
+                    theme.sequence.actor_text.to_css(),
                 ));
                 s.push('\n');
                 for (i, line) in lines.iter().enumerate() {
@@ -157,7 +169,9 @@ fn render_actor(actor: &PositionedActor, y: f64, theme: &Theme) -> String {
                     };
                     s.push_str(&format!(
                         r#"  <tspan x="{}" dy="{}" dominant-baseline="central">{}</tspan>"#,
-                        actor.center_x, dy, escape_xml(&clean),
+                        actor.center_x,
+                        dy,
+                        escape_xml(&clean),
                     ));
                     s.push('\n');
                 }
@@ -177,7 +191,7 @@ fn render_actor(actor: &PositionedActor, y: f64, theme: &Theme) -> String {
             let leg_bottom = body_bottom + 10.0;
             let leg_span = 10.0;
 
-            let stroke = theme.actor_border.to_css();
+            let stroke = theme.sequence.actor_border.to_css();
             // Head
             s.push_str(&format!(
                 r#"<circle cx="{}" cy="{}" r="{}" fill="none" stroke="{}" stroke-width="2"/>"#,
@@ -193,19 +207,31 @@ fn render_actor(actor: &PositionedActor, y: f64, theme: &Theme) -> String {
             // Arms
             s.push_str(&format!(
                 r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="2"/>"#,
-                cx - arm_span, arms_y, cx + arm_span, arms_y, stroke,
+                cx - arm_span,
+                arms_y,
+                cx + arm_span,
+                arms_y,
+                stroke,
             ));
             s.push('\n');
             // Left leg
             s.push_str(&format!(
                 r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="2"/>"#,
-                cx, body_bottom, cx - leg_span, leg_bottom, stroke,
+                cx,
+                body_bottom,
+                cx - leg_span,
+                leg_bottom,
+                stroke,
             ));
             s.push('\n');
             // Right leg
             s.push_str(&format!(
                 r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="2"/>"#,
-                cx, body_bottom, cx + leg_span, leg_bottom, stroke,
+                cx,
+                body_bottom,
+                cx + leg_span,
+                leg_bottom,
+                stroke,
             ));
             s.push('\n');
 
@@ -214,7 +240,7 @@ fn render_actor(actor: &PositionedActor, y: f64, theme: &Theme) -> String {
             let clean = html_util::strip_html_tags(&html_util::normalize_br(&actor.display_name));
             s.push_str(&format!(
                 r#"<text class="seq-text" x="{}" y="{}" text-anchor="middle" dominant-baseline="hanging" fill="{}">{}</text>"#,
-                cx, label_y, theme.actor_text.to_css(), escape_xml(&clean),
+                cx, label_y, theme.sequence.actor_text.to_css(), escape_xml(&clean),
             ));
             s.push('\n');
         }
@@ -225,9 +251,12 @@ fn render_actor(actor: &PositionedActor, y: f64, theme: &Theme) -> String {
 
 fn render_lifeline(lifeline: &Lifeline, theme: &Theme) -> String {
     format!(
-        r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="1" stroke-dasharray="5,5"/>"#,
-        lifeline.x, lifeline.y_start, lifeline.x, lifeline.y_end,
-        theme.line_color.to_css(),
+        r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="1"/>"#,
+        lifeline.x,
+        lifeline.y_start,
+        lifeline.x,
+        lifeline.y_end,
+        theme.sequence.lifeline_color.to_css(),
     ) + "\n"
 }
 
@@ -237,9 +266,12 @@ fn render_activation(act: &PositionedActivation, theme: &Theme) -> String {
     let x = act.x - w / 2.0 + x_offset;
     format!(
         r#"<rect x="{}" y="{}" width="{}" height="{}" fill="{}" stroke="{}" stroke-width="1"/>"#,
-        x, act.y_start, w, act.y_end - act.y_start,
-        theme.activation_fill.to_css(),
-        theme.activation_border.to_css(),
+        x,
+        act.y_start,
+        w,
+        act.y_end - act.y_start,
+        theme.sequence.activation_fill.to_css(),
+        theme.sequence.activation_border.to_css(),
     ) + "\n"
 }
 
@@ -249,15 +281,18 @@ fn render_note(note: &PositionedNote, theme: &Theme) -> String {
     // Note rectangle
     s.push_str(&format!(
         r#"<rect x="{}" y="{}" width="{}" height="{}" fill="{}" stroke="{}" stroke-width="1"/>"#,
-        note.x, note.y, note.width, note.height,
-        theme.note_fill.to_css(),
-        theme.note_border.to_css(),
+        note.x,
+        note.y,
+        note.width,
+        note.height,
+        theme.sequence.note_fill.to_css(),
+        theme.sequence.note_border.to_css(),
     ));
     s.push('\n');
 
     // Note text (already normalized: <br/> → \n by layout phase)
     let text_x = note.x + note.width / 2.0;
-    let text_color = theme.note_text.to_css();
+    let text_color = theme.sequence.note_text.to_css();
     let lines: Vec<&str> = note.text.split('\n').collect();
 
     if lines.len() == 1 {
@@ -289,7 +324,9 @@ fn render_note(note: &PositionedNote, theme: &Theme) -> String {
             };
             s.push_str(&format!(
                 r#"  <tspan x="{}" dy="{}" dominant-baseline="central">{}</tspan>"#,
-                text_x, dy, escape_xml(line),
+                text_x,
+                dy,
+                escape_xml(line),
             ));
             s.push('\n');
         }
@@ -299,7 +336,7 @@ fn render_note(note: &PositionedNote, theme: &Theme) -> String {
     s
 }
 
-fn render_message(msg: &PositionedMessage, theme: &Theme) -> String {
+fn render_message_line(msg: &PositionedMessage, theme: &Theme) -> String {
     let mut s = String::new();
     let line_color = theme.line_color.to_css();
 
@@ -324,30 +361,61 @@ fn render_message(msg: &PositionedMessage, theme: &Theme) -> String {
             marker,
         ));
         s.push('\n');
-
-        // Label to the right
-        s.push_str(&format!(
-            r#"<text class="seq-label" x="{}" y="{}" text-anchor="start" dominant-baseline="auto" fill="{}">{}</text>"#,
-            x + sw + 5.0,
-            y1 + sh / 2.0 + 4.0,
-            theme.text_color.to_css(),
-            escape_xml(&msg.label),
-        ));
-        s.push('\n');
     } else {
         // Regular message: horizontal line with arrowhead
         let (dasharray, marker) = arrow_attrs(msg.arrow);
 
         s.push_str(&format!(
             r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="2"{}{}/>"#,
-            msg.from_x, msg.y, msg.to_x, msg.y,
-            line_color,
-            dasharray,
-            marker,
+            msg.from_x, msg.y, msg.to_x, msg.y, line_color, dasharray, marker,
         ));
         s.push('\n');
+    }
 
-        // Label centered above the arrow
+    // Autonumber circle (part of the line layer)
+    if let Some(num) = msg.number {
+        let num_x = if msg.is_self {
+            msg.from_x - 12.0
+        } else {
+            msg.from_x.min(msg.to_x) - 5.0
+        };
+        let num_y = msg.y;
+        s.push_str(&format!(
+            r#"<circle cx="{}" cy="{}" r="8" fill="{}"/>"#,
+            num_x,
+            num_y,
+            theme.sequence.actor_fill.to_css(),
+        ));
+        s.push('\n');
+        s.push_str(&format!(
+            r#"<text class="seq-label" x="{}" y="{}" text-anchor="middle" dominant-baseline="central" fill="{}" font-size="10">{}</text>"#,
+            num_x, num_y, theme.sequence.actor_text.to_css(), num,
+        ));
+        s.push('\n');
+    }
+
+    s
+}
+
+fn render_message_label(msg: &PositionedMessage, theme: &Theme) -> String {
+    let mut s = String::new();
+
+    if msg.is_self {
+        // Self-message label centered above the self-message
+        let x = msg.from_x;
+        let sw = msg.self_width;
+        let y1 = msg.y;
+        let mid_x = x + sw / 2.0;
+        s.push_str(&format!(
+            r#"<text class="seq-label" x="{}" y="{}" text-anchor="middle" dominant-baseline="auto" fill="{}">{}</text>"#,
+            mid_x,
+            y1 - 5.0,
+            theme.text_color.to_css(),
+            escape_xml(&msg.label),
+        ));
+        s.push('\n');
+    } else {
+        // Regular message label centered above the arrow
         let mid_x = (msg.from_x + msg.to_x) / 2.0;
         s.push_str(&format!(
             r#"<text class="seq-label" x="{}" y="{}" text-anchor="middle" dominant-baseline="auto" fill="{}">{}</text>"#,
@@ -359,51 +427,24 @@ fn render_message(msg: &PositionedMessage, theme: &Theme) -> String {
         s.push('\n');
     }
 
-    // Autonumber
-    if let Some(num) = msg.number {
-        let num_x = if msg.is_self {
-            msg.from_x - 12.0
-        } else {
-            msg.from_x.min(msg.to_x) - 5.0
-        };
-        let num_y = msg.y;
-        s.push_str(&format!(
-            r#"<circle cx="{}" cy="{}" r="8" fill="{}"/>"#,
-            num_x, num_y, theme.actor_fill.to_css(),
-        ));
-        s.push('\n');
-        s.push_str(&format!(
-            r#"<text class="seq-label" x="{}" y="{}" text-anchor="middle" dominant-baseline="central" fill="{}" font-size="10">{}</text>"#,
-            num_x, num_y, theme.actor_text.to_css(), num,
-        ));
-        s.push('\n');
-    }
-
     s
 }
 
 fn arrow_attrs(arrow: ArrowType) -> (&'static str, &'static str) {
     match arrow {
-        ArrowType::SolidArrow => (
-            "",
-            r#" marker-end="url(#seq-arrowhead)""#,
-        ),
+        ArrowType::SolidArrow => ("", r#" marker-end="url(#seq-arrowhead)""#),
         ArrowType::DottedArrow => (
             r#" stroke-dasharray="5,5""#,
             r#" marker-end="url(#seq-arrowhead)""#,
         ),
-        ArrowType::SolidOpen => (
-            "",
-            r#" marker-end="url(#seq-arrowhead-open)""#,
-        ),
+        ArrowType::SolidOpen => ("", r#" marker-end="url(#seq-arrowhead-open)""#),
         ArrowType::DottedOpen => (
             r#" stroke-dasharray="5,5""#,
             r#" marker-end="url(#seq-arrowhead-open)""#,
         ),
-        ArrowType::SolidCross => (
-            "",
-            r#" marker-end="url(#seq-cross)""#,
-        ),
+        ArrowType::SolidParen => ("", ""),
+        ArrowType::DottedParen => (r#" stroke-dasharray="5,5""#, ""),
+        ArrowType::SolidCross => ("", r#" marker-end="url(#seq-cross)""#),
         ArrowType::DottedCross => (
             r#" stroke-dasharray="5,5""#,
             r#" marker-end="url(#seq-cross)""#,
@@ -411,19 +452,19 @@ fn arrow_attrs(arrow: ArrowType) -> (&'static str, &'static str) {
     }
 }
 
-fn render_block(block: &PositionedBlock, theme: &Theme) -> String {
+fn render_block_bg(block: &PositionedBlock, theme: &Theme) -> String {
     let mut s = String::new();
 
     // Block background
     s.push_str(&format!(
         r#"<rect x="{}" y="{}" width="{}" height="{}" rx="3" fill="{}" stroke="{}" stroke-width="1"/>"#,
         block.x, block.y, block.width, block.height,
-        theme.loop_fill.to_css(),
-        theme.loop_line.to_css(),
+        theme.sequence.loop_fill.to_css(),
+        theme.sequence.loop_line.to_css(),
     ));
     s.push('\n');
 
-    // Block kind label tab (just the kind keyword)
+    // Block kind label tab background (just the background, text will be in label layer)
     let kind_text = match block.kind {
         BlockKind::Alt => "alt",
         BlockKind::Loop => "loop",
@@ -444,10 +485,38 @@ fn render_block(block: &PositionedBlock, theme: &Theme) -> String {
         block.x + tab_w, block.y + tab_h - 4.0,
         block.x + tab_w - 4.0, block.y + tab_h,
         block.x, block.y + tab_h,
-        theme.label_box_fill.to_css(),
-        theme.loop_line.to_css(),
+        theme.sequence.label_box_fill.to_css(),
+        theme.sequence.loop_line.to_css(),
     ));
     s.push('\n');
+
+    // Section dividers (dashed lines only)
+    for divider in &block.sections {
+        s.push_str(&format!(
+            r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="1" stroke-dasharray="5,5"/>"#,
+            block.x, divider.y, block.x + block.width, divider.y,
+            theme.sequence.loop_line.to_css(),
+        ));
+        s.push('\n');
+    }
+
+    s
+}
+
+fn render_block_label(block: &PositionedBlock, theme: &Theme) -> String {
+    let mut s = String::new();
+
+    // Block kind label tab (just the kind keyword)
+    let kind_text = match block.kind {
+        BlockKind::Alt => "alt",
+        BlockKind::Loop => "loop",
+        BlockKind::Opt => "opt",
+        BlockKind::Par => "par",
+        BlockKind::Critical => "critical",
+        BlockKind::Break => "break",
+        BlockKind::Rect => "rect",
+    };
+    let tab_h = 20.0;
 
     // Kind text inside tab
     s.push_str(&format!(
@@ -459,7 +528,7 @@ fn render_block(block: &PositionedBlock, theme: &Theme) -> String {
     ));
     s.push('\n');
 
-    // Condition label centered in the block
+    // Condition label centered in the block header area
     if !block.label.is_empty() {
         let condition_text = format!("[{}]", block.label);
         let center_x = block.x + block.width / 2.0;
@@ -473,17 +542,8 @@ fn render_block(block: &PositionedBlock, theme: &Theme) -> String {
         s.push('\n');
     }
 
-    // Section dividers
+    // Divider labels
     for divider in &block.sections {
-        // Dashed line
-        s.push_str(&format!(
-            r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="1" stroke-dasharray="5,5"/>"#,
-            block.x, divider.y, block.x + block.width, divider.y,
-            theme.loop_line.to_css(),
-        ));
-        s.push('\n');
-
-        // Divider label centered in the block
         if let Some(label) = &divider.label {
             let div_text = format!("[{}]", label);
             let center_x = block.x + block.width / 2.0;

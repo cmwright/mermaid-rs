@@ -1,0 +1,25 @@
+// Mermaid Pie Chart PEG Grammar
+// Handles: pie [title] followed by "label": value pairs
+
+pie_chart = {
+    SOI ~ NEWLINE* ~ pie_header ~ NEWLINE* ~
+    (pie_slice ~ stmt_sep)* ~ pie_slice? ~
+    NEWLINE* ~ EOI
+}
+
+pie_header = { "pie" ~ (^"title" ~ pie_title)? }
+
+pie_title = @{ (!NEWLINE ~ ANY)* }
+
+pie_slice = { pie_label ~ ":" ~ pie_value }
+
+pie_label = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
+
+pie_value = @{ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? }
+
+stmt_sep = _{ (NEWLINE | ";")+ }
+
+// ── Primitives ──────────────────────────────────────────────
+
+WHITESPACE = _{ " " | "\t" }
+NEWLINE    = _{ "\r\n" | "\n" | "\r" }

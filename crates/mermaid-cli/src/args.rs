@@ -18,8 +18,8 @@ pub struct CliArgs {
     #[arg(short = 'o', long = "output")]
     pub output: Option<PathBuf>,
 
-    /// Output format (currently: svg)
-    #[arg(short = 'f', long = "format", value_parser = ["svg"])]
+    /// Output format: svg or png
+    #[arg(short = 'f', long = "format", value_parser = ["svg", "png"])]
     pub format: Option<String>,
 
     /// Theme: default, dark, forest, neutral

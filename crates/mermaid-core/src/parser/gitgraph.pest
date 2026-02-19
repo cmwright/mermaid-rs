@@ -1,0 +1,74 @@
+// Mermaid gitGraph PEG Grammar
+
+gitgraph = {
+    SOI ~ NEWLINE* ~ gitgraph_header ~ NEWLINE* ~
+    (git_statement ~ stmt_sep)* ~ git_statement? ~
+    NEWLINE* ~ EOI
+}
+
+gitgraph_header = { "gitGraph" ~ ":"? }
+
+stmt_sep = _{ (NEWLINE | ";")+ }
+
+// ── Statements ──────────────────────────────────────────────
+
+git_statement = _{
+    git_comment
+    | commit_stmt
+    | branch_stmt
+    | checkout_stmt
+    | merge_stmt
+}
+
+git_comment = _{ "%%" ~ (!NEWLINE ~ ANY)* }
+
+// ── Commit ──────────────────────────────────────────────────
+
+commit_stmt = {
+    "commit" ~ commit_option*
+}
+
+commit_option = _{
+    commit_id
+    | commit_tag
+    | commit_type
+    | commit_message
+}
+
+commit_id = { "id:" ~ quoted_value }
+
+commit_tag = { "tag:" ~ quoted_value }
+
+commit_type = { "type:" ~ commit_type_value }
+
+commit_type_value = @{ "NORMAL" | "REVERSE" | "HIGHLIGHT" }
+
+// Bare quoted string after commit (no keyword prefix)
+commit_message = { quoted_value }
+
+quoted_value = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
+
+// ── Branch ──────────────────────────────────────────────────
+
+branch_stmt = {
+    "branch" ~ branch_name
+}
+
+// ── Checkout ────────────────────────────────────────────────
+
+checkout_stmt = {
+    "checkout" ~ branch_name
+}
+
+// ── Merge ───────────────────────────────────────────────────
+
+merge_stmt = {
+    "merge" ~ branch_name
+}
+
+branch_name = @{ (ASCII_ALPHANUMERIC | "_" | "-" | "/" | ".")+ }
+
+// ── Primitives ──────────────────────────────────────────────
+
+WHITESPACE = _{ " " | "\t" }
+NEWLINE    = _{ "\r\n" | "\n" | "\r" }

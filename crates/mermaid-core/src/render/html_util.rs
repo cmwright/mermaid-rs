@@ -56,14 +56,20 @@ pub fn parse_segments(line: &str) -> Vec<TextSegment> {
             match tag_lower.as_str() {
                 "<b>" | "<strong>" => {
                     if !current.is_empty() {
-                        segments.push(TextSegment { text: current.clone(), bold });
+                        segments.push(TextSegment {
+                            text: current.clone(),
+                            bold,
+                        });
                         current.clear();
                     }
                     bold = true;
                 }
                 "</b>" | "</strong>" => {
                     if !current.is_empty() {
-                        segments.push(TextSegment { text: current.clone(), bold });
+                        segments.push(TextSegment {
+                            text: current.clone(),
+                            bold,
+                        });
                         current.clear();
                     }
                     bold = false;
@@ -76,7 +82,10 @@ pub fn parse_segments(line: &str) -> Vec<TextSegment> {
     }
 
     if !current.is_empty() {
-        segments.push(TextSegment { text: current, bold });
+        segments.push(TextSegment {
+            text: current,
+            bold,
+        });
     }
 
     segments

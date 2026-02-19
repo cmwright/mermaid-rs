@@ -1,21 +1,21 @@
+pub mod compound;
+pub mod edge_routing;
+pub mod graph_builder;
+pub mod normalize;
+pub mod sugiyama;
+pub mod types;
+
 use crate::ast::flowchart::{Direction, FlowchartAst};
 use crate::error::Result;
 use crate::layout::text_measure::TextMeasurer;
 
 // Re-export public types for API compatibility
-pub use crate::layout::types::{
-    PositionedEdge, PositionedGraph, PositionedNode, PositionedSubgraph,
-};
+pub use types::{PositionedEdge, PositionedGraph, PositionedNode, PositionedSubgraph};
 
 use std::collections::HashMap;
 
-use crate::layout::compound;
-use crate::layout::edge_routing;
-use crate::layout::graph_builder;
-use crate::layout::normalize;
-use crate::layout::sugiyama;
-use crate::layout::sugiyama::dummy_nodes::DummyChain;
-use crate::layout::types::*;
+use sugiyama::dummy_nodes::DummyChain;
+use types::*;
 
 /// Compute layout positions for a flowchart AST.
 pub fn layout_flowchart(
@@ -49,8 +49,12 @@ pub fn layout_flowchart(
     let mut positioned_nodes = build_positioned_nodes(&graph, &result.positions);
 
     // 8. Position subgraphs (with style overrides)
-    let mut positioned_subgraphs =
-        compound::position_subgraphs(&ast.subgraphs, &positioned_nodes, &ast.style_overrides, measurer);
+    let mut positioned_subgraphs = compound::position_subgraphs(
+        &ast.subgraphs,
+        &positioned_nodes,
+        &ast.style_overrides,
+        measurer,
+    );
 
     // 9. Ensure sibling subgraphs do not overlap
     compound::separate_overlapping_sibling_subgraphs(
@@ -61,15 +65,15 @@ pub fn layout_flowchart(
         &all_edges,
         is_horizontal,
     );
-    positioned_subgraphs =
-        compound::position_subgraphs(&ast.subgraphs, &positioned_nodes, &ast.style_overrides, measurer);
+    positioned_subgraphs = compound::position_subgraphs(
+        &ast.subgraphs,
+        &positioned_nodes,
+        &ast.style_overrides,
+        measurer,
+    );
 
     // 10. Extract bend points and label positions from dummy node positions, then route edges
-    let extraction = build_edge_bend_points(
-        &graph,
-        &result.dummy_chains,
-        &result.positions,
-    );
+    let extraction = build_edge_bend_points(&graph, &result.dummy_chains, &result.positions);
     let mut positioned_edges = edge_routing::route_edges(
         &positioned_nodes,
         &all_edges,

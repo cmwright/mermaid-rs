@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ast::common::StyleProperties;
 use crate::ast::flowchart::{EdgeDef, FlowchartAst, StyleOverride, SubgraphDef};
-use crate::layout::graph_builder::SubgraphMembership;
+use crate::layout::flowchart::graph_builder::SubgraphMembership;
+use crate::layout::flowchart::types::*;
 use crate::layout::text_measure::TextMeasurer;
-use crate::layout::types::*;
 
 const SUBGRAPH_TITLE_SIDE_PADDING: f64 = 18.0;
 
@@ -118,7 +118,7 @@ fn measure_subgraph_title_width(label: &str, measurer: &TextMeasurer<'_>) -> f64
     let normalized = crate::render::html_util::normalize_br(label);
     normalized
         .split('\n')
-        .map(|line| crate::render::html_util::strip_html_tags(line))
+        .map(crate::render::html_util::strip_html_tags)
         .map(|line| measurer.measure(&line).width)
         .fold(0.0, f64::max)
 }
@@ -296,8 +296,8 @@ fn shift_nodes_in_subgraph(
 }
 
 /// Post-processing step to compact subgraph nodes by shifting them toward
-the subgraph's centroid. This helps keep nodes in the same subgraph closer
-together after the Sugiyama layout has spread them across ranks.
+/// the subgraph's centroid. This helps keep nodes in the same subgraph closer
+/// together after the Sugiyama layout has spread them across ranks.
 pub fn compact_subgraphs(
     nodes: &mut [PositionedNode],
     membership: &SubgraphMembership,
@@ -317,7 +317,7 @@ pub fn compact_subgraphs(
     }
 
     // For each subgraph, shift nodes toward the median position
-    for (_sg_id, sg_nodes) in subgraph_nodes {
+    for (_sg_id, mut sg_nodes) in subgraph_nodes {
         if sg_nodes.len() <= 1 {
             continue;
         }

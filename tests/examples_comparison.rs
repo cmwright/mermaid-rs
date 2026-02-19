@@ -197,10 +197,7 @@ fn build_html(results: &[(&Example, Result<String, String>)]) -> String {
 
         match result {
             Ok(svg) => {
-                html.push_str(&format!(
-                    "  <div class=\"svg-container\">{}</div>\n",
-                    svg
-                ));
+                html.push_str(&format!("  <div class=\"svg-container\">{}</div>\n", svg));
             }
             Err(err) => {
                 html.push_str(&format!(
@@ -241,7 +238,10 @@ fn generate_examples_comparison() {
     let results: Vec<(&Example, Result<String, String>)> = EXAMPLES
         .iter()
         .map(|ex| {
-            let result = render(ex.source, &config).map_err(|e| format!("{}", e));
+            let result: Result<String, String> = match render(ex.source, &config) {
+                Ok(output) => output.into_svg().map_err(|e| format!("{}", e)),
+                Err(e) => Err(format!("{}", e)),
+            };
             (ex, result)
         })
         .collect();

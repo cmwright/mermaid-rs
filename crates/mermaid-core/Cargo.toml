@@ -10,6 +10,8 @@ petgraph = "0.8"
 ab_glyph = "0.2"
 thiserror.workspace = true
 log.workspace = true
+resvg = "0.44"
+png = "0.17"
 
 [dev-dependencies]
 pretty_assertions = "1"

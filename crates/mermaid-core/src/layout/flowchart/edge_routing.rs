@@ -1,5 +1,5 @@
-use crate::ast::flowchart::EdgeDef;
-use crate::layout::types::*;
+use crate::ast::flowchart::{EdgeDef, NodeShape};
+use crate::layout::flowchart::types::*;
 use std::collections::HashMap;
 
 /// Route edges using dummy-node bend points for long edges and S-curve fallback
@@ -75,11 +75,11 @@ fn route_with_bend_points(
 ) -> Vec<(f64, f64)> {
     // First bend point direction determines exit angle from source
     let first_target = bend_points.first().copied().unwrap_or((to.x, to.y));
-    let start = intersect_rect(from, first_target.0, first_target.1);
+    let start = intersect_shape(from, first_target.0, first_target.1);
 
     // Last bend point direction determines entry angle into target
     let last_target = bend_points.last().copied().unwrap_or((from.x, from.y));
-    let end = intersect_rect(to, last_target.0, last_target.1);
+    let end = intersect_shape(to, last_target.0, last_target.1);
 
     // Build the raw waypoint sequence
     let mut raw = Vec::with_capacity(bend_points.len() + 2);
@@ -151,8 +151,8 @@ fn route_short_edge(
     nodes: &[PositionedNode],
     is_horizontal: bool,
 ) -> Vec<(f64, f64)> {
-    let start = intersect_rect(from, to.x, to.y);
-    let end = intersect_rect(to, from.x, from.y);
+    let start = intersect_shape(from, to.x, to.y);
+    let end = intersect_shape(to, from.x, from.y);
 
     let eps = 1e-6;
 
@@ -182,7 +182,15 @@ fn route_short_edge(
 
     for &off in &offsets {
         let points = build_smooth_waypoints(
-            start, end, main_s, cross_s, main_e, cross_e, num_steps, off, is_horizontal,
+            start,
+            end,
+            main_s,
+            cross_s,
+            main_e,
+            cross_e,
+            num_steps,
+            off,
+            is_horizontal,
         );
 
         if path_avoids_nodes(&points, &from.id, &to.id, nodes) {
@@ -192,40 +200,86 @@ fn route_short_edge(
 
     // Last resort
     build_smooth_waypoints(
-        start, end, main_s, cross_s, main_e, cross_e, num_steps, 0.0, is_horizontal,
+        start,
+        end,
+        main_s,
+        cross_s,
+        main_e,
+        cross_e,
+        num_steps,
+        0.0,
+        is_horizontal,
     )
 }
 
-/// Dagre-style ray-rect intersection: finds where a ray from the rectangle's
-/// center toward (target_x, target_y) exits the rectangle boundary.
-fn intersect_rect(node: &PositionedNode, target_x: f64, target_y: f64) -> (f64, f64) {
-    let hw = node.width / 2.0;
-    let hh = node.height / 2.0;
+/// Shape-aware intersection: finds where a ray from the node's center toward
+/// (target_x, target_y) exits the node's actual shape boundary.
+fn intersect_shape(node: &PositionedNode, target_x: f64, target_y: f64) -> (f64, f64) {
     let dx = target_x - node.x;
     let dy = target_y - node.y;
 
     // Degenerate case: target is at node center
     if dx.abs() < 1e-9 && dy.abs() < 1e-9 {
-        return (node.x, node.y + hh);
+        return (node.x, node.y + node.height / 2.0);
     }
 
+    match node.shape {
+        NodeShape::Circle | NodeShape::DoubleCircle => {
+            intersect_circle(node.x, node.y, node.width / 2.0, target_x, target_y)
+        }
+        NodeShape::Diamond => intersect_diamond(
+            node.x,
+            node.y,
+            node.width / 2.0,
+            node.height / 2.0,
+            target_x,
+            target_y,
+        ),
+        _ => intersect_rect_impl(node.x, node.y, node.width / 2.0, node.height / 2.0, dx, dy),
+    }
+}
+
+/// Circle intersection: normalize direction vector and scale by radius.
+fn intersect_circle(cx: f64, cy: f64, r: f64, tx: f64, ty: f64) -> (f64, f64) {
+    let dx = tx - cx;
+    let dy = ty - cy;
+    let len = (dx * dx + dy * dy).sqrt();
+    if len < 1e-9 {
+        return (cx, cy + r);
+    }
+    (cx + r * dx / len, cy + r * dy / len)
+}
+
+/// Diamond intersection: diamond boundary is |x/rx| + |y/ry| = 1.
+/// Scale the direction vector so the point lies on this boundary.
+fn intersect_diamond(cx: f64, cy: f64, rx: f64, ry: f64, tx: f64, ty: f64) -> (f64, f64) {
+    let dx = tx - cx;
+    let dy = ty - cy;
+    // t satisfies |t*dx|/rx + |t*dy|/ry = 1
+    let denom = dx.abs() / rx + dy.abs() / ry;
+    if denom < 1e-9 {
+        return (cx, cy + ry);
+    }
+    let t = 1.0 / denom;
+    (cx + t * dx, cy + t * dy)
+}
+
+/// Rectangle intersection: ray from center exits the rectangular boundary.
+fn intersect_rect_impl(cx: f64, cy: f64, hw: f64, hh: f64, dx: f64, dy: f64) -> (f64, f64) {
     let abs_dx = dx.abs();
     let abs_dy = dy.abs();
 
-    // Determine which edge the ray hits first
     let (sx, sy) = if abs_dy * hw > abs_dx * hh {
-        // Hits top or bottom edge
         let sy = if dy > 0.0 { hh } else { -hh };
         let sx = if abs_dy > 1e-9 { sy * dx / dy } else { 0.0 };
         (sx, sy)
     } else {
-        // Hits left or right edge
         let sx = if dx > 0.0 { hw } else { -hw };
         let sy = if abs_dx > 1e-9 { sx * dy / dx } else { 0.0 };
         (sx, sy)
     };
 
-    (node.x + sx, node.y + sy)
+    (cx + sx, cy + sy)
 }
 
 fn edge_label_anchor(points: &[(f64, f64)]) -> (f64, f64) {
@@ -253,6 +307,7 @@ fn edge_label_anchor(points: &[(f64, f64)]) -> (f64, f64) {
 }
 
 /// Build waypoints along a smooth curve between start and end.
+#[allow(clippy::too_many_arguments)]
 fn build_smooth_waypoints(
     start: (f64, f64),
     end: (f64, f64),

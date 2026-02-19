@@ -62,25 +62,32 @@ display_name = @{ (!NEWLINE ~ ANY)+ }
 // ── Messages ────────────────────────────────────────────────
 
 message_stmt = {
-    msg_participant_id ~ arrow_type ~ msg_participant_id ~ activation_modifier? ~ ":" ~ message_text
+    msg_participant_id ~ arrow_type ~ pre_activation? ~ msg_participant_id ~ post_activation? ~ ":" ~ message_text
 }
+
+pre_activation = @{ "+" | "-" }
+post_activation = @{ "+" | "-" }
 
 // Arrow types — ordered longest-first for correct PEG matching
 arrow_type = {
     dotted_arrow_seq
     | dotted_cross
-    | dotted_open
+    | dotted_open_arrow
+    | dotted_open_paren
     | solid_arrow_seq
     | solid_cross
-    | solid_open
+    | solid_open_arrow
+    | solid_open_paren
 }
 
-solid_arrow_seq  = @{ "->>" }
-dotted_arrow_seq = @{ "-->>" }
-solid_open       = @{ "->" }
-dotted_open      = @{ "-->" }
-solid_cross      = @{ "-x" }
-dotted_cross     = @{ "--x" }
+solid_arrow_seq   = @{ "->>" }
+dotted_arrow_seq  = @{ "-->>" }
+solid_open_arrow  = @{ "->" }
+dotted_open_arrow = @{ "-->" }
+solid_open_paren  = @{ "-)" }
+dotted_open_paren = @{ "--)" }
+solid_cross       = @{ "-x" }
+dotted_cross      = @{ "--x" }
 
 activation_modifier = @{ "+" | "-" }
 

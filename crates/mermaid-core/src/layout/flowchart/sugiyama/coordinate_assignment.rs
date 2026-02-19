@@ -2,8 +2,8 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::ast::flowchart::Direction;
-use crate::layout::graph_builder::SubgraphMembership;
-use crate::layout::types::*;
+use crate::layout::flowchart::graph_builder::SubgraphMembership;
+use crate::layout::flowchart::types::*;
 
 /// Brandes-Köpf coordinate assignment.
 /// - Main axis: accumulate max_thickness_in_rank + RANK_SEP
@@ -48,10 +48,7 @@ pub fn assign_coordinates(
     for &idx in layers.iter().flat_map(|l| l.iter()) {
         let m = main_pos[&idx];
         let c = cross_pos.get(&idx).copied().unwrap_or(0.0);
-        positions.insert(
-            idx,
-            if is_horizontal { (m, c) } else { (c, m) },
-        );
+        positions.insert(idx, if is_horizontal { (m, c) } else { (c, m) });
     }
 
     // ── BT / RL mirror ──
@@ -150,10 +147,7 @@ fn brandes_kopf(
     // Balance: average middle two of 4 values per node
     let mut result: HashMap<NodeIndex, f64> = HashMap::new();
     for &idx in layers.iter().flat_map(|l| l.iter()) {
-        let mut vals: Vec<f64> = xss
-            .iter()
-            .filter_map(|xs| xs.get(&idx).copied())
-            .collect();
+        let mut vals: Vec<f64> = xss.iter().filter_map(|xs| xs.get(&idx).copied()).collect();
         vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let balanced = match vals.len() {
             4 => (vals[1] + vals[2]) / 2.0,
@@ -215,8 +209,7 @@ fn vertical_alignment(
             let lo = mp.floor() as usize;
             let hi = mp.ceil() as usize;
 
-            for i in lo..=hi {
-                let w = ws[i];
+            for &w in ws.iter().take(hi + 1).skip(lo) {
                 let w_pos = pos.get(&w).copied().unwrap_or(0) as i64;
                 if align[&v] == v && prev_idx < w_pos {
                     // Form block: w → v, and v joins w's block
@@ -257,8 +250,7 @@ fn horizontal_compaction(
             let ur = root[&u];
             let vr = root[&v];
             if ur != vr {
-                let sep =
-                    node_separation(graph, u, v, is_horizontal, membership, empty_path);
+                let sep = node_separation(graph, u, v, is_horizontal, membership, empty_path);
                 let w = out_edges.entry(ur).or_default().entry(vr).or_insert(0.0f64);
                 *w = w.max(sep);
             }
@@ -310,7 +302,11 @@ fn horizontal_compaction(
 
     // Handle any blocks not reached by Kahn's (cycles)
     let topo_set: HashSet<NodeIndex> = topo.iter().copied().collect();
-    let mut remaining: Vec<NodeIndex> = block_set.iter().filter(|b| !topo_set.contains(b)).copied().collect();
+    let mut remaining: Vec<NodeIndex> = block_set
+        .iter()
+        .filter(|b| !topo_set.contains(b))
+        .copied()
+        .collect();
     remaining.sort_by_key(|n| n.index()); // deterministic order
     topo.extend(remaining);
 
@@ -420,8 +416,11 @@ fn find_smallest_width(
         let mut lo = f64::INFINITY;
         let mut hi = f64::NEG_INFINITY;
         for (&n, &x) in xs {
-            let half =
-                if is_horizontal { graph[n].height } else { graph[n].width } / 2.0;
+            let half = if is_horizontal {
+                graph[n].height
+            } else {
+                graph[n].width
+            } / 2.0;
             lo = lo.min(x - half);
             hi = hi.max(x + half);
         }
@@ -448,24 +447,30 @@ fn align_to_smallest(
         let mut lo = f64::INFINITY;
         let mut hi = f64::NEG_INFINITY;
         for (&n, &x) in xs {
-            let half =
-                if is_horizontal { graph[n].height } else { graph[n].width } / 2.0;
+            let half = if is_horizontal {
+                graph[n].height
+            } else {
+                graph[n].width
+            } / 2.0;
             lo = lo.min(x - half);
             hi = hi.max(x + half);
         }
         (lo, hi)
     };
 
-    for i in 0..xss.len() {
+    for (i, xs) in xss.iter_mut().enumerate() {
         if i == smallest {
             continue;
         }
 
         let mut xs_lo = f64::INFINITY;
         let mut xs_hi = f64::NEG_INFINITY;
-        for (&n, &x) in &xss[i] {
-            let half =
-                if is_horizontal { graph[n].height } else { graph[n].width } / 2.0;
+        for (&n, &x) in xs.iter() {
+            let half = if is_horizontal {
+                graph[n].height
+            } else {
+                graph[n].width
+            } / 2.0;
             xs_lo = xs_lo.min(x - half);
             xs_hi = xs_hi.max(x + half);
         }
@@ -477,7 +482,7 @@ fn align_to_smallest(
             align_max - xs_hi
         };
 
-        for v in xss[i].values_mut() {
+        for v in xs.values_mut() {
             *v += delta;
         }
     }

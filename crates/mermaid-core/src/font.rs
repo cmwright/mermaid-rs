@@ -32,6 +32,11 @@ impl FontProvider {
         FontRef::try_from_slice(&self.font_data)
             .map_err(|e| MermaidError::Font(format!("Failed to load font: {}", e)))
     }
+
+    /// Get the raw font data.
+    pub fn font_data(&self) -> Vec<u8> {
+        self.font_data.clone()
+    }
 }
 
 impl Default for FontProvider {

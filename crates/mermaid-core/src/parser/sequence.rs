@@ -157,13 +157,16 @@ fn parse_message(pair: pest::iterators::Pair<'_, Rule>) -> Result<MessageDef> {
             Rule::arrow_type => {
                 arrow = parse_arrow_type(inner)?;
             }
-            Rule::activation_modifier => {
-                match inner.as_str() {
-                    "+" => activate_target = true,
-                    "-" => deactivate_source = true,
-                    _ => {}
-                }
-            }
+            Rule::pre_activation => match inner.as_str() {
+                "+" => activate_target = true,
+                "-" => deactivate_source = true,
+                _ => {}
+            },
+            Rule::post_activation => match inner.as_str() {
+                "+" => activate_target = true,
+                "-" => deactivate_source = true,
+                _ => {}
+            },
             Rule::message_text => {
                 label = inner.as_str().trim().to_string();
             }
@@ -182,12 +185,14 @@ fn parse_message(pair: pest::iterators::Pair<'_, Rule>) -> Result<MessageDef> {
 }
 
 fn parse_arrow_type(pair: pest::iterators::Pair<'_, Rule>) -> Result<ArrowType> {
-    for inner in pair.into_inner() {
+    if let Some(inner) = pair.into_inner().next() {
         return Ok(match inner.as_rule() {
             Rule::solid_arrow_seq => ArrowType::SolidArrow,
             Rule::dotted_arrow_seq => ArrowType::DottedArrow,
-            Rule::solid_open => ArrowType::SolidOpen,
-            Rule::dotted_open => ArrowType::DottedOpen,
+            Rule::solid_open_arrow => ArrowType::SolidOpen,
+            Rule::dotted_open_arrow => ArrowType::DottedOpen,
+            Rule::solid_open_paren => ArrowType::SolidParen,
+            Rule::dotted_open_paren => ArrowType::DottedParen,
             Rule::solid_cross => ArrowType::SolidCross,
             Rule::dotted_cross => ArrowType::DottedCross,
             _ => ArrowType::SolidArrow,
@@ -282,10 +287,7 @@ fn extract_note_over_parts(pair: pest::iterators::Pair<'_, Rule>) -> (Vec<String
     (participants, text)
 }
 
-fn parse_block(
-    pair: pest::iterators::Pair<'_, Rule>,
-    kind: BlockKind,
-) -> Result<BlockDef> {
+fn parse_block(pair: pest::iterators::Pair<'_, Rule>, kind: BlockKind) -> Result<BlockDef> {
     let mut label = String::new();
     let mut sections = Vec::new();
     let mut current_stmts: Vec<SequenceStatement> = Vec::new();
@@ -386,7 +388,11 @@ fn parse_block_body(pair: pest::iterators::Pair<'_, Rule>) -> Result<Vec<Sequenc
 fn resolve_implicit_participants(ast: &mut SequenceAst) {
     let mut seen: Vec<String> = ast.participants.iter().map(|p| p.id.clone()).collect();
 
-    fn scan_statements(stmts: &[SequenceStatement], seen: &mut Vec<String>, implicit: &mut Vec<ParticipantDef>) {
+    fn scan_statements(
+        stmts: &[SequenceStatement],
+        seen: &mut Vec<String>,
+        implicit: &mut Vec<ParticipantDef>,
+    ) {
         for stmt in stmts {
             match stmt {
                 SequenceStatement::Message(msg) => {
@@ -453,7 +459,8 @@ mod tests {
 
     #[test]
     fn test_parse_participant_declarations() {
-        let source = "sequenceDiagram\n    participant A\n    participant B as Bob\n    A->>B: Hello";
+        let source =
+            "sequenceDiagram\n    participant A\n    participant B as Bob\n    A->>B: Hello";
         let ast = parse_sequence(source).unwrap();
         assert_eq!(ast.participants.len(), 2);
         assert_eq!(ast.participants[0].id, "A");
@@ -464,7 +471,8 @@ mod tests {
 
     #[test]
     fn test_parse_actor() {
-        let source = "sequenceDiagram\n    actor User\n    participant Server\n    User->>Server: Request";
+        let source =
+            "sequenceDiagram\n    actor User\n    participant Server\n    User->>Server: Request";
         let ast = parse_sequence(source).unwrap();
         assert_eq!(ast.participants.len(), 2);
         assert_eq!(ast.participants[0].kind, ParticipantKind::Actor);
@@ -473,9 +481,9 @@ mod tests {
 
     #[test]
     fn test_parse_arrow_types() {
-        let source = "sequenceDiagram\n    A->>B: solid arrow\n    A-->>B: dotted arrow\n    A->B: solid open\n    A-->B: dotted open\n    A-xB: solid cross\n    A--xB: dotted cross";
+        let source = "sequenceDiagram\n    A->>B: solid arrow\n    A-->>B: dotted arrow\n    A->B: solid open arrow\n    A-->B: dotted open arrow\n    A-)B: solid open paren\n    A--)B: dotted open paren\n    A-xB: solid cross\n    A--xB: dotted cross";
         let ast = parse_sequence(source).unwrap();
-        assert_eq!(ast.statements.len(), 6);
+        assert_eq!(ast.statements.len(), 8);
         if let SequenceStatement::Message(m) = &ast.statements[0] {
             assert_eq!(m.arrow, ArrowType::SolidArrow);
         }
@@ -489,10 +497,56 @@ mod tests {
             assert_eq!(m.arrow, ArrowType::DottedOpen);
         }
         if let SequenceStatement::Message(m) = &ast.statements[4] {
-            assert_eq!(m.arrow, ArrowType::SolidCross);
+            assert_eq!(m.arrow, ArrowType::SolidParen);
         }
         if let SequenceStatement::Message(m) = &ast.statements[5] {
+            assert_eq!(m.arrow, ArrowType::DottedParen);
+        }
+        if let SequenceStatement::Message(m) = &ast.statements[6] {
+            assert_eq!(m.arrow, ArrowType::SolidCross);
+        }
+        if let SequenceStatement::Message(m) = &ast.statements[7] {
             assert_eq!(m.arrow, ArrowType::DottedCross);
+        }
+    }
+
+    #[test]
+    fn test_parse_activation_syntax() {
+        // Test activation marker before target (e.g., ->>+target)
+        let source = "sequenceDiagram\n    A->>+B: Activate B\n    B-->>-A: Deactivate A";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.statements.len(), 2);
+        if let SequenceStatement::Message(m) = &ast.statements[0] {
+            assert_eq!(m.from, "A");
+            assert_eq!(m.to, "B");
+            assert!(m.activate_target);
+            assert!(!m.deactivate_source);
+        }
+        if let SequenceStatement::Message(m) = &ast.statements[1] {
+            assert_eq!(m.from, "B");
+            assert_eq!(m.to, "A");
+            assert!(!m.activate_target);
+            assert!(m.deactivate_source);
+        }
+
+        // Test activation marker after target (e.g., ->>target+)
+        let source2 = "sequenceDiagram\n    A->>B+: Activate B\n    B-->>A-: Deactivate A";
+        let ast2 = parse_sequence(source2).unwrap();
+        if let SequenceStatement::Message(m) = &ast2.statements[0] {
+            assert!(m.activate_target);
+        }
+        if let SequenceStatement::Message(m) = &ast2.statements[1] {
+            assert!(m.deactivate_source);
+        }
+
+        // Test combined activation markers
+        let source3 = "sequenceDiagram\n    A->>+B+: Activate B\n    B-->>-A-: Deactivate A";
+        let ast3 = parse_sequence(source3).unwrap();
+        if let SequenceStatement::Message(m) = &ast3.statements[0] {
+            assert!(m.activate_target);
+        }
+        if let SequenceStatement::Message(m) = &ast3.statements[1] {
+            assert!(m.deactivate_source);
         }
     }
 
@@ -561,7 +615,10 @@ mod tests {
         assert_eq!(ast.participants[0].id, "User");
         assert_eq!(ast.participants[0].kind, ParticipantKind::Actor);
         assert_eq!(ast.participants[1].id, "UI");
-        assert_eq!(ast.participants[1].display_name.as_deref(), Some("Factor UI"));
+        assert_eq!(
+            ast.participants[1].display_name.as_deref(),
+            Some("Factor UI")
+        );
         assert_eq!(ast.participants[5].id, "DB");
 
         // Count messages and blocks
@@ -607,9 +664,6 @@ mod tests {
     fn test_detect_sequence_diagram() {
         use crate::parser::{detect_diagram_kind, DiagramKind};
         let source = "sequenceDiagram\n    A->>B: Hello";
-        assert_eq!(
-            detect_diagram_kind(source).unwrap(),
-            DiagramKind::Sequence
-        );
+        assert_eq!(detect_diagram_kind(source).unwrap(), DiagramKind::Sequence);
     }
 }

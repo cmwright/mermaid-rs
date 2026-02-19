@@ -2,7 +2,7 @@ use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
 use petgraph::visit::EdgeRef;
 use std::collections::HashSet;
 
-use crate::layout::types::*;
+use crate::layout::flowchart::types::*;
 
 /// DFS-based greedy feedback arc set. Finds back-edges in the graph and
 /// reverses them to make the graph acyclic. Returns the set of reversed

@@ -7,6 +7,6 @@ pub mod parser;
 pub mod render;
 
 // Re-export main public API
-pub use diagram::{render, OutputFormat, RenderConfig};
+pub use diagram::{render, OutputFormat, RenderConfig, RenderOutput};
 pub use error::{MermaidError, Result};
 pub use parser::DiagramKind;

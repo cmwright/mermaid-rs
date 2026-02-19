@@ -1,15 +1,15 @@
 use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::HashMap;
 
-use crate::layout::graph_builder::SubgraphMembership;
-use crate::layout::types::*;
+use crate::layout::flowchart::graph_builder::SubgraphMembership;
+use crate::layout::flowchart::types::*;
 
 /// Barycenter heuristic with alternating up/down sweeps.
 /// Enforces subgraph contiguity: nodes belonging to the same subgraph
 /// remain contiguous within each rank.
 pub fn minimize_crossings(
     graph: &DiGraph<NodeData, EdgeData>,
-    layers: &mut Vec<Vec<NodeIndex>>,
+    layers: &mut [Vec<NodeIndex>],
     membership: &SubgraphMembership,
     num_iterations: usize,
 ) {
@@ -132,7 +132,9 @@ fn sort_layer_by_barycenter(
             .filter_map(|n| barycenters.get(n))
             .sum::<f64>()
             / b_members.len().max(1) as f64;
-        avg_a.partial_cmp(&avg_b).unwrap_or(std::cmp::Ordering::Equal)
+        avg_a
+            .partial_cmp(&avg_b)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     // Flatten back into layer
