@@ -42,6 +42,52 @@ impl<'a> TextMeasurer<'a> {
         }
     }
 
+    /// Word-wrap text so no line exceeds `max_width` pixels.
+    ///
+    /// For each line (already split by `\n`), if the line width exceeds
+    /// `max_width`, break at word boundaries. Single words longer than
+    /// `max_width` are kept intact (never mid-word break).
+    pub fn wrap_text(&self, text: &str, max_width: f64) -> String {
+        let mut result_lines: Vec<String> = Vec::new();
+
+        for line in text.split('\n') {
+            let line_width = self.measure(line).width;
+            if line_width <= max_width {
+                result_lines.push(line.to_string());
+                continue;
+            }
+
+            // Need to wrap this line at word boundaries
+            let words: Vec<&str> = line.split_whitespace().collect();
+            if words.is_empty() {
+                result_lines.push(String::new());
+                continue;
+            }
+
+            let mut current_line = String::new();
+            for word in &words {
+                if current_line.is_empty() {
+                    // First word on the line — always add it (even if it exceeds max_width)
+                    current_line = word.to_string();
+                } else {
+                    let candidate = format!("{} {}", current_line, word);
+                    if self.measure(&candidate).width <= max_width {
+                        current_line = candidate;
+                    } else {
+                        // Current line is full, start a new one
+                        result_lines.push(current_line);
+                        current_line = word.to_string();
+                    }
+                }
+            }
+            if !current_line.is_empty() {
+                result_lines.push(current_line);
+            }
+        }
+
+        result_lines.join("\n")
+    }
+
     /// Measure multi-line text (split by newline).
     pub fn measure_multiline(&self, text: &str, line_spacing: f32) -> TextMetrics {
         let lines: Vec<&str> = text.lines().collect();

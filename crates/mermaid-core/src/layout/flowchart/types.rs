@@ -3,11 +3,12 @@ use crate::ast::flowchart::{Direction, EdgeType, NodeShape};
 
 // ── Layout constants ────────────────────────────────────────
 
-pub const NODE_PADDING_H: f64 = 10.0;
-pub const NODE_PADDING_V: f64 = 6.0;
+pub const NODE_PADDING_H: f64 = 16.0;
+pub const NODE_PADDING_V: f64 = 15.0;
 pub const MIN_NODE_WIDTH: f64 = 0.0;
 pub const MIN_NODE_HEIGHT: f64 = 0.0;
-pub const NODE_SEP: f64 = 30.0;
+pub const MAX_NODE_TEXT_WIDTH: f64 = 200.0;
+pub const NODE_SEP: f64 = 50.0;
 pub const EDGE_SEP: f64 = 10.0;
 pub const RANK_SEP: f64 = 50.0;
 pub const SUBGRAPH_PADDING: f64 = 12.0;

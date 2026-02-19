@@ -199,13 +199,25 @@ pub fn build_petgraph(
     for (id, (node_def, style)) in sorted_nodes {
         let label = node_def.label.clone().unwrap_or_else(|| id.clone());
 
-        let measure_text = crate::render::html_util::strip_html_tags(
+        let clean_text = crate::render::html_util::strip_html_tags(
             &crate::render::html_util::normalize_br(&label),
         );
-        let text_metrics = if measure_text.contains('\n') {
-            measurer.measure_multiline(&measure_text, 4.0)
+
+        // Word-wrap long text and update the label if wrapping occurred
+        let wrapped_text = measurer.wrap_text(&clean_text, MAX_NODE_TEXT_WIDTH);
+        let label = if wrapped_text != clean_text {
+            // Wrapping occurred — use the wrapped plain text as the label
+            wrapped_text.clone()
         } else {
-            measurer.measure(&measure_text)
+            // No wrapping needed — preserve original label (may contain HTML)
+            label
+        };
+
+        let measure_text = &wrapped_text;
+        let text_metrics = if measure_text.contains('\n') {
+            measurer.measure_multiline(measure_text, 4.0)
+        } else {
+            measurer.measure(measure_text)
         };
         let (width, height) = compute_node_size(&node_def.shape, &text_metrics);
 
