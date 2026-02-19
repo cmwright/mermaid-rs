@@ -255,15 +255,46 @@ fn render_note(note: &PositionedNote, theme: &Theme) -> String {
     ));
     s.push('\n');
 
-    // Note text
-    s.push_str(&format!(
-        r#"<text class="seq-note" x="{}" y="{}" text-anchor="middle" dominant-baseline="central" fill="{}">{}</text>"#,
-        note.x + note.width / 2.0,
-        note.y + note.height / 2.0,
-        theme.note_text.to_css(),
-        escape_xml(&note.text),
-    ));
-    s.push('\n');
+    // Note text (already normalized: <br/> → \n by layout phase)
+    let text_x = note.x + note.width / 2.0;
+    let text_color = theme.note_text.to_css();
+    let lines: Vec<&str> = note.text.split('\n').collect();
+
+    if lines.len() == 1 {
+        s.push_str(&format!(
+            r#"<text class="seq-note" x="{}" y="{}" text-anchor="middle" dominant-baseline="central" fill="{}">{}</text>"#,
+            text_x,
+            note.y + note.height / 2.0,
+            text_color,
+            escape_xml(lines[0]),
+        ));
+        s.push('\n');
+    } else {
+        let line_height = 1.2_f64;
+        let total_em = (lines.len() as f64 - 1.0) * line_height;
+        // Center the text block vertically in the note box
+        let start_y = note.y + note.height / 2.0;
+        let start_dy = -(total_em / 2.0);
+
+        s.push_str(&format!(
+            r#"<text class="seq-note" x="{}" y="{}" text-anchor="middle" fill="{}">"#,
+            text_x, start_y, text_color,
+        ));
+        s.push('\n');
+        for (i, line) in lines.iter().enumerate() {
+            let dy = if i == 0 {
+                format!("{}em", start_dy)
+            } else {
+                format!("{}em", line_height)
+            };
+            s.push_str(&format!(
+                r#"  <tspan x="{}" dy="{}" dominant-baseline="central">{}</tspan>"#,
+                text_x, dy, escape_xml(line),
+            ));
+            s.push('\n');
+        }
+        s.push_str("</text>\n");
+    }
 
     s
 }

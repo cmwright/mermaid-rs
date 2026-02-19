@@ -38,11 +38,11 @@ seq_comment = _{ "%%" ~ (!NEWLINE ~ ANY)* }
 // ── Participant / Actor ─────────────────────────────────────
 
 participant_stmt = {
-    "participant" ~ participant_id ~ ("as" ~ display_name)?
+    ^"participant" ~ participant_id ~ (^"as" ~ display_name)?
 }
 
 actor_stmt = {
-    "actor" ~ participant_id ~ ("as" ~ display_name)?
+    ^"actor" ~ participant_id ~ (^"as" ~ display_name)?
 }
 
 // General participant_id: used in declarations, activate/deactivate, notes
@@ -90,16 +90,16 @@ message_text = @{ (!NEWLINE ~ ANY)* }
 // ── Activation ──────────────────────────────────────────────
 
 activate_stmt = {
-    "activate" ~ participant_id
+    ^"activate" ~ participant_id
 }
 
 deactivate_stmt = {
-    "deactivate" ~ participant_id
+    ^"deactivate" ~ participant_id
 }
 
 // ── Autonumber ──────────────────────────────────────────────
 
-autonumber_stmt = { "autonumber" }
+autonumber_stmt = { ^"autonumber" }
 
 // ── Notes ───────────────────────────────────────────────────
 
@@ -110,15 +110,15 @@ note_stmt = {
 }
 
 note_left_of = {
-    "note" ~ "left" ~ "of" ~ participant_id ~ ":" ~ note_text
+    ^"note" ~ ^"left" ~ ^"of" ~ participant_id ~ ":" ~ note_text
 }
 
 note_right_of = {
-    "note" ~ "right" ~ "of" ~ participant_id ~ ":" ~ note_text
+    ^"note" ~ ^"right" ~ ^"of" ~ participant_id ~ ":" ~ note_text
 }
 
 note_over = {
-    "note" ~ "over" ~ participant_id_list ~ ":" ~ note_text
+    ^"note" ~ ^"over" ~ participant_id_list ~ ":" ~ note_text
 }
 
 participant_id_list = {
@@ -130,63 +130,63 @@ note_text = @{ (!NEWLINE ~ ANY)* }
 // ── Blocks ──────────────────────────────────────────────────
 
 block_alt = {
-    "alt" ~ block_label ~ NEWLINE+ ~
+    ^"alt" ~ block_label ~ NEWLINE+ ~
     block_body ~
     (else_section)* ~
-    "end"
+    ^"end"
 }
 
 else_section = {
-    "else" ~ block_label? ~ NEWLINE+ ~
+    ^"else" ~ block_label? ~ NEWLINE+ ~
     block_body
 }
 
 block_loop = {
-    "loop" ~ block_label ~ NEWLINE+ ~
+    ^"loop" ~ block_label ~ NEWLINE+ ~
     block_body ~
-    "end"
+    ^"end"
 }
 
 block_opt = {
-    "opt" ~ block_label ~ NEWLINE+ ~
+    ^"opt" ~ block_label ~ NEWLINE+ ~
     block_body ~
-    "end"
+    ^"end"
 }
 
 block_par = {
-    "par" ~ block_label ~ NEWLINE+ ~
+    ^"par" ~ block_label ~ NEWLINE+ ~
     block_body ~
     (and_section)* ~
-    "end"
+    ^"end"
 }
 
 and_section = {
-    "and" ~ block_label? ~ NEWLINE+ ~
+    ^"and" ~ block_label? ~ NEWLINE+ ~
     block_body
 }
 
 block_critical = {
-    "critical" ~ block_label ~ NEWLINE+ ~
+    ^"critical" ~ block_label ~ NEWLINE+ ~
     block_body ~
     (option_section)* ~
-    "end"
+    ^"end"
 }
 
 option_section = {
-    "option" ~ block_label? ~ NEWLINE+ ~
+    ^"option" ~ block_label? ~ NEWLINE+ ~
     block_body
 }
 
 block_break = {
-    "break" ~ block_label ~ NEWLINE+ ~
+    ^"break" ~ block_label ~ NEWLINE+ ~
     block_body ~
-    "end"
+    ^"end"
 }
 
 block_rect = {
-    "rect" ~ block_label ~ NEWLINE+ ~
+    ^"rect" ~ block_label ~ NEWLINE+ ~
     block_body ~
-    "end"
+    ^"end"
 }
 
 block_label = @{ (!NEWLINE ~ ANY)* }

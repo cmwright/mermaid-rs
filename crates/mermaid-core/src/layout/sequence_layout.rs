@@ -124,8 +124,8 @@ pub fn layout_sequence(
 
     // Phase C: Vertical layout
     let top_box_height = actor_infos.iter().map(|a| a.box_height).fold(0.0_f64, f64::max);
-    let mut cursor_y = DIAGRAM_PADDING + top_box_height + 15.0;
-    let lifeline_start_y = cursor_y;
+    let lifeline_start_y = DIAGRAM_PADDING + top_box_height;
+    let mut cursor_y = lifeline_start_y + 25.0;
 
     let mut messages = Vec::new();
     let mut blocks: Vec<PositionedBlock> = Vec::new();
@@ -195,12 +195,16 @@ pub fn layout_sequence(
         });
     }
 
-    // Compute bounding box
-    let rightmost = actor_infos
+    // Compute bounding box (consider actors and notes)
+    let rightmost_actor = actor_infos
         .iter()
         .map(|a| a.center_x + a.box_width / 2.0)
         .fold(0.0_f64, f64::max);
-    let width = rightmost + DIAGRAM_PADDING;
+    let rightmost_note = notes
+        .iter()
+        .map(|n| n.x + n.width)
+        .fold(0.0_f64, f64::max);
+    let width = rightmost_actor.max(rightmost_note) + DIAGRAM_PADDING;
     let height = cursor_y;
 
     Ok(SequenceLayout {
@@ -458,11 +462,12 @@ fn layout_statements(
             }
             SequenceStatement::Note(note) => {
                 let (note_x, note_w) = compute_note_position(note, actor_idx, actor_infos, measurer);
-                let text_metrics = measurer.measure_multiline(&note.text, 2.0);
+                let normalized = html_util::normalize_br(&note.text);
+                let text_metrics = measurer.measure_multiline(&normalized, 2.0);
                 let note_h = text_metrics.height + NOTE_PADDING * 2.0;
 
                 notes.push(PositionedNote {
-                    text: note.text.clone(),
+                    text: normalized,
                     x: note_x,
                     y: *cursor_y,
                     width: note_w,
@@ -545,7 +550,13 @@ fn compute_note_position(
     actor_infos: &[ActorInfo],
     measurer: &TextMeasurer,
 ) -> (f64, f64) {
-    let text_w = measurer.measure(&note.text).width + NOTE_PADDING * 2.0;
+    // Normalize <br/> to newlines and measure the widest line
+    let normalized = html_util::normalize_br(&note.text);
+    let max_line_w = normalized
+        .split('\n')
+        .map(|line| measurer.measure(line).width)
+        .fold(0.0_f64, f64::max);
+    let text_w = max_line_w + NOTE_PADDING * 2.0;
     let note_w = text_w.min(NOTE_MAX_WIDTH).max(40.0);
 
     if note.participants.is_empty() {

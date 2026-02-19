@@ -334,6 +334,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "mermaid-rs"
+version = "0.0.0"
+dependencies = [
+ "mermaid-core",
+]
+
+[[package]]
 name = "once_cell_polyfill"
 version = "1.70.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"

@@ -6,7 +6,7 @@ BINARY := cargo run --
 FIXTURES := $(wildcard $(FIXTURES_DIR)/*.mmd)
 FIXTURE_SVGS := $(patsubst $(FIXTURES_DIR)/%.mmd,$(OUTPUT_DIR)/%.svg,$(FIXTURES))
 
-.PHONY: test-svgs clean-svgs build test
+.PHONY: test-svgs clean-svgs build test test-examples
 
 build:
 	cargo build
@@ -27,6 +27,10 @@ $(OUTPUT_DIR)/%.svg: $(FIXTURES_DIR)/%.mmd | $(OUTPUT_DIR)
 
 $(OUTPUT_DIR):
 	mkdir -p $(OUTPUT_DIR)
+
+test-examples:
+	cargo test -p mermaid-rs --test examples_comparison -- --nocapture
+	@echo "Open target/examples-comparison.html in your browser"
 
 clean-svgs:
 	rm -rf $(OUTPUT_DIR)
