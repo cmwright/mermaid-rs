@@ -76,6 +76,8 @@ pub fn render_svg(layout: &GanttLayout, theme: &Theme) -> Result<String> {
   .gantt-task-label {{ font-family: {}; font-size: {:.0}px; }}
   .gantt-grid-label {{ font-family: {}; font-size: {:.0}px; }}
   .gantt-today {{ stroke: #f66; stroke-width: 2; stroke-dasharray: 5,5; }}
+  .gantt-dependency-halo {{ fill: none; stroke: {}; stroke-width: 4; opacity: 0.7; }}
+  .gantt-dependency {{ fill: none; stroke: {}; stroke-width: 1.5; opacity: 0.9; }}
 </style>"#,
         theme.background.to_css(),
         theme.font_family,
@@ -88,6 +90,20 @@ pub fn render_svg(layout: &GanttLayout, theme: &Theme) -> Result<String> {
         theme.font_size * 0.85,
         theme.font_family,
         theme.font_size * 0.8,
+        theme.background.to_css(),
+        theme.text_color.to_css(),
+    );
+    svg.push('\n');
+
+    // Marker defs
+    let _ = write!(
+        svg,
+        r#"<defs>
+  <marker id="gantt-dependency-arrow" markerWidth="4" markerHeight="3" refX="3.5" refY="1.5" orient="auto">
+    <path d="M 0 0 L 4 1.5 L 0 3 z" fill="{}"/>
+  </marker>
+</defs>"#,
+        theme.text_color.to_css(),
     );
     svg.push('\n');
 
@@ -120,7 +136,7 @@ pub fn render_svg(layout: &GanttLayout, theme: &Theme) -> Result<String> {
             svg,
             r#"<rect x="0" y="{}" width="{}" height="{}" fill="{}" opacity="{}"/>"#,
             section.y_start,
-            layout.chart_x + layout.chart_width,
+            layout.width,
             section.y_end - section.y_start,
             band_color,
             band_opacity,
@@ -173,7 +189,41 @@ pub fn render_svg(layout: &GanttLayout, theme: &Theme) -> Result<String> {
         render_task_bar(&mut svg, task, theme);
     }
 
-    // 6. Task labels — inside bars when they fit, otherwise to the right
+    // 6. Dependency edges (on top of bars, below labels)
+    let task_count = layout.tasks.len();
+    let mut out_totals = vec![0usize; task_count];
+    let mut in_totals = vec![0usize; task_count];
+    for edge in &layout.dependency_edges {
+        if edge.from_task_index < task_count && edge.to_task_index < task_count {
+            out_totals[edge.from_task_index] += 1;
+            in_totals[edge.to_task_index] += 1;
+        }
+    }
+    let mut out_seen = vec![0usize; task_count];
+    let mut in_seen = vec![0usize; task_count];
+    for edge in &layout.dependency_edges {
+        if edge.from_task_index >= task_count || edge.to_task_index >= task_count {
+            continue;
+        }
+        let source_slot = out_seen[edge.from_task_index];
+        let target_slot = in_seen[edge.to_task_index];
+        out_seen[edge.from_task_index] += 1;
+        in_seen[edge.to_task_index] += 1;
+
+        let from_task = &layout.tasks[edge.from_task_index];
+        let to_task = &layout.tasks[edge.to_task_index];
+        render_dependency_edge(
+            &mut svg,
+            from_task,
+            to_task,
+            source_slot,
+            out_totals[edge.from_task_index],
+            target_slot,
+            in_totals[edge.to_task_index],
+        );
+    }
+
+    // 7. Task labels — inside bars when they fit, otherwise to the right
     for task in &layout.tasks {
         let label_pad = 8.0;
         let label_fits_inside = task.label_width + label_pad * 2.0 <= task.width
@@ -215,7 +265,7 @@ pub fn render_svg(layout: &GanttLayout, theme: &Theme) -> Result<String> {
         svg.push('\n');
     }
 
-    // 7. Section labels
+    // 8. Section labels
     for section in &layout.sections {
         if section.name.is_empty() {
             continue;
@@ -282,6 +332,80 @@ fn render_task_bar(svg: &mut String, task: &PositionedTask, _theme: &Theme) {
     svg.push('\n');
 }
 
+fn render_dependency_edge(
+    svg: &mut String,
+    from_task: &PositionedTask,
+    to_task: &PositionedTask,
+    source_slot: usize,
+    source_total: usize,
+    target_slot: usize,
+    target_total: usize,
+) {
+    let (from_x, from_y) = task_end_anchor(from_task, source_slot, source_total);
+    let (to_x, to_y) = task_start_anchor(to_task, target_slot, target_total);
+    let spacing_nudge =
+        (source_slot as f64 - (source_total.saturating_sub(1) as f64) / 2.0) * 4.0;
+    let target_nudge =
+        (target_slot as f64 - (target_total.saturating_sub(1) as f64) / 2.0) * 3.0;
+    let from_y = from_y + spacing_nudge;
+    let to_y = to_y + target_nudge;
+    let from_stub_x = from_x + 6.0;
+    let to_stub_x = to_x - 6.0;
+    let dx = to_x - from_x;
+    let control = (dx.abs() * 0.45).clamp(24.0, 100.0);
+    let c1x = from_stub_x + control;
+    let c2x = to_stub_x - control;
+    let path_d = format!(
+        "M {:.1} {:.1} L {:.1} {:.1} C {:.1} {:.1}, {:.1} {:.1}, {:.1} {:.1} L {:.1} {:.1}",
+        from_x, from_y, from_stub_x, from_y, c1x, from_y, c2x, to_y, to_stub_x, to_y, to_x, to_y
+    );
+
+    let _ = write!(
+        svg,
+        r#"<path class="gantt-dependency-halo" d="{}"/>"#,
+        path_d
+    );
+    svg.push('\n');
+    let _ = write!(
+        svg,
+        r#"<path class="gantt-dependency" d="{}" marker-end="url(#gantt-dependency-arrow)"/>"#,
+        path_d
+    );
+    svg.push('\n');
+}
+
+fn task_start_anchor(task: &PositionedTask, slot: usize, total: usize) -> (f64, f64) {
+    let y = port_y(task, slot, total);
+    if task.is_milestone {
+        let cx = task.x + task.width / 2.0;
+        let half = task.height / 3.0;
+        (cx - half, y)
+    } else {
+        (task.x, y)
+    }
+}
+
+fn task_end_anchor(task: &PositionedTask, slot: usize, total: usize) -> (f64, f64) {
+    let y = port_y(task, slot, total);
+    if task.is_milestone {
+        let cx = task.x + task.width / 2.0;
+        let half = task.height / 3.0;
+        (cx + half, y)
+    } else {
+        (task.x + task.width, y)
+    }
+}
+
+fn port_y(task: &PositionedTask, slot: usize, total: usize) -> f64 {
+    if total <= 1 {
+        return task.y + task.height / 2.0;
+    }
+    let slot = slot.min(total - 1) as f64;
+    let total = total as f64;
+    let frac = (slot + 1.0) / (total + 1.0);
+    task.y + task.height * frac
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,6 +420,7 @@ mod tests {
             tasks: vec![
                 PositionedTask {
                     name: "Task A".to_string(),
+                    id: "a1".to_string(),
                     x: 220.0,
                     y: 80.0,
                     width: 100.0,
@@ -307,6 +432,7 @@ mod tests {
                 },
                 PositionedTask {
                     name: "Task B".to_string(),
+                    id: "b1".to_string(),
                     x: 320.0,
                     y: 108.0,
                     width: 80.0,
@@ -321,6 +447,7 @@ mod tests {
                 },
                 PositionedTask {
                     name: "Milestone".to_string(),
+                    id: "m1".to_string(),
                     x: 400.0,
                     y: 136.0,
                     width: 0.0,
@@ -352,6 +479,10 @@ mod tests {
                     show_label: true,
                 },
             ],
+            dependency_edges: vec![DependencyEdge {
+                from_task_index: 0,
+                to_task_index: 1,
+            }],
             today_x: Some(350.0),
             chart_x: 200.0,
             chart_y: 50.0,
@@ -424,6 +555,17 @@ mod tests {
         let svg = render_svg(&layout, &theme).unwrap();
 
         assert!(svg.contains("Section A"));
+    }
+
+    #[test]
+    fn test_render_dependency_edges() {
+        let layout = create_test_layout();
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(svg.contains("gantt-dependency-arrow"));
+        assert!(svg.contains("class=\"gantt-dependency\""));
+        assert!(svg.contains("marker-end=\"url(#gantt-dependency-arrow)\""));
     }
 
     #[test]

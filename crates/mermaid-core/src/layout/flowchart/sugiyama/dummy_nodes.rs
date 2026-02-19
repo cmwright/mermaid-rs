@@ -1,4 +1,4 @@
-use petgraph::graph::{DiGraph, EdgeIndex, NodeIndex};
+use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::HashMap;
 
 use crate::ast::flowchart::NodeShape;
@@ -27,22 +27,27 @@ pub fn insert_dummy_nodes(
 ) -> Vec<DummyChain> {
     let mut chains = Vec::new();
 
-    // Collect edges that span >1 rank
-    let long_edges: Vec<(EdgeIndex, NodeIndex, NodeIndex, usize, usize)> = graph
+    // Collect edges that span >1 rank.
+    // We store (src, tgt) endpoints — NOT EdgeIndex — because petgraph's
+    // `remove_edge` invalidates the last edge index via a swap, making
+    // pre-collected indices stale after any removal.
+    let long_edges: Vec<(NodeIndex, NodeIndex, usize, usize)> = graph
         .edge_indices()
         .filter_map(|ei| {
             let (src, tgt) = graph.edge_endpoints(ei)?;
             let src_rank = *ranks.get(&src)?;
             let tgt_rank = *ranks.get(&tgt)?;
             if tgt_rank > src_rank + 1 {
-                Some((ei, src, tgt, src_rank, tgt_rank))
+                Some((src, tgt, src_rank, tgt_rank))
             } else {
                 None
             }
         })
         .collect();
 
-    for (edge_idx, src, tgt, src_rank, tgt_rank) in long_edges {
+    for (src, tgt, src_rank, tgt_rank) in long_edges {
+        // Find and remove the edge by endpoints (safe after prior mutations).
+        let edge_idx = graph.find_edge(src, tgt).expect("long edge disappeared");
         let edge_data = graph.remove_edge(edge_idx).unwrap();
 
         // Determine the label rank (midpoint) for labeled edges

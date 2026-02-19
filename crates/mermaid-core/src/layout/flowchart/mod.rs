@@ -348,4 +348,57 @@ mod tests {
             }
         }
     }
+
+    /// Regression test: in the "Larger flowchart with styling" example,
+    /// sq→ci should be a straight vertical edge (same x-coordinate).
+    #[test]
+    fn test_sq_ci_vertical_alignment() {
+        use crate::parser::flowchart::parse_flowchart;
+
+        let source = r#"graph TB
+    sq[Square shape] --> ci((Circle shape))
+
+    subgraph A
+        od>Odd shape]-- Two line<br/>edge comment --> ro
+        di{Diamond with <br/> line break} -.-> ro(Rounded<br>square<br>shape)
+        di==>ro2(Rounded square shape)
+    end
+
+    e --> od3>Really long text with linebreak<br>in an Odd shape]
+
+    e((Inner / circle<br>and some odd <br>special characters)) --> f(,.?!+-*ز)
+
+    cyr[Cyrillic]-->cyr2((Circle shape Начало));
+
+     classDef green fill:#9f6,stroke:#333,stroke-width:2px;
+     classDef orange fill:#f96,stroke:#333,stroke-width:4px;
+     class sq,e green
+     class di orange"#;
+
+        let ast = parse_flowchart(source).unwrap();
+        let provider = FontProvider::default_font();
+        let measurer = make_measurer(&provider);
+        let result = layout_flowchart(&ast, &measurer).unwrap();
+
+        let sq = result.nodes.iter().find(|n| n.id == "sq").unwrap();
+        let ci = result.nodes.iter().find(|n| n.id == "ci").unwrap();
+
+        // Print all node positions for debugging
+        println!("\n=== Node positions ===");
+        let mut nodes: Vec<_> = result.nodes.iter().collect();
+        nodes.sort_by(|a, b| a.y.partial_cmp(&b.y).unwrap().then(a.x.partial_cmp(&b.x).unwrap()));
+        for n in &nodes {
+            println!("  {:>4} ({:>20}): x={:>8.1}, y={:>8.1}", n.id, n.label, n.x, n.y);
+        }
+
+        // sq should be directly above ci (same x-coordinate)
+        let x_diff = (sq.x - ci.x).abs();
+        assert!(
+            x_diff < 1.0,
+            "sq (x={:.1}) and ci (x={:.1}) should be vertically aligned (diff={:.1})",
+            sq.x,
+            ci.x,
+            x_diff
+        );
+    }
 }

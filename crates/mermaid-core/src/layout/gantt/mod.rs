@@ -1,6 +1,8 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, Weekday};
+use petgraph::algo::toposort;
+use petgraph::graphmap::DiGraphMap;
 
 use crate::ast::gantt::*;
 use crate::error::{MermaidError, Result};
@@ -17,6 +19,7 @@ const TOP_PADDING: f64 = 50.0;
 const RIGHT_PADDING: f64 = 20.0;
 const BOTTOM_PADDING: f64 = 20.0;
 const MIN_CHART_WIDTH: f64 = 400.0;
+const TASK_LABEL_PAD: f64 = 8.0;
 
 // ── Output types ────────────────────────────────────────────
 
@@ -29,6 +32,7 @@ pub struct GanttLayout {
     pub tasks: Vec<PositionedTask>,
     pub sections: Vec<PositionedSection>,
     pub grid_lines: Vec<GridLine>,
+    pub dependency_edges: Vec<DependencyEdge>,
     pub today_x: Option<f64>,
     pub chart_x: f64,
     pub chart_y: f64,
@@ -40,6 +44,7 @@ pub struct GanttLayout {
 #[derive(Debug, Clone)]
 pub struct PositionedTask {
     pub name: String,
+    pub id: String,
     pub x: f64,
     pub y: f64,
     pub width: f64,
@@ -49,6 +54,12 @@ pub struct PositionedTask {
     pub is_milestone: bool,
     /// Measured width of the task label text in pixels.
     pub label_width: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct DependencyEdge {
+    pub from_task_index: usize,
+    pub to_task_index: usize,
 }
 
 #[derive(Debug, Clone)]
@@ -72,7 +83,7 @@ pub struct GridLine {
 #[derive(Debug, Clone)]
 struct ResolvedTask {
     name: String,
-    _id: String,
+    id: String,
     start: NaiveDateTime,
     end: NaiveDateTime,
     tags: TaskTags,
@@ -115,6 +126,7 @@ pub fn layout_gantt(
             tasks: Vec::new(),
             sections: Vec::new(),
             grid_lines: Vec::new(),
+            dependency_edges: Vec::new(),
             today_x: None,
             chart_x: LEFT_PADDING,
             chart_y: TOP_PADDING,
@@ -188,6 +200,7 @@ pub fn layout_gantt(
 
             positioned_tasks.push(PositionedTask {
                 name: rt.name.clone(),
+                id: rt.id.clone(),
                 x,
                 y: y_cursor,
                 width: w.max(1.0), // minimum 1px width
@@ -213,6 +226,40 @@ pub fn layout_gantt(
 
     let chart_height = y_cursor - chart_y;
 
+    // Resolve visual dependency edges from explicit task depends_on fields.
+    let mut dependency_edges = Vec::new();
+    let mut seen_edges: HashSet<(usize, usize)> = HashSet::new();
+    let mut id_to_index: HashMap<&str, usize> = HashMap::new();
+    for (idx, task) in positioned_tasks.iter().enumerate() {
+        if !task.id.is_empty() {
+            id_to_index.insert(task.id.as_str(), idx);
+        }
+    }
+    let mut to_task_index = 0usize;
+    for section in &ast.sections {
+        for task in &section.tasks {
+            if to_task_index >= positioned_tasks.len() {
+                break;
+            }
+            for dep_id in &task.depends_on {
+                if let Some(&from_task_index) = id_to_index.get(dep_id.as_str()) {
+                    if from_task_index == to_task_index {
+                        continue;
+                    }
+                    if seen_edges.insert((from_task_index, to_task_index)) {
+                        dependency_edges.push(DependencyEdge {
+                            from_task_index,
+                            to_task_index,
+                        });
+                    }
+                }
+            }
+            to_task_index += 1;
+        }
+    }
+    let dependency_edges =
+        reduce_redundant_dependency_edges(positioned_tasks.len(), dependency_edges);
+
     // Generate grid lines
     let grid_lines = generate_grid_lines(
         ast,
@@ -236,7 +283,26 @@ pub fn layout_gantt(
         None
     };
 
-    let total_width = chart_x + chart_width + RIGHT_PADDING;
+    // Account for labels that are rendered outside bars on the right side.
+    let max_label_right = positioned_tasks
+        .iter()
+        .filter_map(|task| {
+            let label_fits_inside = task.label_width + TASK_LABEL_PAD * 2.0 <= task.width
+                && !task.is_milestone;
+            if label_fits_inside {
+                return None;
+            }
+            let label_x = if task.is_milestone {
+                task.x + task.height / 3.0 + TASK_LABEL_PAD
+            } else {
+                task.x + task.width + TASK_LABEL_PAD
+            };
+            Some(label_x + task.label_width)
+        })
+        .fold(0.0_f64, f64::max);
+
+    let base_width = chart_x + chart_width + RIGHT_PADDING;
+    let total_width = base_width.max(max_label_right + RIGHT_PADDING);
     let total_height = y_cursor + BOTTOM_PADDING;
 
     Ok(GanttLayout {
@@ -247,6 +313,7 @@ pub fn layout_gantt(
         tasks: positioned_tasks,
         sections,
         grid_lines,
+        dependency_edges,
         today_x,
         chart_x,
         chart_y,
@@ -254,6 +321,70 @@ pub fn layout_gantt(
         chart_height,
         axis_format,
     })
+}
+
+fn reduce_redundant_dependency_edges(
+    task_count: usize,
+    edges: Vec<DependencyEdge>,
+) -> Vec<DependencyEdge> {
+    if edges.len() < 2 || task_count == 0 {
+        return edges;
+    }
+
+    let mut graph: DiGraphMap<usize, ()> = DiGraphMap::new();
+    for i in 0..task_count {
+        graph.add_node(i);
+    }
+    for edge in &edges {
+        if edge.from_task_index < task_count && edge.to_task_index < task_count {
+            graph.add_edge(edge.from_task_index, edge.to_task_index, ());
+        }
+    }
+
+    // Transitive reduction is well-defined for DAGs; if there's a cycle,
+    // keep all explicit edges to avoid surprising removals.
+    let topo = match toposort(&graph, None) {
+        Ok(order) => order,
+        Err(_) => return edges,
+    };
+
+    let mut reachability: Vec<HashSet<usize>> = vec![HashSet::new(); task_count];
+    for &node in topo.iter().rev() {
+        for next in graph.neighbors_directed(node, petgraph::Direction::Outgoing) {
+            reachability[node].insert(next);
+            if next == node {
+                continue;
+            }
+            if node < next {
+                let (left, right) = reachability.split_at_mut(next);
+                left[node].extend(right[0].iter().copied());
+            } else {
+                let (left, right) = reachability.split_at_mut(node);
+                right[0].extend(left[next].iter().copied());
+            }
+        }
+    }
+
+    edges
+        .into_iter()
+        .filter(|edge| {
+            !has_alternate_path(&graph, &reachability, edge.from_task_index, edge.to_task_index)
+        })
+        .collect()
+}
+
+fn has_alternate_path(
+    graph: &DiGraphMap<usize, ()>,
+    reachability: &[HashSet<usize>],
+    from: usize,
+    to: usize,
+) -> bool {
+    if from >= reachability.len() || to >= reachability.len() {
+        return false;
+    }
+    graph
+        .neighbors_directed(from, petgraph::Direction::Outgoing)
+        .any(|neighbor| neighbor != to && reachability[neighbor].contains(&to))
 }
 
 // ── Date resolution ─────────────────────────────────────────
@@ -398,7 +529,7 @@ fn resolve_tasks(
 
         result.push(ResolvedTask {
             name: task.name.clone(),
-            _id: task.id.clone().unwrap_or_default(),
+            id: task.id.clone().unwrap_or_default(),
             start,
             end,
             tags: task.tags.clone(),
@@ -775,6 +906,7 @@ mod tests {
                         name: "Task 1".to_string(),
                         tags: TaskTags::default(),
                         id: Some("t1".to_string()),
+                        depends_on: Vec::new(),
                         start: TaskStart::Date("2014-01-01".to_string()),
                         end: TaskEnd::Duration("3d".to_string()),
                     },
@@ -782,6 +914,7 @@ mod tests {
                         name: "Task 2".to_string(),
                         tags: TaskTags::default(),
                         id: Some("t2".to_string()),
+                        depends_on: Vec::new(),
                         start: TaskStart::After(vec!["t1".to_string()]),
                         end: TaskEnd::Duration("5d".to_string()),
                     },
@@ -829,6 +962,7 @@ mod tests {
                     name: "Task".to_string(),
                     tags: TaskTags::default(),
                     id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
                     start: TaskStart::Date("2014-01-06".to_string()), // Monday
                     end: TaskEnd::Duration("5d".to_string()),
                 }],
@@ -845,5 +979,131 @@ mod tests {
         // With weekend excludes, a 5-day task starting Monday should end on the following Monday
         // (skipping Saturday and Sunday)
         assert!(layout.tasks[0].width > 0.0);
+    }
+
+    #[test]
+    fn test_layout_resolves_dependency_edges() {
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Deps".to_string(),
+                tasks: vec![
+                    GanttTask {
+                        name: "Task A".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("a1".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-01".to_string()),
+                        end: TaskEnd::Duration("3d".to_string()),
+                    },
+                    GanttTask {
+                        name: "Task B".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("b1".to_string()),
+                        depends_on: vec!["a1".to_string(), "missing".to_string()],
+                        start: TaskStart::Date("2014-01-05".to_string()),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.tasks.len(), 2);
+        assert_eq!(layout.dependency_edges.len(), 1);
+        assert_eq!(layout.dependency_edges[0].from_task_index, 0);
+        assert_eq!(layout.dependency_edges[0].to_task_index, 1);
+    }
+
+    #[test]
+    fn test_layout_dedupes_transitive_dependency_edges() {
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Deps".to_string(),
+                tasks: vec![
+                    GanttTask {
+                        name: "Task A".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("a1".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-01".to_string()),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                    GanttTask {
+                        name: "Task B".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("b1".to_string()),
+                        depends_on: vec!["a1".to_string()],
+                        start: TaskStart::Date("2014-01-03".to_string()),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                    GanttTask {
+                        name: "Task C".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("c1".to_string()),
+                        depends_on: vec!["a1".to_string(), "b1".to_string()],
+                        start: TaskStart::Date("2014-01-05".to_string()),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.dependency_edges.len(), 2);
+        assert!(layout
+            .dependency_edges
+            .iter()
+            .any(|e| e.from_task_index == 0 && e.to_task_index == 1));
+        assert!(layout
+            .dependency_edges
+            .iter()
+            .any(|e| e.from_task_index == 1 && e.to_task_index == 2));
+        assert!(!layout
+            .dependency_edges
+            .iter()
+            .any(|e| e.from_task_index == 0 && e.to_task_index == 2));
+    }
+
+    #[test]
+    fn test_layout_expands_width_for_outside_labels() {
+        let ast = GanttAst {
+            title: Some("Label Width Test".to_string()),
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Final milestone label should not overflow chart bounds".to_string(),
+                    tags: TaskTags {
+                        milestone: true,
+                        ..Default::default()
+                    },
+                    id: Some("m1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date("2014-01-10".to_string()),
+                    end: TaskEnd::Duration("0d".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+
+        let base_width = layout.chart_x + layout.chart_width + RIGHT_PADDING;
+        assert!(layout.width > base_width);
     }
 }

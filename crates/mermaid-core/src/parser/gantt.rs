@@ -208,6 +208,7 @@ fn parse_task_data(
     task_counter: &mut u32,
 ) -> Result<GanttTask> {
     let mut tags = TaskTags::default();
+    let mut depends_on: Vec<String> = Vec::new();
     let mut done_reading_tags = false;
 
     // Keep only the first 3 non-tag fields since matching logic only uses these.
@@ -237,6 +238,11 @@ fn parse_task_data(
                 }
                 _ => done_reading_tags = true,
             }
+        }
+
+        if let Some(dep_ids) = parse_depends_on_field(field) {
+            depends_on.extend(dep_ids);
+            continue;
         }
 
         match remaining_len {
@@ -337,9 +343,26 @@ fn parse_task_data(
         name: name.to_string(),
         tags,
         id: final_id,
+        depends_on,
         start,
         end,
     })
+}
+
+fn parse_depends_on_field(field: &str) -> Option<Vec<String>> {
+    let trimmed = field.trim();
+    if trimmed.len() < "dependson".len() {
+        return None;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    if !lower.starts_with("dependson") {
+        return None;
+    }
+    let ids = trimmed["dependsOn".len()..].trim();
+    if ids.is_empty() {
+        return Some(Vec::new());
+    }
+    Some(parse_id_list(ids))
 }
 
 fn parse_id_list(s: &str) -> Vec<String> {
@@ -613,5 +636,34 @@ mod tests {
         let ti = parse_tick_interval("2week").unwrap();
         assert_eq!(ti.count, 2);
         assert_eq!(ti.unit, TickUnit::Week);
+    }
+
+    #[test]
+    fn test_parse_depends_on_field() {
+        let source = r#"gantt
+    dateFormat YYYY-MM-DD
+    section Test
+    Task A :a1, 2014-01-01, 3d
+    Task B :b1, 2014-01-04, 2d, dependsOn a1
+"#;
+        let ast = parse_gantt(source).unwrap();
+        let tasks = &ast.sections[0].tasks;
+        assert_eq!(tasks[0].depends_on, Vec::<String>::new());
+        assert_eq!(tasks[1].depends_on, vec!["a1"]);
+    }
+
+    #[test]
+    fn test_parse_depends_on_multiple_ids() {
+        let source = r#"gantt
+    dateFormat YYYY-MM-DD
+    section Test
+    Task A :a1, 2014-01-01, 3d
+    Task B :b1, 2014-01-04, 2d
+    Task C :c1, after a1, 5d, dependsOn a1 b1
+"#;
+        let ast = parse_gantt(source).unwrap();
+        let task = &ast.sections[0].tasks[2];
+        assert_eq!(task.depends_on, vec!["a1", "b1"]);
+        assert!(matches!(&task.start, TaskStart::After(ids) if ids == &["a1"]));
     }
 }

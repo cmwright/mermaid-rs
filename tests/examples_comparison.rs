@@ -184,6 +184,137 @@ const EXAMPLES: &[Example] = &[
     Completed critical task :crit, done, 2014-01-06, 24h
     Important milestone :crit, milestone, 2014-01-12, 0d"#,
     },
+    Example {
+        name: "LR Flowchart - Dependency diagram with dotted edges",
+        source: r#"flowchart LR
+    USO[User Service Org data sync] --> FF[Feature Flagging]
+    USO --> VM[Vendor Management]
+    USO --> FVM[File Vault Management]
+    USO --> OO[Organization Onboarding]
+
+    FF --> RCT[Rebrand Colors Typography]
+    RCT --> RGUN[Rebrand Global UI NAV]
+
+    USO -. "blocked by" .-> HC[HC services live in Titan]
+    HC --> IHCTUS[Integrate HC to Titan User Service]
+    IHCTUS --> AUHCE[Assign users to HC entities]
+
+    AUHCE -. "blocked by" .-> AOSI[Assess Org Service Integration]
+
+    AOSI --> AQPF[AI Questionnaire Pre-Fill]
+    AOSI --> AAW[Assessment Approval Workflow]
+    AOSI --> VA[Vendor Assessments]
+    AOSI --> IDOA[Include Docs and Obs in Assessments]
+    AOSI --> SVQ[Send a vendor a questionnaire]
+
+    AAW --> IRQ[Inherent Risk Questionnaire]
+    IRQ --> SNI[ServiceNow Integration]
+    AAW --> CQ[Conditional Questions]
+    CQ --> ATI[AI Template Import]
+    ATI --> ATG[AI Template Generation]
+    AAW --> FRT[Findings and Risk Treatments]
+    AAW --> ASR[Assessment Summary Report]
+    ASR --> APLR[Assessment Program Level Reporting]
+    APLR --> AR[Automated Re-assessment]
+    AAW --> RA[Reviewer Assignments]
+
+    VA --> ATRA[AI Text Response Analysis]
+    ATRA --> STA[Scoring Text Answers]
+    VA --> LAVM[Launch Assessments from Vendor Manager]
+
+    VM -. "also blocked by" .-> IDOA
+    IDOA --> FI[Filevault Integration]
+    IDOA --> AEA[AI Evidence Analysis]
+
+    OO -. "blocked by" .-> SVQ
+    FVM -. "blocked by" .-> SVQ
+    SVQ --> SRS[Scheduled Recurring Send]
+
+    AUHCE -. "blocked by" .-> RSQ[Respond - Streamlined Questionnaire]
+    AUHCE -. "blocked by" .-> RNTQ[Respond to a non-Titan questionnaire via file upload]
+    RNTQ --> RSQ
+    OO -. "blocked by" .-> RTQ[Respond to a Titan questionnaire]
+    RTQ --> DL[Data Localization]"#,
+    },
+    Example {
+        name: "TD Flowchart - Dependency diagram with dotted edges",
+        source: r#"flowchart TD
+    USO[User Service Org data sync] --> FF[Feature Flagging]
+    USO --> VM[Vendor Management]
+    USO --> FVM[File Vault Management]
+    USO --> OO[Organization Onboarding]
+
+    FF --> RCT[Rebrand Colors Typography]
+    RCT --> RGUN[Rebrand Global UI NAV]
+
+    USO -. "blocked by" .-> HC[HC services live in Titan]
+    HC --> IHCTUS[Integrate HC to Titan User Service]
+    IHCTUS --> AUHCE[Assign users to HC entities]
+
+    AUHCE -. "blocked by" .-> AOSI[Assess Org Service Integration]
+
+    AOSI --> AQPF[AI Questionnaire Pre-Fill]
+    AOSI --> AAW[Assessment Approval Workflow]
+    AOSI --> VA[Vendor Assessments]
+    AOSI --> IDOA[Include Docs and Obs in Assessments]
+    AOSI --> SVQ[Send a vendor a questionnaire]
+
+    AAW --> IRQ[Inherent Risk Questionnaire]
+    IRQ --> SNI[ServiceNow Integration]
+    AAW --> CQ[Conditional Questions]
+    CQ --> ATI[AI Template Import]
+    ATI --> ATG[AI Template Generation]
+    AAW --> FRT[Findings and Risk Treatments]
+    AAW --> ASR[Assessment Summary Report]
+    ASR --> APLR[Assessment Program Level Reporting]
+    APLR --> AR[Automated Re-assessment]
+    AAW --> RA[Reviewer Assignments]
+
+    VA --> ATRA[AI Text Response Analysis]
+    ATRA --> STA[Scoring Text Answers]
+    VA --> LAVM[Launch Assessments from Vendor Manager]
+
+    VM -. "also blocked by" .-> IDOA
+    IDOA --> FI[Filevault Integration]
+    IDOA --> AEA[AI Evidence Analysis]
+
+    OO -. "blocked by" .-> SVQ
+    FVM -. "blocked by" .-> SVQ
+    SVQ --> SRS[Scheduled Recurring Send]
+
+    AUHCE -. "blocked by" .-> RSQ[Respond - Streamlined Questionnaire]
+    AUHCE -. "blocked by" .-> RNTQ[Respond to a non-Titan questionnaire via file upload]
+    RNTQ --> RSQ
+    OO -. "blocked by" .-> RTQ[Respond to a Titan questionnaire]
+    RTQ --> DL[Data Localization]"#,
+    },
+    Example {
+        name: "Gantt chart - complex dependency handling",
+        source: r#"gantt
+    title Complex Dependency Gantt (Readable)
+    dateFormat YYYY-MM-DD
+    axisFormat %Y-%m-%d
+    excludes weekends
+
+    section Discovery
+    Kickoff :kickoff, 2026-03-02, 1d
+    Requirements :req, after kickoff, 4d
+    Risk review :risk, after kickoff, 2d
+    Scope freeze :milestone, scope, after req, 0d, dependsOn req
+
+    section Platform
+    Infra setup :infra, 2026-03-03, 6d, dependsOn kickoff
+    Auth service :auth, after infra, 5d, dependsOn infra
+    Data contracts :contracts, after req, 3d, dependsOn req
+    Integration gate :milestone, gate1, after auth, 0d, dependsOn auth contracts
+
+    section Product
+    UI implementation :ui, after scope, 6d, dependsOn scope
+    API integration :api, after gate1, 5d, dependsOn gate1
+    QA cycle :qa, after api, 4d, dependsOn api
+    Launch prep :prep, after qa, 2d, dependsOn qa
+    Go live :milestone, golive, after prep, 0d, dependsOn prep"#,
+    },
 ];
 
 fn html_escape(s: &str) -> String {

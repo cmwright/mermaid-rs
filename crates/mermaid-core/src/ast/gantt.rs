@@ -46,6 +46,8 @@ pub struct GanttTask {
     pub tags: TaskTags,
     /// Explicit ID or None for auto-generated
     pub id: Option<String>,
+    /// Explicit visual dependency links from predecessor task IDs to this task.
+    pub depends_on: Vec<String>,
     pub start: TaskStart,
     pub end: TaskEnd,
 }

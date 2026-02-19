@@ -457,6 +457,24 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_dotted_arrow_labeled() {
+        let source = "flowchart TD\n    A -. text .-> B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges.len(), 1);
+        assert_eq!(ast.edges[0].edge_type, EdgeType::DottedArrow);
+        assert_eq!(ast.edges[0].label.as_deref(), Some("text"));
+    }
+
+    #[test]
+    fn test_parse_dotted_arrow_labeled_with_quotes() {
+        let source = "flowchart TD\n    A -. \"blocked by\" .-> B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges.len(), 1);
+        assert_eq!(ast.edges[0].edge_type, EdgeType::DottedArrow);
+        assert_eq!(ast.edges[0].label.as_deref(), Some("\"blocked by\""));
+    }
+
+    #[test]
     fn test_parse_direction_lr() {
         let source = "graph LR\n    A --> B";
         let ast = parse_flowchart(source).unwrap();
