@@ -88,9 +88,15 @@ fn bench_end_to_end(c: &mut Criterion) {
 
 fn bench_parse(c: &mut Criterion) {
     let mut group = c.benchmark_group("gantt_parse");
-    group.bench_function("simple", |b| b.iter(|| parse_gantt(black_box(SIMPLE)).unwrap()));
-    group.bench_function("medium", |b| b.iter(|| parse_gantt(black_box(MEDIUM)).unwrap()));
-    group.bench_function("complex", |b| b.iter(|| parse_gantt(black_box(COMPLEX)).unwrap()));
+    group.bench_function("simple", |b| {
+        b.iter(|| parse_gantt(black_box(SIMPLE)).unwrap())
+    });
+    group.bench_function("medium", |b| {
+        b.iter(|| parse_gantt(black_box(MEDIUM)).unwrap())
+    });
+    group.bench_function("complex", |b| {
+        b.iter(|| parse_gantt(black_box(COMPLEX)).unwrap())
+    });
     group.finish();
 }
 
@@ -106,13 +112,34 @@ fn bench_layout(c: &mut Criterion) {
 
     let mut group = c.benchmark_group("gantt_layout");
     group.bench_function("simple", |b| {
-        b.iter(|| layout_gantt(black_box(&simple_ast), black_box(&measurer), black_box(&theme)).unwrap())
+        b.iter(|| {
+            layout_gantt(
+                black_box(&simple_ast),
+                black_box(&measurer),
+                black_box(&theme),
+            )
+            .unwrap()
+        })
     });
     group.bench_function("medium", |b| {
-        b.iter(|| layout_gantt(black_box(&medium_ast), black_box(&measurer), black_box(&theme)).unwrap())
+        b.iter(|| {
+            layout_gantt(
+                black_box(&medium_ast),
+                black_box(&measurer),
+                black_box(&theme),
+            )
+            .unwrap()
+        })
     });
     group.bench_function("complex", |b| {
-        b.iter(|| layout_gantt(black_box(&complex_ast), black_box(&measurer), black_box(&theme)).unwrap())
+        b.iter(|| {
+            layout_gantt(
+                black_box(&complex_ast),
+                black_box(&measurer),
+                black_box(&theme),
+            )
+            .unwrap()
+        })
     });
     group.finish();
 }

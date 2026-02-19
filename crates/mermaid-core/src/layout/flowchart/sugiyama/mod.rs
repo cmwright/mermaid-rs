@@ -60,12 +60,8 @@ pub fn layout(
     // Kahn's can be better for simpler graphs with subgraphs.
     let layers_dfs = rank_assignment::ranks_to_layers(graph, &ranks);
     let layers_topo = rank_assignment::ranks_to_layers_alt(graph, &ranks);
-    let mut layers = ordering::minimize_crossings_best_of(
-        graph,
-        &[layers_dfs, layers_topo],
-        membership,
-        48,
-    );
+    let mut layers =
+        ordering::minimize_crossings_best_of(graph, &[layers_dfs, layers_topo], membership, 48);
 
     // Phase 4b: Subgraph-local ordering refinement
     ordering::refine_subgraph_ordering(graph, &mut layers, membership, ast, &dummy_chains);

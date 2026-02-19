@@ -102,12 +102,7 @@ pub fn layout_mindmap(
     if !sized.children.is_empty() {
         // Distribute ALL children around the full 360° circle,
         // each getting angular space proportional to its subtree weight.
-        position_first_level(
-            &sized.children,
-            &sized.id,
-            &mut nodes,
-            &mut edges,
-        );
+        position_first_level(&sized.children, &sized.id, &mut nodes, &mut edges);
     }
 
     // Phase 3: normalize coordinates (shift so min x/y = DIAGRAM_PADDING)

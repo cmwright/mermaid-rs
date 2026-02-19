@@ -273,9 +273,7 @@ pub fn layout_gantt(
 
     // Today marker
     let today = chrono::Local::now().naive_local();
-    let today_x = if ast.today_marker == TodayMarker::On
-        && today >= time_start
-        && today <= time_end
+    let today_x = if ast.today_marker == TodayMarker::On && today >= time_start && today <= time_end
     {
         let offset = (today - time_start).num_seconds() as f64;
         Some(chart_x + (offset / time_span) * chart_width)
@@ -287,8 +285,8 @@ pub fn layout_gantt(
     let max_label_right = positioned_tasks
         .iter()
         .filter_map(|task| {
-            let label_fits_inside = task.label_width + TASK_LABEL_PAD * 2.0 <= task.width
-                && !task.is_milestone;
+            let label_fits_inside =
+                task.label_width + TASK_LABEL_PAD * 2.0 <= task.width && !task.is_milestone;
             if label_fits_inside {
                 return None;
             }
@@ -368,7 +366,12 @@ fn reduce_redundant_dependency_edges(
     edges
         .into_iter()
         .filter(|edge| {
-            !has_alternate_path(&graph, &reachability, edge.from_task_index, edge.to_task_index)
+            !has_alternate_path(
+                &graph,
+                &reachability,
+                edge.from_task_index,
+                edge.to_task_index,
+            )
         })
         .collect()
 }
@@ -425,9 +428,7 @@ fn resolve_tasks(
 
             // Try to resolve start
             let start = match &task.start {
-                TaskStart::Date(date_str) => {
-                    parse_date(date_str, chrono_fmt).ok()
-                }
+                TaskStart::Date(date_str) => parse_date(date_str, chrono_fmt).ok(),
                 TaskStart::After(ids) => {
                     // Find the latest end time among referenced tasks
                     let mut latest: Option<NaiveDateTime> = None;
@@ -444,7 +445,11 @@ fn resolve_tasks(
                             }
                         }
                     }
-                    if all_resolved { latest } else { None }
+                    if all_resolved {
+                        latest
+                    } else {
+                        None
+                    }
                 }
                 TaskStart::PrevEnd => {
                     if i == 0 {
@@ -469,10 +474,12 @@ fn resolve_tasks(
             // Try to resolve end
             let end = match &task.end {
                 TaskEnd::Date(date_str) => {
-                    let mut end_date = parse_date(date_str, chrono_fmt)
-                        .map_err(|_| MermaidError::Layout(
-                            format!("Cannot parse end date '{}' for task '{}'", date_str, task.name)
-                        ))?;
+                    let mut end_date = parse_date(date_str, chrono_fmt).map_err(|_| {
+                        MermaidError::Layout(format!(
+                            "Cannot parse end date '{}' for task '{}'",
+                            date_str, task.name
+                        ))
+                    })?;
                     if ast.inclusive_end_dates {
                         end_date += Duration::days(1);
                     }
@@ -500,7 +507,11 @@ fn resolve_tasks(
                             }
                         }
                     }
-                    if all_resolved { earliest } else { None }
+                    if all_resolved {
+                        earliest
+                    } else {
+                        None
+                    }
                 }
             };
 
@@ -618,7 +629,7 @@ fn parse_duration(dur_str: &str) -> Result<Duration> {
         "h" => Duration::hours(count),
         "d" => Duration::days(count),
         "w" => Duration::weeks(count),
-        "M" => Duration::days(count * 30), // approximate month
+        "M" => Duration::days(count * 30),  // approximate month
         "y" => Duration::days(count * 365), // approximate year
         _ => {
             return Err(MermaidError::Layout(format!(
@@ -665,10 +676,7 @@ fn apply_excludes_to_end(
 }
 
 /// If a start date falls on an excluded day, advance to the next non-excluded day.
-fn skip_excluded_start(
-    start: NaiveDateTime,
-    exclusion_rules: &ExclusionRules,
-) -> NaiveDateTime {
+fn skip_excluded_start(start: NaiveDateTime, exclusion_rules: &ExclusionRules) -> NaiveDateTime {
     if exclusion_rules.excludes.is_empty() {
         return start;
     }

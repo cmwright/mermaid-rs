@@ -16,8 +16,8 @@ const MILESTONE_FILL: &str = "#e83737";
 
 // Section band colors (alternating backgrounds with visible contrast)
 const SECTION_BAND_COLORS: &[(&str, &str)] = &[
-    ("#d8d8e8", "0.6"),  // darker band
-    ("#ececf4", "0.4"),  // lighter band
+    ("#d8d8e8", "0.6"), // darker band
+    ("#ececf4", "0.4"), // lighter band
 ];
 
 /// Compute relative luminance of a hex color (e.g. "#8a90dd") using WCAG formula.
@@ -33,7 +33,11 @@ fn hex_luminance(hex: &str) -> f64 {
 
     // sRGB to linear
     let linearize = |c: f64| -> f64 {
-        if c <= 0.03928 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        if c <= 0.03928 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
     };
     0.2126 * linearize(r) + 0.7152 * linearize(g) + 0.0722 * linearize(b)
 }
@@ -226,8 +230,8 @@ pub fn render_svg(layout: &GanttLayout, theme: &Theme) -> Result<String> {
     // 7. Task labels — inside bars when they fit, otherwise to the right
     for task in &layout.tasks {
         let label_pad = 8.0;
-        let label_fits_inside = task.label_width + label_pad * 2.0 <= task.width
-            && !task.is_milestone;
+        let label_fits_inside =
+            task.label_width + label_pad * 2.0 <= task.width && !task.is_milestone;
 
         if label_fits_inside {
             // Choose text color based on bar darkness
@@ -298,10 +302,14 @@ fn render_task_bar(svg: &mut String, task: &PositionedTask, _theme: &Theme) {
         let _ = write!(
             svg,
             r##"<polygon points="{:.1},{:.1} {:.1},{:.1} {:.1},{:.1} {:.1},{:.1}" fill="{}" stroke="#333" stroke-width="1"/>"##,
-            cx, cy - half,        // top
-            cx + half, cy,        // right
-            cx, cy + half,        // bottom
-            cx - half, cy,        // left
+            cx,
+            cy - half, // top
+            cx + half,
+            cy, // right
+            cx,
+            cy + half, // bottom
+            cx - half,
+            cy, // left
             MILESTONE_FILL,
         );
         svg.push('\n');
@@ -321,13 +329,7 @@ fn render_task_bar(svg: &mut String, task: &PositionedTask, _theme: &Theme) {
     let _ = write!(
         svg,
         r#"<rect x="{:.1}" y="{:.1}" width="{:.1}" height="{:.1}" rx="3" ry="3" fill="{}" stroke="{}" stroke-width="{}"/>"#,
-        task.x,
-        task.y,
-        task.width,
-        task.height,
-        fill,
-        stroke,
-        stroke_width,
+        task.x, task.y, task.width, task.height, fill, stroke, stroke_width,
     );
     svg.push('\n');
 }
@@ -343,10 +345,8 @@ fn render_dependency_edge(
 ) {
     let (from_x, from_y) = task_end_anchor(from_task, source_slot, source_total);
     let (to_x, to_y) = task_start_anchor(to_task, target_slot, target_total);
-    let spacing_nudge =
-        (source_slot as f64 - (source_total.saturating_sub(1) as f64) / 2.0) * 4.0;
-    let target_nudge =
-        (target_slot as f64 - (target_total.saturating_sub(1) as f64) / 2.0) * 3.0;
+    let spacing_nudge = (source_slot as f64 - (source_total.saturating_sub(1) as f64) / 2.0) * 4.0;
+    let target_nudge = (target_slot as f64 - (target_total.saturating_sub(1) as f64) / 2.0) * 3.0;
     let from_y = from_y + spacing_nudge;
     let to_y = to_y + target_nudge;
     let from_stub_x = from_x + 6.0;

@@ -202,11 +202,7 @@ fn parse_task_line(
 /// Where tags can be: done, active, crit, milestone
 /// Start can be: a date, "after <ids>", or omitted (previous task end)
 /// End can be: a date, a duration (e.g. "3d"), or "until <ids>"
-fn parse_task_data(
-    name: &str,
-    raw: &str,
-    task_counter: &mut u32,
-) -> Result<GanttTask> {
+fn parse_task_data(name: &str, raw: &str, task_counter: &mut u32) -> Result<GanttTask> {
     let mut tags = TaskTags::default();
     let mut depends_on: Vec<String> = Vec::new();
     let mut done_reading_tags = false;
@@ -263,25 +259,45 @@ fn parse_task_data(
     let (id, start, end) = match remaining_len {
         0 => {
             // No data, use defaults
-            (None, TaskStart::PrevEnd, TaskEnd::Duration("1d".to_string()))
+            (
+                None,
+                TaskStart::PrevEnd,
+                TaskEnd::Duration("1d".to_string()),
+            )
         }
         1 => {
             let f = r0.unwrap_or_default();
             if f.is_empty() {
-                (None, TaskStart::PrevEnd, TaskEnd::Duration("1d".to_string()))
+                (
+                    None,
+                    TaskStart::PrevEnd,
+                    TaskEnd::Duration("1d".to_string()),
+                )
             } else if is_duration(f) {
                 (None, TaskStart::PrevEnd, TaskEnd::Duration(f.to_string()))
             } else if f.starts_with("after ") {
                 let ids = parse_id_list(&f[6..]);
-                (None, TaskStart::After(ids), TaskEnd::Duration("1d".to_string()))
+                (
+                    None,
+                    TaskStart::After(ids),
+                    TaskEnd::Duration("1d".to_string()),
+                )
             } else {
                 // Could be an id or a date as end
                 // If it looks like a date, treat as end date
                 // Otherwise treat as id
                 if looks_like_date_or_start(f) {
-                    (None, TaskStart::Date(f.to_string()), TaskEnd::Duration("1d".to_string()))
+                    (
+                        None,
+                        TaskStart::Date(f.to_string()),
+                        TaskEnd::Duration("1d".to_string()),
+                    )
                 } else {
-                    (Some(f.to_string()), TaskStart::PrevEnd, TaskEnd::Duration("1d".to_string()))
+                    (
+                        Some(f.to_string()),
+                        TaskStart::PrevEnd,
+                        TaskEnd::Duration("1d".to_string()),
+                    )
                 }
             }
         }
@@ -304,7 +320,11 @@ fn parse_task_data(
                 (None, start, end)
             } else if is_duration(f0) {
                 // (id, duration) -- id first, then duration as end
-                (Some(f0.to_string()), TaskStart::PrevEnd, TaskEnd::Duration(f0.to_string()))
+                (
+                    Some(f0.to_string()),
+                    TaskStart::PrevEnd,
+                    TaskEnd::Duration(f0.to_string()),
+                )
             } else {
                 // Likely (id, start_or_end)
                 // If the second field looks like a date or duration, first is id

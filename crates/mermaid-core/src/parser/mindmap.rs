@@ -63,10 +63,7 @@ pub fn parse_mindmap(source: &str) -> Result<MindmapAst> {
 /// Parse a block (between INDENT and DEDENT).
 /// Decorator lines in a block modify the parent node.
 /// Node lines become children of the parent.
-fn parse_block(
-    pair: pest::iterators::Pair<'_, Rule>,
-    parent: &mut MindmapNode,
-) -> Result<()> {
+fn parse_block(pair: pest::iterators::Pair<'_, Rule>, parent: &mut MindmapNode) -> Result<()> {
     for inner in pair.into_inner() {
         if inner.as_rule() == Rule::statement {
             parse_statement(inner, parent)?;
@@ -76,10 +73,7 @@ fn parse_block(
 }
 
 /// Parse a statement — either a decorator line (modifies parent) or a node line (new child).
-fn parse_statement(
-    pair: pest::iterators::Pair<'_, Rule>,
-    parent: &mut MindmapNode,
-) -> Result<()> {
+fn parse_statement(pair: pest::iterators::Pair<'_, Rule>, parent: &mut MindmapNode) -> Result<()> {
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::decorator_line => {
@@ -237,7 +231,13 @@ fn normalize_label(s: &str) -> String {
 fn sanitize_id(label: &str) -> String {
     label
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -467,10 +467,7 @@ mod tests {
         // ::icon on same-indent line is consumed by Long history's decorator*
         assert_eq!(origins.children.len(), 2);
         assert_eq!(origins.children[0].label, "Long history");
-        assert_eq!(
-            origins.children[0].icon.as_deref(),
-            Some("fa fa-book")
-        );
+        assert_eq!(origins.children[0].icon.as_deref(), Some("fa fa-book"));
         assert_eq!(origins.children[1].label, "Popularisation");
         assert_eq!(origins.children[1].children.len(), 1);
 

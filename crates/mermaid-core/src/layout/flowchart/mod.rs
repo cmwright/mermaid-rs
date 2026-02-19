@@ -386,9 +386,16 @@ mod tests {
         // Print all node positions for debugging
         println!("\n=== Node positions ===");
         let mut nodes: Vec<_> = result.nodes.iter().collect();
-        nodes.sort_by(|a, b| a.y.partial_cmp(&b.y).unwrap().then(a.x.partial_cmp(&b.x).unwrap()));
+        nodes.sort_by(|a, b| {
+            a.y.partial_cmp(&b.y)
+                .unwrap()
+                .then(a.x.partial_cmp(&b.x).unwrap())
+        });
         for n in &nodes {
-            println!("  {:>4} ({:>20}): x={:>8.1}, y={:>8.1}", n.id, n.label, n.x, n.y);
+            println!(
+                "  {:>4} ({:>20}): x={:>8.1}, y={:>8.1}",
+                n.id, n.label, n.x, n.y
+            );
         }
 
         // sq should be directly above ci (same x-coordinate)
@@ -401,4 +408,5 @@ mod tests {
             x_diff
         );
     }
+
 }

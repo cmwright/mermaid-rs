@@ -120,10 +120,7 @@ fn edge_displacement_score(
 }
 
 /// Total crossings across all adjacent layer pairs.
-fn count_total_crossings(
-    graph: &DiGraph<NodeData, EdgeData>,
-    layers: &[Vec<NodeIndex>],
-) -> usize {
+fn count_total_crossings(graph: &DiGraph<NodeData, EdgeData>, layers: &[Vec<NodeIndex>]) -> usize {
     (0..layers.len().saturating_sub(1))
         .map(|i| count_bilayer_crossings(graph, &layers[i], &layers[i + 1]))
         .sum()
@@ -267,11 +264,8 @@ fn sort_layer_by_barycenter(
     bias_right: bool,
 ) {
     // Capture original positions before sorting (for stable tie-breaking).
-    let original_positions: HashMap<NodeIndex, usize> = layer
-        .iter()
-        .enumerate()
-        .map(|(i, &n)| (n, i))
-        .collect();
+    let original_positions: HashMap<NodeIndex, usize> =
+        layer.iter().enumerate().map(|(i, &n)| (n, i)).collect();
 
     // Compute barycenter for each node
     let barycenters: HashMap<NodeIndex, f64> = layer
@@ -720,11 +714,8 @@ fn sort_sublayer_by_barycenter(
     let block: Vec<NodeIndex> = layer[block_start..block_end].to_vec();
 
     // Capture original positions for tie-breaking (relative to block start).
-    let original_positions: HashMap<NodeIndex, usize> = block
-        .iter()
-        .enumerate()
-        .map(|(i, &n)| (n, i))
-        .collect();
+    let original_positions: HashMap<NodeIndex, usize> =
+        block.iter().enumerate().map(|(i, &n)| (n, i)).collect();
 
     // Compute barycenters using full global adjacent layer positions.
     let barycenters: HashMap<NodeIndex, f64> = block
@@ -994,7 +985,10 @@ mod tests {
         refine_subgraph_ordering(&g, &mut layers, &membership, &ast, &[]);
 
         let final_cc = count_total_crossings(&g, &layers);
-        assert_eq!(final_cc, 0, "refinement should eliminate the intra-subgraph crossing");
+        assert_eq!(
+            final_cc, 0,
+            "refinement should eliminate the intra-subgraph crossing"
+        );
     }
 
     #[test]
@@ -1058,11 +1052,23 @@ mod tests {
 
         let mut membership = SubgraphMembership::new();
         membership.insert("X".to_string(), vec![]);
-        membership.insert("A".to_string(), vec!["Outer".to_string(), "Inner".to_string()]);
-        membership.insert("B".to_string(), vec!["Outer".to_string(), "Inner".to_string()]);
+        membership.insert(
+            "A".to_string(),
+            vec!["Outer".to_string(), "Inner".to_string()],
+        );
+        membership.insert(
+            "B".to_string(),
+            vec!["Outer".to_string(), "Inner".to_string()],
+        );
         membership.insert("C".to_string(), vec!["Outer".to_string()]);
-        membership.insert("D".to_string(), vec!["Outer".to_string(), "Inner".to_string()]);
-        membership.insert("E".to_string(), vec!["Outer".to_string(), "Inner".to_string()]);
+        membership.insert(
+            "D".to_string(),
+            vec!["Outer".to_string(), "Inner".to_string()],
+        );
+        membership.insert(
+            "E".to_string(),
+            vec!["Outer".to_string(), "Inner".to_string()],
+        );
         membership.insert("F".to_string(), vec!["Outer".to_string()]);
 
         let ast = make_ast_with_subgraphs(vec![make_subgraph(

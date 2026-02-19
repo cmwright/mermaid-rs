@@ -2,7 +2,7 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MindmapNodeShape {
     #[default]
-    Default,     // plain text, underline only
+    Default, // plain text, underline only
     Rect,        // [text]
     RoundedRect, // (text)
     Circle,      // ((text))
