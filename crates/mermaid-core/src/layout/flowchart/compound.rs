@@ -139,7 +139,8 @@ pub fn separate_overlapping_sibling_subgraphs(
     all_edges: &[EdgeDef],
     is_horizontal: bool,
 ) {
-    let gap = 8.0;
+    let main_gap = 50.0; // space between stacked subgraphs (room for edge labels)
+    let cross_gap = 12.0; // space between side-by-side subgraphs
     let overlap_epsilon = 1e-6;
 
     let mut parent_children: HashMap<Option<String>, Vec<String>> = HashMap::new();
@@ -281,12 +282,12 @@ pub fn separate_overlapping_sibling_subgraphs(
                         my_main_end.min(prev_main_end) - my_main_start.max(prev_main_start);
                     let my_main_size = my_main_end - my_main_start;
                     let prev_main_size = prev_main_end - prev_main_start;
-                    let smaller_main = my_main_size.min(prev_main_size);
+                    let larger_main = my_main_size.max(prev_main_size);
 
-                    // If overlap is less than half the smaller subgraph's main size,
+                    // If overlap is less than half the larger subgraph's main size,
                     // it's a stacking situation — resolve on main axis.
-                    if main_overlap_amount < smaller_main * 0.5 {
-                        let needed = prev_main_end + gap - my_main_start;
+                    if main_overlap_amount < larger_main * 0.5 {
+                        let needed = prev_main_end + main_gap - my_main_start;
                         if needed > 0.0 {
                             let cur = main_shifts.entry(id).or_insert(0.0);
                             *cur = cur.max(needed);
@@ -339,7 +340,7 @@ pub fn separate_overlapping_sibling_subgraphs(
                 let main_overlap = main_start < placed_main_end - overlap_epsilon
                     && main_end > placed_main_start + overlap_epsilon;
                 if main_overlap {
-                    required_cross_start = required_cross_start.max(*placed_cross_end + gap);
+                    required_cross_start = required_cross_start.max(*placed_cross_end + cross_gap);
                 }
             }
 

@@ -43,7 +43,7 @@ pub fn layout_flowchart(
     let membership = graph_builder::build_subgraph_membership(ast);
 
     // 6. Run Sugiyama layout pipeline
-    let result = sugiyama::layout(&mut graph, ast.direction, &membership, ast);
+    let mut result = sugiyama::layout(&mut graph, ast.direction, &membership, ast);
 
     // 7. Build positioned nodes from Sugiyama results
     let mut positioned_nodes = build_positioned_nodes(&graph, &result.positions);
@@ -72,6 +72,9 @@ pub fn layout_flowchart(
         measurer,
     );
 
+    // 9.5. Sync dummy node positions with shifted real nodes
+    sync_dummy_positions(&graph, &result.dummy_chains, &positioned_nodes, &mut result.positions);
+
     // 10. Extract bend points and label positions from dummy node positions, then route edges
     let extraction = build_edge_bend_points(&graph, &result.dummy_chains, &result.positions);
     let mut positioned_edges = edge_routing::route_edges(
@@ -81,6 +84,12 @@ pub fn layout_flowchart(
         &extraction.bend_points,
         &extraction.label_positions,
         &extraction.label_dimensions,
+    );
+
+    // 10.5. Adjust edge labels to avoid subgraph border/title overlaps
+    edge_routing::adjust_labels_for_subgraph_boundaries(
+        &mut positioned_edges,
+        &positioned_subgraphs,
     );
 
     // 11. Normalize coordinates and compute bounding box
@@ -126,6 +135,66 @@ fn build_positioned_nodes(
             })
         })
         .collect()
+}
+
+/// After subgraph separation shifts real nodes, update dummy node positions
+/// so that edge bend points and labels stay aligned with their endpoints.
+/// For each dummy chain, interpolates the shift between source and target.
+fn sync_dummy_positions(
+    graph: &petgraph::graph::DiGraph<NodeData, EdgeData>,
+    dummy_chains: &[DummyChain],
+    positioned_nodes: &[PositionedNode],
+    positions: &mut HashMap<petgraph::graph::NodeIndex, (f64, f64)>,
+) {
+    let node_pos: HashMap<&str, &PositionedNode> = positioned_nodes
+        .iter()
+        .map(|n| (n.id.as_str(), n))
+        .collect();
+
+    for chain in dummy_chains {
+        let src_id = &graph[chain.original_source].id;
+        let tgt_id = &graph[chain.original_target].id;
+
+        let Some(new_src) = node_pos.get(src_id.as_str()) else {
+            continue;
+        };
+        let Some(new_tgt) = node_pos.get(tgt_id.as_str()) else {
+            continue;
+        };
+        let Some(&old_src) = positions.get(&chain.original_source) else {
+            continue;
+        };
+        let Some(&old_tgt) = positions.get(&chain.original_target) else {
+            continue;
+        };
+
+        let src_dx = new_src.x - old_src.0;
+        let src_dy = new_src.y - old_src.1;
+        let tgt_dx = new_tgt.x - old_tgt.0;
+        let tgt_dy = new_tgt.y - old_tgt.1;
+
+        // Skip if neither endpoint moved
+        if src_dx.abs() < 0.1 && src_dy.abs() < 0.1 && tgt_dx.abs() < 0.1 && tgt_dy.abs() < 0.1 {
+            continue;
+        }
+
+        // Update the real node positions in the map too
+        positions.insert(chain.original_source, (new_src.x, new_src.y));
+        positions.insert(chain.original_target, (new_tgt.x, new_tgt.y));
+
+        // Interpolate shifts for each dummy node in the chain
+        let n = chain.dummy_nodes.len();
+        for (i, &dummy) in chain.dummy_nodes.iter().enumerate() {
+            let t = (i + 1) as f64 / (n + 1) as f64;
+            let dx = src_dx + (tgt_dx - src_dx) * t;
+            let dy = src_dy + (tgt_dy - src_dy) * t;
+
+            if let Some(pos) = positions.get_mut(&dummy) {
+                pos.0 += dx;
+                pos.1 += dy;
+            }
+        }
+    }
 }
 
 /// Result of extracting bend points and label positions from dummy chains.

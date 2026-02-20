@@ -6,41 +6,15 @@ use std::fs;
 
 struct Example {
     name: &'static str,
+    category: &'static str,
     source: &'static str,
 }
 
 const EXAMPLES: &[Example] = &[
-    Example {
-        name: "Test Loop - Complex Organization Flowchart",
-        source: include_str!("../tests/test_loop/input_mermaid.mmd"),
-    },
-    Example {
-        name: "Basic Pie Chart (Netflix)",
-        source: r#"pie title NETFLIX
-         "Time spent looking for movie" : 90
-         "Time spent watching it" : 10"#,
-    },
-    Example {
-        name: "Basic Pie Chart (Voldemort)",
-        source: r#"pie title What Voldemort doesn't have?
-         "FRIENDS" : 2
-         "FAMILY" : 3
-         "NOSE" : 45"#,
-    },
-    Example {
-        name: "Basic sequence diagram",
-        source: r#"sequenceDiagram
-    Alice ->> Bob: Hello Bob, how are you?
-    Bob-->>John: How about you John?
-    Bob--x Alice: I am good thanks!
-    Bob-x John: I am good thanks!
-    Note right of John: Bob thinks a long<br/>long time, so long<br/>that the text does<br/>not fit on a row.
-
-    Bob-->Alice: Checking with John...
-    Alice->John: Yes... John, how are you?"#,
-    },
+    // ── Flowcharts ──────────────────────────────────────────
     Example {
         name: "Basic flowchart",
+        category: "Flowchart",
         source: r#"graph LR
     A[Square Rect] -- Link text --> B((Circle))
     A --> C(Round Rect)
@@ -49,6 +23,7 @@ const EXAMPLES: &[Example] = &[
     },
     Example {
         name: "Larger flowchart with styling",
+        category: "Flowchart",
         source: r#"graph TB
     sq[Square shape] --> ci((Circle shape))
 
@@ -70,122 +45,8 @@ const EXAMPLES: &[Example] = &[
      class di orange"#,
     },
     Example {
-        name: "Loops, alt and opt",
-        source: r#"sequenceDiagram
-    loop Daily query
-        Alice->>Bob: Hello Bob, how are you?
-        alt is sick
-            Bob->>Alice: Not so good :(
-        else is well
-            Bob->>Alice: Feeling fresh like a daisy
-        end
-
-        opt Extra response
-            Bob->>Alice: Thanks for asking
-        end
-    end"#,
-    },
-    Example {
-        name: "Message to self in loop",
-        source: r#"sequenceDiagram
-    participant Alice
-    participant Bob
-    Alice->>John: Hello John, how are you?
-    loop HealthCheck
-        John->>John: Fight against hypochondria
-    end
-    Note right of John: Rational thoughts<br/>prevail...
-    John-->>Alice: Great!
-    John->>Bob: How about you?
-    Bob-->>John: Jolly good!"#,
-    },
-    Example {
-        name: "Blogging app service communication",
-        source: r#"sequenceDiagram
-    participant web as Web Browser
-    participant blog as Blog Service
-    participant account as Account Service
-    participant mail as Mail Service
-    participant db as Storage
-
-    Note over web,db: The user must be logged in to submit blog posts
-    web->>+account: Logs in using credentials
-    account->>db: Query stored accounts
-    db->>account: Respond with query result
-
-    alt Credentials not found
-        account->>web: Invalid credentials
-    else Credentials found
-        account->>-web: Successfully logged in
-
-        Note over web,db: When the user is authenticated, they can now submit new posts
-        web->>+blog: Submit new post
-        blog->>db: Store post data
-
-        par Notifications
-            blog--)mail: Send mail to blog subscribers
-            blog--)db: Store in-site notifications
-        and Response
-            blog-->>-web: Successfully posted
-        end
-    end"#,
-    },
-    Example {
-        name: "Mindmap",
-        source: r#"mindmap
-  root((mindmap))
-    Origins
-      Long history
-      ::icon(fa fa-book)
-      Popularisation
-        British popular psychology author Tony Buzan
-    Research
-      On effectiveness<br/>and features
-      On Automatic creation
-        Uses
-            Creative techniques
-            Strategic planning
-            Argument mapping
-    Tools
-      Pen and paper
-      Mermaid"#,
-    },
-    Example {
-        name: "Commit flow diagram",
-        source: r#"gitGraph:
-    commit "Ashish"
-    branch newbranch
-    checkout newbranch
-    commit id:"1111"
-    commit tag:"test"
-    checkout main
-    commit type: HIGHLIGHT
-    commit
-    merge newbranch
-    commit
-    branch b2
-    commit"#,
-    },
-    Example {
-        name: "Gantt chart",
-        source: r#"gantt
-    title A Gantt Diagram
-    dateFormat YYYY-MM-DD
-    axisFormat %Y-%m-%d
-    excludes weekends
-
-    section Section A
-    Completed task :done, des1, 2014-01-06, 2014-01-08
-    Active task :active, des2, 2014-01-09, 3d
-    Future task : des3, after des2, 5d
-    Future task2 : des4, after des3, 5d
-
-    section Critical tasks
-    Completed critical task :crit, done, 2014-01-06, 24h
-    Important milestone :crit, milestone, 2014-01-12, 0d"#,
-    },
-    Example {
         name: "LR Flowchart - Dependency diagram with dotted edges",
+        category: "Flowchart",
         source: r#"flowchart LR
     USO[User Service Org data sync] --> FF[Feature Flagging]
     USO --> VM[Vendor Management]
@@ -238,6 +99,7 @@ const EXAMPLES: &[Example] = &[
     },
     Example {
         name: "TD Flowchart - Dependency diagram with dotted edges",
+        category: "Flowchart",
         source: r#"flowchart TD
     USO[User Service Org data sync] --> FF[Feature Flagging]
     USO --> VM[Vendor Management]
@@ -289,7 +151,127 @@ const EXAMPLES: &[Example] = &[
     RTQ --> DL[Data Localization]"#,
     },
     Example {
+        name: "Complex Organization Flowchart",
+        category: "Flowchart",
+        source: include_str!("../tests/test_loop/input_mermaid.mmd"),
+    },
+    // ── Sequence Diagrams ───────────────────────────────────
+    Example {
+        name: "Basic sequence diagram",
+        category: "Sequence Diagram",
+        source: r#"sequenceDiagram
+    Alice ->> Bob: Hello Bob, how are you?
+    Bob-->>John: How about you John?
+    Bob--x Alice: I am good thanks!
+    Bob-x John: I am good thanks!
+    Note right of John: Bob thinks a long<br/>long time, so long<br/>that the text does<br/>not fit on a row.
+
+    Bob-->Alice: Checking with John...
+    Alice->John: Yes... John, how are you?"#,
+    },
+    Example {
+        name: "Loops, alt and opt",
+        category: "Sequence Diagram",
+        source: r#"sequenceDiagram
+    loop Daily query
+        Alice->>Bob: Hello Bob, how are you?
+        alt is sick
+            Bob->>Alice: Not so good :(
+        else is well
+            Bob->>Alice: Feeling fresh like a daisy
+        end
+
+        opt Extra response
+            Bob->>Alice: Thanks for asking
+        end
+    end"#,
+    },
+    Example {
+        name: "Message to self in loop",
+        category: "Sequence Diagram",
+        source: r#"sequenceDiagram
+    participant Alice
+    participant Bob
+    Alice->>John: Hello John, how are you?
+    loop HealthCheck
+        John->>John: Fight against hypochondria
+    end
+    Note right of John: Rational thoughts<br/>prevail...
+    John-->>Alice: Great!
+    John->>Bob: How about you?
+    Bob-->>John: Jolly good!"#,
+    },
+    Example {
+        name: "Blogging app service communication",
+        category: "Sequence Diagram",
+        source: r#"sequenceDiagram
+    participant web as Web Browser
+    participant blog as Blog Service
+    participant account as Account Service
+    participant mail as Mail Service
+    participant db as Storage
+
+    Note over web,db: The user must be logged in to submit blog posts
+    web->>+account: Logs in using credentials
+    account->>db: Query stored accounts
+    db->>account: Respond with query result
+
+    alt Credentials not found
+        account->>web: Invalid credentials
+    else Credentials found
+        account->>-web: Successfully logged in
+
+        Note over web,db: When the user is authenticated, they can now submit new posts
+        web->>+blog: Submit new post
+        blog->>db: Store post data
+
+        par Notifications
+            blog--)mail: Send mail to blog subscribers
+            blog--)db: Store in-site notifications
+        and Response
+            blog-->>-web: Successfully posted
+        end
+    end"#,
+    },
+    // ── Pie Charts ──────────────────────────────────────────
+    Example {
+        name: "Basic Pie Chart (Netflix)",
+        category: "Pie Chart",
+        source: r#"pie title NETFLIX
+         "Time spent looking for movie" : 90
+         "Time spent watching it" : 10"#,
+    },
+    Example {
+        name: "Basic Pie Chart (Voldemort)",
+        category: "Pie Chart",
+        source: r#"pie title What Voldemort doesn't have?
+         "FRIENDS" : 2
+         "FAMILY" : 3
+         "NOSE" : 45"#,
+    },
+    // ── Gantt Charts ────────────────────────────────────────
+    Example {
+        name: "Gantt chart",
+        category: "Gantt Chart",
+        source: r#"gantt
+    title A Gantt Diagram
+    dateFormat YYYY-MM-DD
+    axisFormat %Y-%m-%d
+    excludes weekends
+
+    section Section A
+    Completed task :done, des1, 2014-01-06, 2014-01-08
+    Active task :active, des2, 2014-01-09, 3d
+    Future task : des3, after des2, 5d
+    Future task2 : des4, after des3, 5d
+
+    section Critical tasks
+    Completed critical task :crit, done, 2014-01-06, 24h
+    Important milestone :crit, milestone, 2014-01-12, 0d"#,
+    },
+    Example {
         name: "Gantt chart - complex dependency handling",
+        category: "Gantt Chart",
         source: r#"gantt
     title Complex Dependency Gantt (Readable)
     dateFormat YYYY-MM-DD
@@ -315,6 +297,46 @@ const EXAMPLES: &[Example] = &[
     Launch prep :prep, after qa, 2d, dependsOn qa
     Go live :milestone, golive, after prep, 0d, dependsOn prep"#,
     },
+    // ── Git Graph ───────────────────────────────────────────
+    Example {
+        name: "Commit flow diagram",
+        category: "Git Graph",
+        source: r#"gitGraph:
+    commit "Ashish"
+    branch newbranch
+    checkout newbranch
+    commit id:"1111"
+    commit tag:"test"
+    checkout main
+    commit type: HIGHLIGHT
+    commit
+    merge newbranch
+    commit
+    branch b2
+    commit"#,
+    },
+    // ── Mindmap ─────────────────────────────────────────────
+    Example {
+        name: "Mindmap",
+        category: "Mindmap",
+        source: r#"mindmap
+  root((mindmap))
+    Origins
+      Long history
+      ::icon(fa fa-book)
+      Popularisation
+        British popular psychology author Tony Buzan
+    Research
+      On effectiveness<br/>and features
+      On Automatic creation
+        Uses
+            Creative techniques
+            Strategic planning
+            Argument mapping
+    Tools
+      Pen and paper
+      Mermaid"#,
+    },
 ];
 
 fn html_escape(s: &str) -> String {
@@ -336,6 +358,8 @@ fn build_html(results: &[(&Example, Result<String, String>)]) -> String {
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; padding: 20px; }
   h1 { text-align: center; margin-bottom: 24px; color: #333; }
   .example { background: #fff; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 24px; overflow: hidden; }
+  .category-header { background: #1a202c; color: #fff; padding: 14px 20px; font-size: 20px; font-weight: 700; margin-top: 32px; margin-bottom: 16px; border-radius: 8px; }
+  .category-header:first-of-type { margin-top: 0; }
   .example-header { background: #2d3748; color: #fff; padding: 10px 16px; font-size: 16px; font-weight: 600; }
   .columns { display: grid; grid-template-columns: 1fr 1fr 1fr; min-height: 200px; }
   .col { padding: 12px; border-right: 1px solid #e2e8f0; overflow: auto; }
@@ -351,7 +375,15 @@ fn build_html(results: &[(&Example, Result<String, String>)]) -> String {
 "#,
     );
 
+    let mut current_category = "";
     for (i, (example, result)) in results.iter().enumerate() {
+        if example.category != current_category {
+            current_category = example.category;
+            html.push_str(&format!(
+                "<div class=\"category-header\">{}</div>\n",
+                html_escape(current_category),
+            ));
+        }
         html.push_str(&format!(
             r#"<div class="example">
 <div class="example-header">#{} &mdash; {}</div>

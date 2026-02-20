@@ -2,6 +2,110 @@ use crate::ast::flowchart::{EdgeDef, NodeShape};
 use crate::layout::flowchart::types::*;
 use std::collections::HashMap;
 
+/// Adjust edge label positions to prevent overlap with subgraph borders and titles.
+/// For each label, checks if its bounding box straddles any subgraph border line
+/// or overlaps the title area, and pushes it to the nearest clear position.
+pub fn adjust_labels_for_subgraph_boundaries(
+    edges: &mut [PositionedEdge],
+    subgraphs: &[PositionedSubgraph],
+) {
+    let clearance = 4.0;
+
+    for edge in edges.iter_mut() {
+        let Some(lx) = edge.label_x else { continue };
+        let Some(ly) = edge.label_y else { continue };
+        let lw = edge.label_width.unwrap_or(0.0);
+        let lh = edge.label_height.unwrap_or(0.0);
+        if lw < 1.0 || lh < 1.0 {
+            continue;
+        }
+
+        let mut cur_x = lx;
+        let mut cur_y = ly;
+
+        // Multiple passes to handle cascading adjustments from nested subgraphs
+        for _ in 0..3 {
+            let prev_x = cur_x;
+            let prev_y = cur_y;
+
+            for sg in subgraphs.iter() {
+                let hw = lw / 2.0;
+                let hh = lh / 2.0;
+
+                let sg_right = sg.x + sg.width;
+                let sg_bottom = sg.y + sg.height;
+                let title_bottom = sg.y + SUBGRAPH_TITLE_HEIGHT + SUBGRAPH_PADDING;
+
+                // --- Horizontal borders (top/bottom of subgraph) ---
+                // Only relevant if label horizontally overlaps the subgraph
+                if cur_x + hw > sg.x && cur_x - hw < sg_right {
+                    // Top border: label straddles the border line at sg.y
+                    let label_top = cur_y - hh;
+                    let label_bottom = cur_y + hh;
+                    if label_top < sg.y && label_bottom > sg.y {
+                        if cur_y < sg.y {
+                            // Center above border → push label fully above
+                            cur_y = sg.y - hh - clearance;
+                        } else {
+                            // Center below border → push label below title area
+                            cur_y = title_bottom + hh + clearance;
+                        }
+                    } else if label_top >= sg.y && label_top < title_bottom && cur_y > sg.y {
+                        // Label inside subgraph but overlapping title area → push below title
+                        cur_y = title_bottom + hh + clearance;
+                    }
+
+                    // Bottom border: label straddles the border line at sg_bottom
+                    let label_top = cur_y - hh;
+                    let label_bottom = cur_y + hh;
+                    if label_top < sg_bottom && label_bottom > sg_bottom {
+                        if cur_y > sg_bottom {
+                            cur_y = sg_bottom + hh + clearance;
+                        } else {
+                            cur_y = sg_bottom - hh - clearance;
+                        }
+                    }
+                }
+
+                // --- Vertical borders (left/right of subgraph) ---
+                // Only relevant if label vertically overlaps the subgraph
+                let label_top = cur_y - hh;
+                let label_bottom = cur_y + hh;
+                if label_top < sg_bottom && label_bottom > sg.y {
+                    // Left border at sg.x
+                    let label_left = cur_x - hw;
+                    let label_right = cur_x + hw;
+                    if label_left < sg.x && label_right > sg.x {
+                        if cur_x < sg.x {
+                            cur_x = sg.x - hw - clearance;
+                        } else {
+                            cur_x = sg.x + hw + clearance;
+                        }
+                    }
+
+                    // Right border at sg_right
+                    let label_left = cur_x - hw;
+                    let label_right = cur_x + hw;
+                    if label_left < sg_right && label_right > sg_right {
+                        if cur_x > sg_right {
+                            cur_x = sg_right + hw + clearance;
+                        } else {
+                            cur_x = sg_right - hw - clearance;
+                        }
+                    }
+                }
+            }
+
+            if (cur_x - prev_x).abs() < 0.1 && (cur_y - prev_y).abs() < 0.1 {
+                break;
+            }
+        }
+
+        edge.label_x = Some(cur_x);
+        edge.label_y = Some(cur_y);
+    }
+}
+
 /// Route edges using dummy-node bend points for long edges and S-curve fallback
 /// for short edges.
 pub fn route_edges(
