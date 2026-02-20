@@ -409,3 +409,266 @@ fn compute_curve_points(from_x: f64, from_y: f64, to_x: f64, to_y: f64) -> Vec<(
         (to_x, to_y),
     ]
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::font::FontProvider;
+    use crate::render::theme::Theme;
+
+    fn make_measurer() -> (FontProvider, Theme) {
+        (FontProvider::default_font(), Theme::default())
+    }
+
+    #[test]
+    fn test_layout_simple_gitgraph() {
+        let ast = GitGraphAst {
+            commands: vec![
+                GitCommand::Commit(CommitDef {
+                    id: Some("c1".to_string()),
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+                GitCommand::Commit(CommitDef {
+                    id: Some("c2".to_string()),
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+            ],
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gitgraph(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.commits.len(), 2);
+        assert_eq!(layout.branch_labels.len(), 1);
+        assert_eq!(layout.branch_labels[0].name, "main");
+        assert!(layout.width > 0.0);
+        assert!(layout.height > 0.0);
+        // Second commit should be to the right of the first
+        assert!(layout.commits[1].x > layout.commits[0].x);
+    }
+
+    #[test]
+    fn test_layout_gitgraph_branch_and_merge() {
+        let ast = GitGraphAst {
+            commands: vec![
+                GitCommand::Commit(CommitDef {
+                    id: Some("c1".to_string()),
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+                GitCommand::Branch(BranchDef {
+                    name: "feature".to_string(),
+                }),
+                GitCommand::Commit(CommitDef {
+                    id: Some("c2".to_string()),
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+                GitCommand::Checkout(CheckoutDef {
+                    name: "main".to_string(),
+                }),
+                GitCommand::Commit(CommitDef {
+                    id: Some("c3".to_string()),
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+                GitCommand::Merge(MergeDef {
+                    branch: "feature".to_string(),
+                }),
+            ],
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gitgraph(&ast, &measurer, &theme).unwrap();
+
+        // 4 commits: c1, c2 (on feature), c3 (on main), merge commit
+        assert_eq!(layout.commits.len(), 4);
+        // 2 branches: main and feature
+        assert_eq!(layout.branch_labels.len(), 2);
+        assert!(layout.branch_labels.iter().any(|b| b.name == "main"));
+        assert!(layout.branch_labels.iter().any(|b| b.name == "feature"));
+        // Merge commit should be flagged
+        assert!(layout.commits[3].is_merge);
+        // Should have a merge connection
+        assert!(
+            !layout.connections.is_empty(),
+            "Should have at least one connection for the merge"
+        );
+    }
+
+    #[test]
+    fn test_layout_gitgraph_multiple_branches() {
+        let ast = GitGraphAst {
+            commands: vec![
+                GitCommand::Commit(CommitDef {
+                    id: None,
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+                GitCommand::Branch(BranchDef {
+                    name: "develop".to_string(),
+                }),
+                GitCommand::Commit(CommitDef {
+                    id: None,
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+                GitCommand::Branch(BranchDef {
+                    name: "feature".to_string(),
+                }),
+                GitCommand::Commit(CommitDef {
+                    id: None,
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+            ],
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gitgraph(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.branch_labels.len(), 3);
+        assert_eq!(layout.commits.len(), 3);
+        // Each branch should be at a different y position
+        let ys: Vec<f64> = layout.branch_labels.iter().map(|b| b.y).collect();
+        assert!(ys[0] < ys[1], "Branches should be at different y levels");
+        assert!(ys[1] < ys[2], "Branches should be at different y levels");
+    }
+
+    #[test]
+    fn test_layout_gitgraph_with_tags() {
+        let ast = GitGraphAst {
+            commands: vec![
+                GitCommand::Commit(CommitDef {
+                    id: Some("c1".to_string()),
+                    message: None,
+                    tag: Some("v1.0".to_string()),
+                    commit_type: CommitType::Normal,
+                }),
+                GitCommand::Commit(CommitDef {
+                    id: Some("c2".to_string()),
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+            ],
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gitgraph(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.tags.len(), 1);
+        assert_eq!(layout.tags[0].text, "v1.0");
+        // Tag should be above the commit
+        assert!(layout.tags[0].y < layout.commits[0].y);
+    }
+
+    #[test]
+    fn test_layout_gitgraph_commit_types() {
+        let ast = GitGraphAst {
+            commands: vec![
+                GitCommand::Commit(CommitDef {
+                    id: None,
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+                GitCommand::Commit(CommitDef {
+                    id: None,
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Reverse,
+                }),
+                GitCommand::Commit(CommitDef {
+                    id: None,
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Highlight,
+                }),
+            ],
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gitgraph(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.commits.len(), 3);
+        assert_eq!(layout.commits[0].commit_type, CommitType::Normal);
+        assert_eq!(layout.commits[1].commit_type, CommitType::Reverse);
+        assert_eq!(layout.commits[2].commit_type, CommitType::Highlight);
+    }
+
+    #[test]
+    fn test_layout_gitgraph_branch_lines() {
+        let ast = GitGraphAst {
+            commands: vec![
+                GitCommand::Commit(CommitDef {
+                    id: Some("c1".to_string()),
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+                GitCommand::Branch(BranchDef {
+                    name: "feature".to_string(),
+                }),
+                GitCommand::Commit(CommitDef {
+                    id: Some("c2".to_string()),
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+                GitCommand::Checkout(CheckoutDef {
+                    name: "main".to_string(),
+                }),
+                GitCommand::Commit(CommitDef {
+                    id: Some("c3".to_string()),
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+            ],
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gitgraph(&ast, &measurer, &theme).unwrap();
+
+        // Should have branch lines for both branches
+        assert!(
+            !layout.branch_lines.is_empty(),
+            "Should have branch lines"
+        );
+        // Main branch should have a solid line
+        let main_solid = layout.branch_lines.iter().any(|l| l.color_index == 0 && !l.is_dotted);
+        assert!(main_solid, "Main branch should have a solid line");
+    }
+
+    #[test]
+    fn test_layout_gitgraph_empty() {
+        let ast = GitGraphAst {
+            commands: Vec::new(),
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gitgraph(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.commits.len(), 0);
+        // Still has main branch label
+        assert_eq!(layout.branch_labels.len(), 1);
+    }
+}

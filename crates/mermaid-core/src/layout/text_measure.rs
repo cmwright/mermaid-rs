@@ -118,3 +118,137 @@ impl<'a> TextMeasurer<'a> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::font::FontProvider;
+
+    #[test]
+    fn test_measure_text_width() {
+        let fp = FontProvider::default_font();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, 14.0);
+
+        let metrics = measurer.measure("Hello");
+        assert!(metrics.width > 0.0, "Width should be positive");
+        assert!(metrics.height > 0.0, "Height should be positive");
+
+        // Empty string should have zero width
+        let empty = measurer.measure("");
+        assert!((empty.width - 0.0).abs() < 0.001, "Empty string should have zero width");
+    }
+
+    #[test]
+    fn test_wrap_text_fits_one_line() {
+        let fp = FontProvider::default_font();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, 14.0);
+
+        let short_text = "Hi";
+        let result = measurer.wrap_text(short_text, 500.0);
+        assert_eq!(result, "Hi", "Short text should not be wrapped");
+    }
+
+    #[test]
+    fn test_wrap_text_wraps_at_spaces() {
+        let fp = FontProvider::default_font();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, 14.0);
+
+        let long_text = "This is a fairly long sentence that should need wrapping at word boundaries";
+        // Use a narrow max width to force wrapping
+        let result = measurer.wrap_text(long_text, 80.0);
+        let lines: Vec<&str> = result.split('\n').collect();
+        assert!(
+            lines.len() > 1,
+            "Text should be wrapped into multiple lines, got {} line(s): {:?}",
+            lines.len(),
+            lines
+        );
+        // Verify no line exceeds max width (except possibly a single word)
+        for line in &lines {
+            let words: Vec<&str> = line.split_whitespace().collect();
+            if words.len() > 1 {
+                let w = measurer.measure(line).width;
+                assert!(
+                    w <= 80.0 + 1.0, // small tolerance
+                    "Multi-word line '{}' width {} should be <= max_width",
+                    line,
+                    w
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_wrap_text_single_long_word() {
+        let fp = FontProvider::default_font();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, 14.0);
+
+        let long_word = "Supercalifragilisticexpialidocious";
+        let result = measurer.wrap_text(long_word, 50.0);
+        // Single word longer than max_width should be kept intact (no mid-word break)
+        assert_eq!(
+            result, long_word,
+            "Single long word should not be broken"
+        );
+    }
+
+    #[test]
+    fn test_wrap_text_preserves_existing_newlines() {
+        let fp = FontProvider::default_font();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, 14.0);
+
+        let text = "Line one\nLine two\nLine three";
+        let result = measurer.wrap_text(text, 500.0);
+        // With large max_width, existing newlines should be preserved as-is
+        assert_eq!(result, text);
+    }
+
+    #[test]
+    fn test_wrap_text_empty_line() {
+        let fp = FontProvider::default_font();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, 14.0);
+
+        // A line that is only whitespace or empty after split
+        let text = "Hello\n\nWorld";
+        let result = measurer.wrap_text(text, 500.0);
+        let lines: Vec<&str> = result.split('\n').collect();
+        assert_eq!(lines.len(), 3);
+        assert_eq!(lines[1], "");
+    }
+
+    #[test]
+    fn test_measure_multiline() {
+        let fp = FontProvider::default_font();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, 14.0);
+
+        let text = "Hello\nWorld";
+        let metrics = measurer.measure_multiline(text, 2.0);
+        assert!(metrics.width > 0.0);
+        assert!(metrics.height > 0.0);
+
+        // Should be taller than single line
+        let single = measurer.measure("Hello");
+        assert!(
+            metrics.height > single.height,
+            "Multi-line should be taller than single line"
+        );
+    }
+
+    #[test]
+    fn test_measure_multiline_empty() {
+        let fp = FontProvider::default_font();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, 14.0);
+
+        let metrics = measurer.measure_multiline("", 2.0);
+        assert!((metrics.width - 0.0).abs() < 0.001);
+        assert!((metrics.height - 0.0).abs() < 0.001);
+    }
+}

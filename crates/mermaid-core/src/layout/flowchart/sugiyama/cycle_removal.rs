@@ -65,3 +65,131 @@ pub fn restore_cycles(graph: &mut DiGraph<NodeData, EdgeData>, reversed: &[EdgeI
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_node(id: &str) -> NodeData {
+        NodeData {
+            id: id.to_string(),
+            label: String::new(),
+            shape: Default::default(),
+            style: Default::default(),
+            width: 40.0,
+            height: 20.0,
+        }
+    }
+
+    fn make_edge() -> EdgeData {
+        EdgeData {
+            edge_type: Default::default(),
+            label: None,
+            label_width: 0.0,
+            label_height: 0.0,
+        }
+    }
+
+    #[test]
+    fn test_remove_cycles_simple_cycle() {
+        // A -> B -> C -> A (cycle)
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        let c = g.add_node(make_node("C"));
+        g.add_edge(a, b, make_edge());
+        g.add_edge(b, c, make_edge());
+        g.add_edge(c, a, make_edge());
+
+        let reversed = remove_cycles(&mut g);
+        // At least one edge should be reversed
+        assert!(
+            !reversed.is_empty(),
+            "cycle should cause at least one edge reversal"
+        );
+
+        // Graph should now be acyclic
+        // Verify by checking that a topological sort is possible
+        let topo = petgraph::algo::toposort(&g, None);
+        assert!(topo.is_ok(), "graph should be acyclic after cycle removal");
+    }
+
+    #[test]
+    fn test_remove_cycles_no_cycle() {
+        // A -> B -> C (no cycle)
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        let c = g.add_node(make_node("C"));
+        g.add_edge(a, b, make_edge());
+        g.add_edge(b, c, make_edge());
+
+        let reversed = remove_cycles(&mut g);
+        assert!(reversed.is_empty(), "no cycle means no reversals");
+    }
+
+    #[test]
+    fn test_restore_cycles() {
+        // A -> B -> C -> A
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        let c = g.add_node(make_node("C"));
+        g.add_edge(a, b, make_edge());
+        g.add_edge(b, c, make_edge());
+        g.add_edge(c, a, make_edge());
+
+        let original_edge_count = g.edge_count();
+
+        let reversed = remove_cycles(&mut g);
+        assert!(!reversed.is_empty());
+
+        // Restore should bring back original edge direction
+        restore_cycles(&mut g, &reversed);
+
+        // Edge count should be preserved
+        assert_eq!(g.edge_count(), original_edge_count);
+    }
+
+    #[test]
+    fn test_remove_cycles_multiple_cycles() {
+        // A -> B -> A, B -> C -> B
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        let c = g.add_node(make_node("C"));
+        g.add_edge(a, b, make_edge());
+        g.add_edge(b, a, make_edge());
+        g.add_edge(b, c, make_edge());
+        g.add_edge(c, b, make_edge());
+
+        let reversed = remove_cycles(&mut g);
+        // Should handle multiple cycles
+        let topo = petgraph::algo::toposort(&g, None);
+        assert!(topo.is_ok(), "graph should be acyclic after removing multiple cycles");
+
+        // Restore
+        restore_cycles(&mut g, &reversed);
+        assert_eq!(g.edge_count(), 4);
+    }
+
+    #[test]
+    fn test_remove_cycles_disconnected_with_cycle() {
+        // Component 1: A -> B (no cycle)
+        // Component 2: C -> D -> C (cycle)
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        let c = g.add_node(make_node("C"));
+        let d = g.add_node(make_node("D"));
+        g.add_edge(a, b, make_edge());
+        g.add_edge(c, d, make_edge());
+        g.add_edge(d, c, make_edge());
+
+        let reversed = remove_cycles(&mut g);
+        assert!(!reversed.is_empty());
+
+        let topo = petgraph::algo::toposort(&g, None);
+        assert!(topo.is_ok());
+    }
+}

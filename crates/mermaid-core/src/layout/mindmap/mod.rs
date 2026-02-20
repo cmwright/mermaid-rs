@@ -422,3 +422,251 @@ fn position_subtree_radial(
         current_perp += span + SIBLING_GAP;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::font::FontProvider;
+    use crate::render::theme::Theme;
+
+    fn make_measurer() -> (FontProvider, Theme) {
+        (FontProvider::default_font(), Theme::default())
+    }
+
+    #[test]
+    fn test_layout_simple_mindmap() {
+        let ast = MindmapAst {
+            root: MindmapNode {
+                id: "root".to_string(),
+                label: "Root".to_string(),
+                shape: MindmapNodeShape::Circle,
+                children: vec![
+                    MindmapNode {
+                        id: "child1".to_string(),
+                        label: "Child 1".to_string(),
+                        shape: MindmapNodeShape::Rect,
+                        children: Vec::new(),
+                        icon: None,
+                        css_class: None,
+                    },
+                    MindmapNode {
+                        id: "child2".to_string(),
+                        label: "Child 2".to_string(),
+                        shape: MindmapNodeShape::RoundedRect,
+                        children: Vec::new(),
+                        icon: None,
+                        css_class: None,
+                    },
+                ],
+                icon: None,
+                css_class: None,
+            },
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_mindmap(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.nodes.len(), 3);
+        assert_eq!(layout.edges.len(), 2);
+        assert!(layout.width > 0.0);
+        assert!(layout.height > 0.0);
+        // Root should be at depth 0
+        assert_eq!(layout.nodes[0].depth, 0);
+        assert_eq!(layout.nodes[0].id, "root");
+    }
+
+    #[test]
+    fn test_layout_mindmap_three_levels_deep() {
+        // 3+ depth levels to exercise position_subtree_radial recursion
+        let ast = MindmapAst {
+            root: MindmapNode {
+                id: "root".to_string(),
+                label: "Root".to_string(),
+                shape: MindmapNodeShape::Circle,
+                children: vec![
+                    MindmapNode {
+                        id: "level1a".to_string(),
+                        label: "Level 1A".to_string(),
+                        shape: MindmapNodeShape::Rect,
+                        children: vec![
+                            MindmapNode {
+                                id: "level2a".to_string(),
+                                label: "Level 2A".to_string(),
+                                shape: MindmapNodeShape::RoundedRect,
+                                children: vec![
+                                    MindmapNode {
+                                        id: "level3a".to_string(),
+                                        label: "Level 3A".to_string(),
+                                        shape: MindmapNodeShape::Default,
+                                        children: Vec::new(),
+                                        icon: None,
+                                        css_class: None,
+                                    },
+                                    MindmapNode {
+                                        id: "level3b".to_string(),
+                                        label: "Level 3B".to_string(),
+                                        shape: MindmapNodeShape::Hexagon,
+                                        children: Vec::new(),
+                                        icon: None,
+                                        css_class: None,
+                                    },
+                                ],
+                                icon: None,
+                                css_class: None,
+                            },
+                        ],
+                        icon: None,
+                        css_class: None,
+                    },
+                    MindmapNode {
+                        id: "level1b".to_string(),
+                        label: "Level 1B".to_string(),
+                        shape: MindmapNodeShape::Cloud,
+                        children: vec![
+                            MindmapNode {
+                                id: "level2b".to_string(),
+                                label: "Level 2B".to_string(),
+                                shape: MindmapNodeShape::Bang,
+                                children: vec![
+                                    MindmapNode {
+                                        id: "level3c".to_string(),
+                                        label: "Level 3C".to_string(),
+                                        shape: MindmapNodeShape::Default,
+                                        children: Vec::new(),
+                                        icon: None,
+                                        css_class: None,
+                                    },
+                                ],
+                                icon: None,
+                                css_class: None,
+                            },
+                        ],
+                        icon: None,
+                        css_class: None,
+                    },
+                ],
+                icon: None,
+                css_class: None,
+            },
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_mindmap(&ast, &measurer, &theme).unwrap();
+
+        // root + 2 level1 + 2 level2 + 3 level3 = 8 nodes
+        assert_eq!(layout.nodes.len(), 8);
+        // 7 edges (one per non-root node)
+        assert_eq!(layout.edges.len(), 7);
+
+        // Verify depth assignments
+        let root = layout.nodes.iter().find(|n| n.id == "root").unwrap();
+        assert_eq!(root.depth, 0);
+
+        let l1a = layout.nodes.iter().find(|n| n.id == "level1a").unwrap();
+        assert_eq!(l1a.depth, 1);
+
+        let l2a = layout.nodes.iter().find(|n| n.id == "level2a").unwrap();
+        assert_eq!(l2a.depth, 2);
+
+        let l3a = layout.nodes.iter().find(|n| n.id == "level3a").unwrap();
+        assert_eq!(l3a.depth, 3);
+
+        let l3c = layout.nodes.iter().find(|n| n.id == "level3c").unwrap();
+        assert_eq!(l3c.depth, 3);
+
+        // All nodes should have positive coordinates after normalization
+        for node in &layout.nodes {
+            assert!(
+                node.x - node.width / 2.0 >= 0.0,
+                "Node {} left edge should be >= 0, got {}",
+                node.id,
+                node.x - node.width / 2.0
+            );
+            assert!(
+                node.y - node.height / 2.0 >= 0.0,
+                "Node {} top edge should be >= 0, got {}",
+                node.id,
+                node.y - node.height / 2.0
+            );
+        }
+    }
+
+    #[test]
+    fn test_layout_mindmap_root_only() {
+        let ast = MindmapAst {
+            root: MindmapNode {
+                id: "root".to_string(),
+                label: "Only Root".to_string(),
+                shape: MindmapNodeShape::Circle,
+                children: Vec::new(),
+                icon: None,
+                css_class: None,
+            },
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_mindmap(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.nodes.len(), 1);
+        assert_eq!(layout.edges.len(), 0);
+        assert_eq!(layout.nodes[0].depth, 0);
+        assert!(layout.nodes[0].width >= ROOT_MIN_DIM);
+        assert!(layout.nodes[0].height >= ROOT_MIN_DIM);
+    }
+
+    #[test]
+    fn test_layout_mindmap_four_levels_deep() {
+        // 4 levels deep to ensure recursion works deeply
+        let ast = MindmapAst {
+            root: MindmapNode {
+                id: "r".to_string(),
+                label: "R".to_string(),
+                shape: MindmapNodeShape::Circle,
+                children: vec![MindmapNode {
+                    id: "a".to_string(),
+                    label: "A".to_string(),
+                    shape: MindmapNodeShape::Rect,
+                    children: vec![MindmapNode {
+                        id: "b".to_string(),
+                        label: "B".to_string(),
+                        shape: MindmapNodeShape::Rect,
+                        children: vec![MindmapNode {
+                            id: "c".to_string(),
+                            label: "C".to_string(),
+                            shape: MindmapNodeShape::Rect,
+                            children: vec![MindmapNode {
+                                id: "d".to_string(),
+                                label: "D".to_string(),
+                                shape: MindmapNodeShape::Rect,
+                                children: Vec::new(),
+                                icon: None,
+                                css_class: None,
+                            }],
+                            icon: None,
+                            css_class: None,
+                        }],
+                        icon: None,
+                        css_class: None,
+                    }],
+                    icon: None,
+                    css_class: None,
+                }],
+                icon: None,
+                css_class: None,
+            },
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_mindmap(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.nodes.len(), 5);
+        assert_eq!(layout.edges.len(), 4);
+
+        let d = layout.nodes.iter().find(|n| n.id == "d").unwrap();
+        assert_eq!(d.depth, 4);
+    }
+}

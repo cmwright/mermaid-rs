@@ -122,7 +122,7 @@ pub fn insert_dummy_nodes(
     chains
 }
 
-/// Remove dummy nodes from positions map and return bend points for long edges.
+/// Remove dummy nodes from the positions map and return bend points for long edges.
 #[allow(clippy::type_complexity)]
 pub fn extract_dummy_positions(
     chains: &[DummyChain],
@@ -144,4 +144,196 @@ pub fn extract_dummy_positions(
             )
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::flowchart::EdgeType;
+
+    fn make_node(id: &str) -> NodeData {
+        NodeData {
+            id: id.to_string(),
+            label: String::new(),
+            shape: NodeShape::Rectangle,
+            style: Default::default(),
+            width: 40.0,
+            height: 20.0,
+        }
+    }
+
+    fn make_edge_data(label: Option<&str>) -> EdgeData {
+        let (lw, lh) = if label.is_some() { (50.0, 15.0) } else { (0.0, 0.0) };
+        EdgeData {
+            edge_type: EdgeType::SolidArrow,
+            label: label.map(String::from),
+            label_width: lw,
+            label_height: lh,
+        }
+    }
+
+    #[test]
+    fn test_no_long_edges() {
+        // All edges span exactly 1 rank: no dummies needed
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        g.add_edge(a, b, make_edge_data(None));
+
+        let mut ranks = HashMap::new();
+        ranks.insert(a, 0);
+        ranks.insert(b, 1);
+
+        let chains = insert_dummy_nodes(&mut g, &mut ranks);
+        assert!(chains.is_empty(), "no long edges, no dummies");
+        assert_eq!(g.node_count(), 2, "no new nodes added");
+    }
+
+    #[test]
+    fn test_long_edge_spanning_two_ranks() {
+        // A at rank 0, B at rank 2 -> edge spans 2 ranks -> 1 dummy at rank 1
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        g.add_edge(a, b, make_edge_data(None));
+
+        let mut ranks = HashMap::new();
+        ranks.insert(a, 0);
+        ranks.insert(b, 2);
+
+        let chains = insert_dummy_nodes(&mut g, &mut ranks);
+        assert_eq!(chains.len(), 1, "one long edge produces one chain");
+        assert_eq!(chains[0].dummy_nodes.len(), 1, "spanning 2 ranks needs 1 dummy");
+        assert_eq!(chains[0].original_source, a);
+        assert_eq!(chains[0].original_target, b);
+        assert!(chains[0].label_node.is_none());
+
+        // Verify rank of the dummy
+        let dummy = chains[0].dummy_nodes[0];
+        assert_eq!(ranks[&dummy], 1);
+    }
+
+    #[test]
+    fn test_long_edge_spanning_three_ranks() {
+        // A at rank 0, B at rank 3 -> 2 dummies at ranks 1 and 2
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        g.add_edge(a, b, make_edge_data(None));
+
+        let mut ranks = HashMap::new();
+        ranks.insert(a, 0);
+        ranks.insert(b, 3);
+
+        let chains = insert_dummy_nodes(&mut g, &mut ranks);
+        assert_eq!(chains.len(), 1);
+        assert_eq!(chains[0].dummy_nodes.len(), 2);
+        assert_eq!(ranks[&chains[0].dummy_nodes[0]], 1);
+        assert_eq!(ranks[&chains[0].dummy_nodes[1]], 2);
+    }
+
+    #[test]
+    fn test_long_edge_with_label() {
+        // A at rank 0, B at rank 4 -> 3 dummies at ranks 1,2,3
+        // Label dummy should be at midpoint rank (0+4)/2 = 2
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        g.add_edge(a, b, make_edge_data(Some("my label")));
+
+        let mut ranks = HashMap::new();
+        ranks.insert(a, 0);
+        ranks.insert(b, 4);
+
+        let chains = insert_dummy_nodes(&mut g, &mut ranks);
+        assert_eq!(chains.len(), 1);
+        assert_eq!(chains[0].dummy_nodes.len(), 3);
+        assert!(chains[0].label_node.is_some());
+
+        let label_dummy = chains[0].label_node.unwrap();
+        assert_eq!(ranks[&label_dummy], 2, "label dummy should be at midpoint rank");
+
+        // Label dummy should have the label dimensions
+        let label_data = &g[label_dummy];
+        assert!((label_data.width - 50.0).abs() < 0.1);
+        assert!((label_data.height - 15.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_multiple_long_edges() {
+        // A->C spans 2, B->D spans 2
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        let c = g.add_node(make_node("C"));
+        let d = g.add_node(make_node("D"));
+        g.add_edge(a, c, make_edge_data(None));
+        g.add_edge(b, d, make_edge_data(None));
+
+        let mut ranks = HashMap::new();
+        ranks.insert(a, 0);
+        ranks.insert(b, 0);
+        ranks.insert(c, 2);
+        ranks.insert(d, 2);
+
+        let chains = insert_dummy_nodes(&mut g, &mut ranks);
+        assert_eq!(chains.len(), 2, "two long edges, two chains");
+    }
+
+    #[test]
+    fn test_extract_dummy_positions() {
+        // Build a chain manually
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        g.add_edge(a, b, make_edge_data(None));
+
+        let mut ranks = HashMap::new();
+        ranks.insert(a, 0);
+        ranks.insert(b, 3);
+
+        let chains = insert_dummy_nodes(&mut g, &mut ranks);
+        assert_eq!(chains.len(), 1);
+
+        // Create positions for all nodes including dummies
+        let mut positions = HashMap::new();
+        positions.insert(a, (100.0, 0.0));
+        positions.insert(b, (100.0, 300.0));
+        for (i, &dummy) in chains[0].dummy_nodes.iter().enumerate() {
+            positions.insert(dummy, (100.0, (i + 1) as f64 * 100.0));
+        }
+
+        let extracted = extract_dummy_positions(&chains, &positions);
+        assert_eq!(extracted.len(), 1);
+        let (src, tgt, _data, bps) = &extracted[0];
+        assert_eq!(*src, a);
+        assert_eq!(*tgt, b);
+        assert_eq!(bps.len(), 2); // 2 dummies
+        assert!((bps[0].1 - 100.0).abs() < 0.1);
+        assert!((bps[1].1 - 200.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_dummy_chain_connectivity() {
+        // Verify the chain of edges is properly connected
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        g.add_edge(a, b, make_edge_data(None));
+
+        let mut ranks = HashMap::new();
+        ranks.insert(a, 0);
+        ranks.insert(b, 3);
+
+        let chains = insert_dummy_nodes(&mut g, &mut ranks);
+        let chain = &chains[0];
+
+        // Original edge should be removed
+        assert!(g.find_edge(a, b).is_none(), "original long edge should be removed");
+
+        // Path should be A -> dummy1 -> dummy2 -> B
+        assert!(g.find_edge(a, chain.dummy_nodes[0]).is_some());
+        assert!(g.find_edge(chain.dummy_nodes[0], chain.dummy_nodes[1]).is_some());
+        assert!(g.find_edge(chain.dummy_nodes[1], b).is_some());
+    }
 }

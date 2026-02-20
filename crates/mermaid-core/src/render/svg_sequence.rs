@@ -634,3 +634,854 @@ fn block_kind_str(kind: BlockKind) -> &'static str {
         BlockKind::Rect => "rect",
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layout::sequence::{
+        BlockDivider, Lifeline, PositionedActivation, PositionedActor, PositionedBlock,
+        PositionedMessage, PositionedNote, SequenceLayout,
+    };
+
+    /// Build a minimal empty SequenceLayout for reuse across tests.
+    fn empty_layout() -> SequenceLayout {
+        SequenceLayout {
+            width: 400.0,
+            height: 300.0,
+            actors: Vec::new(),
+            lifelines: Vec::new(),
+            messages: Vec::new(),
+            blocks: Vec::new(),
+            notes: Vec::new(),
+            activations: Vec::new(),
+            autonumber: false,
+        }
+    }
+
+    fn default_theme() -> Theme {
+        Theme::default()
+    }
+
+    fn make_participant(id: &str, display_name: &str, center_x: f64) -> PositionedActor {
+        PositionedActor {
+            id: id.to_string(),
+            display_name: display_name.to_string(),
+            kind: ParticipantKind::Participant,
+            center_x,
+            top_y: 30.0,
+            box_width: 80.0,
+            box_height: 40.0,
+            bottom_y: 260.0,
+        }
+    }
+
+    fn make_actor(id: &str, display_name: &str, center_x: f64) -> PositionedActor {
+        PositionedActor {
+            id: id.to_string(),
+            display_name: display_name.to_string(),
+            kind: ParticipantKind::Actor,
+            center_x,
+            top_y: 30.0,
+            box_width: 80.0,
+            box_height: 60.0,
+            bottom_y: 260.0,
+        }
+    }
+
+    fn make_message(
+        from_x: f64,
+        to_x: f64,
+        y: f64,
+        arrow: ArrowType,
+        label: &str,
+    ) -> PositionedMessage {
+        PositionedMessage {
+            from_x,
+            to_x,
+            y,
+            arrow,
+            label: label.to_string(),
+            is_self: false,
+            self_width: 30.0,
+            self_height: 28.0,
+            number: None,
+        }
+    }
+
+    // ── 1. Actor stick figure ──────────────────────────────────
+
+    #[test]
+    fn actor_stick_figure_renders_circle_and_lines() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.actors.push(make_actor("A", "Alice", 100.0));
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        // Stick figure head (circle)
+        assert!(svg.contains("<circle"), "expected <circle for stick figure head");
+        // Body, arms, and legs are all <line> elements — at least 4 lines
+        let line_count = svg.matches("<line ").count();
+        // 4 lines per stick figure * 2 (top + bottom rendering) = 8
+        assert!(
+            line_count >= 8,
+            "expected at least 8 <line> elements for stick figure top+bottom, got {}",
+            line_count
+        );
+        // Label text
+        assert!(svg.contains("Alice"), "expected actor label 'Alice'");
+    }
+
+    // ── 2. Multi-line participant name ─────────────────────────
+
+    #[test]
+    fn multiline_participant_name_renders_tspan_elements() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout
+            .actors
+            .push(make_participant("A", "Line1\nLine2", 100.0));
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        // Multi-line names should produce <tspan> elements
+        assert!(
+            svg.contains("<tspan"),
+            "expected <tspan> for multi-line participant name"
+        );
+        assert!(svg.contains("Line1"), "expected first line text");
+        assert!(svg.contains("Line2"), "expected second line text");
+        // There should be multiple tspan elements (at least 2 per rendering, rendered top+bottom = 4)
+        let tspan_count = svg.matches("<tspan").count();
+        assert!(
+            tspan_count >= 4,
+            "expected at least 4 <tspan> elements (2 lines * top+bottom), got {}",
+            tspan_count
+        );
+    }
+
+    // ── 3. Multi-line note ─────────────────────────────────────
+
+    #[test]
+    fn multiline_note_renders_tspan_elements() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.notes.push(PositionedNote {
+            text: "first line\nsecond line\nthird line".to_string(),
+            x: 50.0,
+            y: 100.0,
+            width: 120.0,
+            height: 60.0,
+        });
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(
+            svg.contains("<tspan"),
+            "expected <tspan> for multi-line note"
+        );
+        assert!(svg.contains("first line"), "expected first line text");
+        assert!(svg.contains("second line"), "expected second line text");
+        assert!(svg.contains("third line"), "expected third line text");
+        let tspan_count = svg.matches("<tspan").count();
+        assert_eq!(tspan_count, 3, "expected 3 <tspan> elements for 3-line note");
+    }
+
+    #[test]
+    fn single_line_note_renders_without_tspan() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.notes.push(PositionedNote {
+            text: "simple note".to_string(),
+            x: 50.0,
+            y: 100.0,
+            width: 120.0,
+            height: 30.0,
+        });
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(svg.contains("simple note"), "expected note text");
+        assert!(
+            svg.contains("seq-note"),
+            "expected seq-note class on note text"
+        );
+        // Single-line note should NOT use tspan
+        assert!(
+            !svg.contains("<tspan"),
+            "single-line note should not contain <tspan>"
+        );
+    }
+
+    // ── 4. Self-message (polyline) ─────────────────────────────
+
+    #[test]
+    fn self_message_renders_polyline() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.messages.push(PositionedMessage {
+            from_x: 100.0,
+            to_x: 100.0,
+            y: 120.0,
+            arrow: ArrowType::SolidArrow,
+            label: "self call".to_string(),
+            is_self: true,
+            self_width: 30.0,
+            self_height: 28.0,
+            number: None,
+        });
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(
+            svg.contains("<polyline"),
+            "expected <polyline> for self-message"
+        );
+        assert!(svg.contains("self call"), "expected self-message label");
+        // Self-message should NOT produce a regular <line> for the message itself
+        // (lifelines and actors may still add <line> elements)
+    }
+
+    // ── 5. Autonumber circle ───────────────────────────────────
+
+    #[test]
+    fn autonumber_renders_circle_and_number() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.messages.push(PositionedMessage {
+            from_x: 80.0,
+            to_x: 200.0,
+            y: 120.0,
+            arrow: ArrowType::SolidArrow,
+            label: "numbered".to_string(),
+            is_self: false,
+            self_width: 30.0,
+            self_height: 28.0,
+            number: Some(1),
+        });
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(
+            svg.contains("<circle"),
+            "expected <circle> for autonumber"
+        );
+        // The number text "1"
+        assert!(
+            svg.contains(">1</text>"),
+            "expected number '1' in autonumber circle"
+        );
+    }
+
+    #[test]
+    fn autonumber_on_self_message_positions_circle() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.messages.push(PositionedMessage {
+            from_x: 100.0,
+            to_x: 100.0,
+            y: 120.0,
+            arrow: ArrowType::SolidArrow,
+            label: "self".to_string(),
+            is_self: true,
+            self_width: 30.0,
+            self_height: 28.0,
+            number: Some(3),
+        });
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(
+            svg.contains("<circle"),
+            "expected <circle> for autonumber on self-message"
+        );
+        assert!(
+            svg.contains(">3</text>"),
+            "expected number '3' in autonumber circle"
+        );
+        // Self-message autonumber is positioned at from_x - 12.0 = 88
+        assert!(svg.contains("cx=\"88\""), "expected cx=88 for self-message autonumber");
+    }
+
+    // ── 6. Multi-line message label ────────────────────────────
+
+    #[test]
+    fn multiline_message_label_renders_tspan_elements() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.messages.push(make_message(
+            80.0,
+            200.0,
+            120.0,
+            ArrowType::SolidArrow,
+            "line one\nline two",
+        ));
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(
+            svg.contains("<tspan"),
+            "expected <tspan> for multi-line message label"
+        );
+        assert!(svg.contains("line one"), "expected first label line");
+        assert!(svg.contains("line two"), "expected second label line");
+    }
+
+    #[test]
+    fn single_line_message_label_no_tspan() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.messages.push(make_message(
+            80.0,
+            200.0,
+            120.0,
+            ArrowType::SolidArrow,
+            "simple label",
+        ));
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(svg.contains("simple label"), "expected label text");
+        assert!(
+            !svg.contains("<tspan"),
+            "single-line label should not contain <tspan>"
+        );
+    }
+
+    // ── 7. Arrow types ─────────────────────────────────────────
+
+    #[test]
+    fn arrow_attrs_solid_arrow() {
+        let (dash, marker) = arrow_attrs(ArrowType::SolidArrow);
+        assert_eq!(dash, "");
+        assert!(marker.contains("seq-arrowhead"));
+        assert!(!marker.contains("open"));
+        assert!(!marker.contains("cross"));
+    }
+
+    #[test]
+    fn arrow_attrs_dotted_arrow() {
+        let (dash, marker) = arrow_attrs(ArrowType::DottedArrow);
+        assert!(dash.contains("stroke-dasharray"));
+        assert!(marker.contains("seq-arrowhead"));
+        assert!(!marker.contains("open"));
+    }
+
+    #[test]
+    fn arrow_attrs_solid_open() {
+        let (dash, marker) = arrow_attrs(ArrowType::SolidOpen);
+        assert_eq!(dash, "");
+        assert!(marker.contains("seq-arrowhead-open"));
+    }
+
+    #[test]
+    fn arrow_attrs_dotted_open() {
+        let (dash, marker) = arrow_attrs(ArrowType::DottedOpen);
+        assert!(dash.contains("stroke-dasharray"));
+        assert!(marker.contains("seq-arrowhead-open"));
+    }
+
+    #[test]
+    fn arrow_attrs_solid_paren() {
+        let (dash, marker) = arrow_attrs(ArrowType::SolidParen);
+        assert_eq!(dash, "");
+        assert_eq!(marker, "");
+    }
+
+    #[test]
+    fn arrow_attrs_dotted_paren() {
+        let (dash, marker) = arrow_attrs(ArrowType::DottedParen);
+        assert!(dash.contains("stroke-dasharray"));
+        assert_eq!(marker, "");
+    }
+
+    #[test]
+    fn arrow_attrs_solid_cross() {
+        let (dash, marker) = arrow_attrs(ArrowType::SolidCross);
+        assert_eq!(dash, "");
+        assert!(marker.contains("seq-cross"));
+    }
+
+    #[test]
+    fn arrow_attrs_dotted_cross() {
+        let (dash, marker) = arrow_attrs(ArrowType::DottedCross);
+        assert!(dash.contains("stroke-dasharray"));
+        assert!(marker.contains("seq-cross"));
+    }
+
+    #[test]
+    fn arrow_types_render_in_svg() {
+        let theme = default_theme();
+        let arrows = [
+            (ArrowType::SolidArrow, "seq-arrowhead"),
+            (ArrowType::DottedArrow, "seq-arrowhead"),
+            (ArrowType::SolidOpen, "seq-arrowhead-open"),
+            (ArrowType::DottedOpen, "seq-arrowhead-open"),
+            (ArrowType::SolidCross, "seq-cross"),
+            (ArrowType::DottedCross, "seq-cross"),
+        ];
+
+        for (arrow, expected_marker) in &arrows {
+            let mut layout = empty_layout();
+            layout.messages.push(make_message(50.0, 200.0, 100.0, *arrow, "msg"));
+            let svg = render_svg(&layout, &theme).unwrap();
+            assert!(
+                svg.contains(expected_marker),
+                "arrow {:?} should reference marker '{}'",
+                arrow,
+                expected_marker
+            );
+        }
+
+        // SolidParen and DottedParen produce no marker-end
+        for arrow in &[ArrowType::SolidParen, ArrowType::DottedParen] {
+            let mut layout = empty_layout();
+            layout.messages.push(make_message(50.0, 200.0, 100.0, *arrow, "msg"));
+            let svg = render_svg(&layout, &theme).unwrap();
+            assert!(
+                !svg.contains("marker-end"),
+                "arrow {arrow:?} should have no marker-end in the message line",
+            );
+        }
+
+        // Dotted arrows should have stroke-dasharray on the message line
+        for arrow in &[
+            ArrowType::DottedArrow,
+            ArrowType::DottedOpen,
+            ArrowType::DottedParen,
+            ArrowType::DottedCross,
+        ] {
+            let mut layout = empty_layout();
+            layout.messages.push(make_message(50.0, 200.0, 100.0, *arrow, "msg"));
+            let svg = render_svg(&layout, &theme).unwrap();
+            // The defs section always has stroke, but the message line should also have dasharray
+            assert!(
+                svg.contains("stroke-dasharray=\"5,5\""),
+                "dotted arrow {arrow:?} should produce stroke-dasharray on message line",
+            );
+        }
+    }
+
+    // ── 8. Block with sections and divider labels ──────────────
+
+    #[test]
+    fn block_section_divider_labels_rendered() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.blocks.push(PositionedBlock {
+            kind: BlockKind::Alt,
+            label: "is valid".to_string(),
+            x: 10.0,
+            y: 80.0,
+            width: 300.0,
+            height: 200.0,
+            sections: vec![
+                BlockDivider {
+                    y: 160.0,
+                    label: Some("else invalid".to_string()),
+                },
+                BlockDivider {
+                    y: 220.0,
+                    label: None,
+                },
+            ],
+        });
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        // Divider label should be rendered
+        assert!(
+            svg.contains("else invalid"),
+            "expected divider label 'else invalid' in SVG"
+        );
+        // Divider line should be rendered (dashed)
+        assert!(
+            svg.contains("stroke-dasharray=\"5,5\""),
+            "expected dashed divider line"
+        );
+        // The block kind label "alt" should appear
+        assert!(
+            svg.contains(">alt</text>"),
+            "expected block kind label 'alt'"
+        );
+        // The condition label "[is valid]" should appear
+        assert!(
+            svg.contains("[is valid]"),
+            "expected condition label '[is valid]'"
+        );
+    }
+
+    #[test]
+    fn block_divider_without_label_no_extra_text() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.blocks.push(PositionedBlock {
+            kind: BlockKind::Loop,
+            label: String::new(),
+            x: 10.0,
+            y: 80.0,
+            width: 300.0,
+            height: 100.0,
+            sections: vec![BlockDivider {
+                y: 130.0,
+                label: None,
+            }],
+        });
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        // The loop label should be present
+        assert!(svg.contains(">loop</text>"), "expected block kind 'loop'");
+        // No condition label (empty label string)
+        // Count text elements - should only have block kind label, no condition text
+        assert!(
+            !svg.contains("["),
+            "empty label should not render condition brackets"
+        );
+    }
+
+    // ── 9. All block kinds ─────────────────────────────────────
+
+    #[test]
+    fn block_kind_str_all_variants() {
+        assert_eq!(block_kind_str(BlockKind::Alt), "alt");
+        assert_eq!(block_kind_str(BlockKind::Loop), "loop");
+        assert_eq!(block_kind_str(BlockKind::Opt), "opt");
+        assert_eq!(block_kind_str(BlockKind::Par), "par");
+        assert_eq!(block_kind_str(BlockKind::Critical), "critical");
+        assert_eq!(block_kind_str(BlockKind::Break), "break");
+        assert_eq!(block_kind_str(BlockKind::Rect), "rect");
+    }
+
+    #[test]
+    fn all_block_kinds_render_label_in_svg() {
+        let theme = default_theme();
+        let kinds = [
+            (BlockKind::Alt, "alt"),
+            (BlockKind::Loop, "loop"),
+            (BlockKind::Opt, "opt"),
+            (BlockKind::Par, "par"),
+            (BlockKind::Critical, "critical"),
+            (BlockKind::Break, "break"),
+            (BlockKind::Rect, "rect"),
+        ];
+
+        for (kind, expected_str) in &kinds {
+            let mut layout = empty_layout();
+            layout.blocks.push(PositionedBlock {
+                kind: *kind,
+                label: String::new(),
+                x: 10.0,
+                y: 80.0,
+                width: 200.0,
+                height: 100.0,
+                sections: Vec::new(),
+            });
+
+            let svg = render_svg(&layout, &theme).unwrap();
+            let expected_text = format!(">{}</text>", expected_str);
+            assert!(
+                svg.contains(&expected_text),
+                "block kind {:?} should render label '{}', got SVG without it",
+                kind,
+                expected_str
+            );
+        }
+    }
+
+    // ── 10. Block with non-empty label ─────────────────────────
+
+    #[test]
+    fn block_with_condition_label_renders_bracketed_text() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.blocks.push(PositionedBlock {
+            kind: BlockKind::Opt,
+            label: "user is admin".to_string(),
+            x: 20.0,
+            y: 90.0,
+            width: 250.0,
+            height: 120.0,
+            sections: Vec::new(),
+        });
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(
+            svg.contains("[user is admin]"),
+            "expected condition label '[user is admin]' in SVG"
+        );
+        assert!(svg.contains(">opt</text>"), "expected block kind 'opt'");
+    }
+
+    #[test]
+    fn block_empty_label_does_not_render_condition() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.blocks.push(PositionedBlock {
+            kind: BlockKind::Rect,
+            label: String::new(),
+            x: 10.0,
+            y: 80.0,
+            width: 200.0,
+            height: 100.0,
+            sections: Vec::new(),
+        });
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(svg.contains(">rect</text>"), "expected block kind 'rect'");
+        // Count how many <text> elements there are for blocks; should only be the kind label
+        // Empty label should not produce a second text element with brackets
+        assert!(
+            !svg.contains("["),
+            "empty label should not produce bracketed condition"
+        );
+    }
+
+    // ── Additional coverage helpers ────────────────────────────
+
+    #[test]
+    fn render_svg_produces_valid_svg_structure() {
+        let theme = default_theme();
+        let layout = empty_layout();
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(svg.starts_with("<svg "), "should start with <svg tag");
+        assert!(svg.contains("xmlns=\"http://www.w3.org/2000/svg\""));
+        assert!(svg.contains("<style>"));
+        assert!(svg.contains("</style>"));
+        assert!(svg.contains("<defs>"));
+        assert!(svg.contains("</defs>"));
+        assert!(svg.contains("</g>"));
+        assert!(svg.trim_end().ends_with("</svg>"));
+    }
+
+    #[test]
+    fn lifeline_renders_as_line() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.lifelines.push(Lifeline {
+            actor_id: "A".to_string(),
+            x: 100.0,
+            y_start: 70.0,
+            y_end: 250.0,
+        });
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(
+            svg.contains("<line "),
+            "expected <line> element for lifeline"
+        );
+        assert!(
+            svg.contains("x1=\"100\""),
+            "expected lifeline at x=100"
+        );
+    }
+
+    #[test]
+    fn activation_renders_as_rect() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.activations.push(PositionedActivation {
+            actor_id: "A".to_string(),
+            x: 100.0,
+            y_start: 90.0,
+            y_end: 150.0,
+            depth: 0,
+        });
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        // Activation should render as a thin rect
+        assert!(
+            svg.contains("<rect "),
+            "expected <rect> element for activation"
+        );
+    }
+
+    #[test]
+    fn self_message_label_midpoint_uses_self_width() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.messages.push(PositionedMessage {
+            from_x: 100.0,
+            to_x: 100.0,
+            y: 120.0,
+            arrow: ArrowType::SolidArrow,
+            label: "self msg".to_string(),
+            is_self: true,
+            self_width: 30.0,
+            self_height: 28.0,
+            number: None,
+        });
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        // Label midpoint for self-message: from_x + self_width/2 = 100 + 15 = 115
+        assert!(svg.contains("self msg"), "expected self message label text");
+        assert!(
+            svg.contains("<polyline"),
+            "expected polyline for self-message"
+        );
+    }
+
+    #[test]
+    fn defs_contain_all_marker_definitions() {
+        let theme = default_theme();
+        let layout = empty_layout();
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(
+            svg.contains("id=\"seq-arrowhead\""),
+            "expected seq-arrowhead marker definition"
+        );
+        assert!(
+            svg.contains("id=\"seq-arrowhead-open\""),
+            "expected seq-arrowhead-open marker definition"
+        );
+        assert!(
+            svg.contains("id=\"seq-cross\""),
+            "expected seq-cross marker definition"
+        );
+    }
+
+    #[test]
+    fn participant_single_line_no_tspan() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout
+            .actors
+            .push(make_participant("A", "SingleName", 100.0));
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(svg.contains("SingleName"), "expected participant name");
+        // Single-line participant should not use tspan
+        assert!(
+            !svg.contains("<tspan"),
+            "single-line participant should not use <tspan>"
+        );
+    }
+
+    #[test]
+    fn block_background_polygon_rendered() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.blocks.push(PositionedBlock {
+            kind: BlockKind::Loop,
+            label: "forever".to_string(),
+            x: 10.0,
+            y: 80.0,
+            width: 300.0,
+            height: 200.0,
+            sections: Vec::new(),
+        });
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        // Block background rect
+        assert!(svg.contains("<rect "), "expected block background <rect>");
+        // Tab polygon
+        assert!(
+            svg.contains("<polygon "),
+            "expected block tab <polygon>"
+        );
+        // Label
+        assert!(svg.contains("[forever]"), "expected condition label");
+    }
+
+    #[test]
+    fn activation_with_depth_offset() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.activations.push(PositionedActivation {
+            actor_id: "A".to_string(),
+            x: 100.0,
+            y_start: 90.0,
+            y_end: 150.0,
+            depth: 2,
+        });
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        // depth=2 produces x_offset=6, so x = 100 - 5 + 6 = 101
+        assert!(
+            svg.contains("<rect "),
+            "expected activation rect with depth offset"
+        );
+    }
+
+    #[test]
+    fn message_without_number_no_circle() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.messages.push(make_message(
+            80.0,
+            200.0,
+            120.0,
+            ArrowType::SolidArrow,
+            "no number",
+        ));
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(
+            !svg.contains("<circle"),
+            "message without number should not have a <circle>"
+        );
+    }
+
+    #[test]
+    fn multiple_sections_with_mixed_labels() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.blocks.push(PositionedBlock {
+            kind: BlockKind::Par,
+            label: "parallel tasks".to_string(),
+            x: 10.0,
+            y: 80.0,
+            width: 300.0,
+            height: 250.0,
+            sections: vec![
+                BlockDivider {
+                    y: 140.0,
+                    label: Some("and task B".to_string()),
+                },
+                BlockDivider {
+                    y: 200.0,
+                    label: Some("and task C".to_string()),
+                },
+            ],
+        });
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(svg.contains(">par</text>"), "expected block kind 'par'");
+        assert!(
+            svg.contains("[parallel tasks]"),
+            "expected condition label"
+        );
+        assert!(
+            svg.contains("[and task B]"),
+            "expected first divider label"
+        );
+        assert!(
+            svg.contains("[and task C]"),
+            "expected second divider label"
+        );
+        // Two divider dashed lines
+        let dash_lines: Vec<&str> = svg
+            .lines()
+            .filter(|l| l.contains("stroke-dasharray") && l.contains("<line"))
+            .collect();
+        assert_eq!(
+            dash_lines.len(),
+            2,
+            "expected 2 dashed divider lines, got {}",
+            dash_lines.len()
+        );
+    }
+}

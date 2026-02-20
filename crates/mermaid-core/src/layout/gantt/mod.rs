@@ -1307,4 +1307,370 @@ mod tests {
         let base_width = layout.chart_x + layout.chart_width + RIGHT_PADDING;
         assert!(layout.width > base_width);
     }
+
+    #[test]
+    fn test_layout_after_dependency_resolution() {
+        // Task B starts after Task A using `After` dependency
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![
+                    GanttTask {
+                        name: "Task A".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("a".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-01".to_string()),
+                        end: TaskEnd::Duration("3d".to_string()),
+                    },
+                    GanttTask {
+                        name: "Task B".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("b".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::After(vec!["a".to_string()]),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.tasks.len(), 2);
+        // Task B should start at or after Task A ends
+        assert!(
+            layout.tasks[1].x >= layout.tasks[0].x + layout.tasks[0].width - 1.0,
+            "Task B (x={}) should start after Task A ends (x+w={})",
+            layout.tasks[1].x,
+            layout.tasks[0].x + layout.tasks[0].width
+        );
+    }
+
+    #[test]
+    fn test_layout_prev_end_resolution() {
+        // Task B uses PrevEnd to start after Task A
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![
+                    GanttTask {
+                        name: "Task A".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("a".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-01".to_string()),
+                        end: TaskEnd::Duration("3d".to_string()),
+                    },
+                    GanttTask {
+                        name: "Task B".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("b".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::PrevEnd,
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.tasks.len(), 2);
+        // Task B should start roughly where Task A ends
+        assert!(
+            layout.tasks[1].x >= layout.tasks[0].x + layout.tasks[0].width - 1.0,
+            "Task B (x={}) should start at or after Task A ends (x+w={})",
+            layout.tasks[1].x,
+            layout.tasks[0].x + layout.tasks[0].width
+        );
+    }
+
+    #[test]
+    fn test_layout_prev_end_first_task() {
+        // First task with PrevEnd uses current time as fallback
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Task A".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("a".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::PrevEnd,
+                    end: TaskEnd::Duration("3d".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.tasks.len(), 1);
+        assert!(layout.tasks[0].width > 0.0);
+    }
+
+    #[test]
+    fn test_layout_long_task_labels_expand_width() {
+        // A very long label on a short bar should push the total width out
+        let long_name = "This is an extremely long task name that should absolutely extend beyond the chart bar itself to test label width expansion";
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![GanttTask {
+                    name: long_name.to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date("2014-01-01".to_string()),
+                    end: TaskEnd::Duration("1d".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.tasks.len(), 1);
+        // The label should not fit inside the bar, so the total width should be expanded
+        let base_width = layout.chart_x + layout.chart_width + RIGHT_PADDING;
+        assert!(
+            layout.width >= base_width,
+            "Layout width should accommodate the long label"
+        );
+        assert!(layout.tasks[0].label_width > 0.0);
+    }
+
+    #[test]
+    fn test_layout_milestone_task() {
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Milestones".to_string(),
+                tasks: vec![
+                    GanttTask {
+                        name: "Start".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("t1".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-01".to_string()),
+                        end: TaskEnd::Duration("3d".to_string()),
+                    },
+                    GanttTask {
+                        name: "Milestone".to_string(),
+                        tags: TaskTags {
+                            milestone: true,
+                            ..Default::default()
+                        },
+                        id: Some("m1".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-04".to_string()),
+                        end: TaskEnd::Duration("0d".to_string()),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.tasks.len(), 2);
+        assert!(!layout.tasks[0].is_milestone);
+        assert!(layout.tasks[1].is_milestone);
+    }
+
+    #[test]
+    fn test_layout_multiple_sections_with_gaps() {
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![
+                GanttSection {
+                    name: "Section A".to_string(),
+                    tasks: vec![GanttTask {
+                        name: "Task 1".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("t1".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-01".to_string()),
+                        end: TaskEnd::Duration("3d".to_string()),
+                    }],
+                },
+                GanttSection {
+                    name: "Section B".to_string(),
+                    tasks: vec![GanttTask {
+                        name: "Task 2".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("t2".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-04".to_string()),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    }],
+                },
+            ],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.sections.len(), 2);
+        assert_eq!(layout.tasks.len(), 2);
+        // Second section should start below first
+        assert!(
+            layout.sections[1].y_start >= layout.sections[0].y_end,
+            "Section B should start at or after Section A ends"
+        );
+    }
+
+    #[test]
+    fn test_after_dependency_with_multiple_predecessors() {
+        // Task C depends on both A and B — starts after the latest of them
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![
+                    GanttTask {
+                        name: "Task A".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("a".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-01".to_string()),
+                        end: TaskEnd::Duration("5d".to_string()),
+                    },
+                    GanttTask {
+                        name: "Task B".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("b".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-01".to_string()),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                    GanttTask {
+                        name: "Task C".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("c".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::After(vec!["a".to_string(), "b".to_string()]),
+                        end: TaskEnd::Duration("1d".to_string()),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.tasks.len(), 3);
+        // Task C should start after the latest predecessor (Task A, 5d)
+        assert!(
+            layout.tasks[2].x >= layout.tasks[0].x + layout.tasks[0].width - 1.0,
+            "Task C should start after Task A (the latest predecessor)"
+        );
+    }
+
+    #[test]
+    fn test_inclusive_end_dates() {
+        // With inclusive_end_dates, an end date should be extended by one day
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            inclusive_end_dates: true,
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Task".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date("2014-01-01".to_string()),
+                    end: TaskEnd::Date("2014-01-03".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let ast_non_inclusive = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            inclusive_end_dates: false,
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Task".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date("2014-01-01".to_string()),
+                    end: TaskEnd::Date("2014-01-03".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout_inc = layout_gantt(&ast, &measurer, &theme).unwrap();
+        let layout_non = layout_gantt(&ast_non_inclusive, &measurer, &theme).unwrap();
+
+        // Inclusive end should make bar wider
+        assert!(
+            layout_inc.tasks[0].width > layout_non.tasks[0].width,
+            "Inclusive end date should result in wider bar"
+        );
+    }
+
+    #[test]
+    fn test_skip_excluded_start() {
+        // Task starting on Saturday should be pushed to Monday
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            excludes: vec!["weekends".to_string()],
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Task".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date("2014-01-04".to_string()), // Saturday
+                    end: TaskEnd::Duration("3d".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.tasks.len(), 1);
+        assert!(layout.tasks[0].width > 0.0);
+    }
 }

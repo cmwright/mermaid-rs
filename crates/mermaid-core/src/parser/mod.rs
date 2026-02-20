@@ -132,4 +132,54 @@ mod tests {
         let result = detect_diagram_kind("");
         assert!(result.is_err());
     }
+
+    #[test]
+    fn test_detect_with_leading_comments() {
+        let source = "%% This is a comment\n%% Another comment\nflowchart TD\n    A --> B";
+        assert_eq!(detect_diagram_kind(source).unwrap(), DiagramKind::Flowchart);
+    }
+
+    #[test]
+    fn test_detect_with_frontmatter_markers() {
+        // The current implementation skips lines that are exactly "---"
+        let source = "---\n---\ngantt\n    title Test";
+        assert_eq!(detect_diagram_kind(source).unwrap(), DiagramKind::Gantt);
+    }
+
+    #[test]
+    fn test_detect_with_directive_line() {
+        let source = "%%{init: {'theme': 'dark'}}%%\nsequenceDiagram\n    A->>B: Hello";
+        assert_eq!(
+            detect_diagram_kind(source).unwrap(),
+            DiagramKind::Sequence
+        );
+    }
+
+    #[test]
+    fn test_detect_gitgraph() {
+        assert_eq!(
+            detect_diagram_kind("gitGraph\n    commit").unwrap(),
+            DiagramKind::GitGraph
+        );
+    }
+
+    #[test]
+    fn test_detect_mindmap() {
+        assert_eq!(
+            detect_diagram_kind("mindmap\n    root").unwrap(),
+            DiagramKind::Mindmap
+        );
+    }
+
+    #[test]
+    fn test_detect_with_blank_lines() {
+        let source = "\n\n\nflowchart TD\n    A --> B";
+        assert_eq!(detect_diagram_kind(source).unwrap(), DiagramKind::Flowchart);
+    }
+
+    #[test]
+    fn test_detect_with_mixed_comments_and_frontmatter() {
+        let source = "---\n%% comment inside frontmatter\n---\n%% standalone comment\npie\n    \"A\": 50";
+        assert_eq!(detect_diagram_kind(source).unwrap(), DiagramKind::Pie);
+    }
 }

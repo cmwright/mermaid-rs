@@ -207,4 +207,126 @@ mod tests {
             assert_eq!(c.commit_type, CommitType::Normal);
         }
     }
+
+    #[test]
+    fn test_parse_commit_type_highlight() {
+        let source = "gitGraph\n    commit type: HIGHLIGHT";
+        let ast = parse_gitgraph(source).unwrap();
+        assert_eq!(ast.commands.len(), 1);
+        if let GitCommand::Commit(c) = &ast.commands[0] {
+            assert_eq!(c.commit_type, CommitType::Highlight);
+        } else {
+            panic!("Expected Commit");
+        }
+    }
+
+    #[test]
+    fn test_parse_commit_type_reverse() {
+        let source = "gitGraph\n    commit type: REVERSE";
+        let ast = parse_gitgraph(source).unwrap();
+        assert_eq!(ast.commands.len(), 1);
+        if let GitCommand::Commit(c) = &ast.commands[0] {
+            assert_eq!(c.commit_type, CommitType::Reverse);
+        } else {
+            panic!("Expected Commit");
+        }
+    }
+
+    #[test]
+    fn test_parse_commit_type_normal() {
+        let source = "gitGraph\n    commit type: NORMAL";
+        let ast = parse_gitgraph(source).unwrap();
+        assert_eq!(ast.commands.len(), 1);
+        if let GitCommand::Commit(c) = &ast.commands[0] {
+            assert_eq!(c.commit_type, CommitType::Normal);
+        } else {
+            panic!("Expected Commit");
+        }
+    }
+
+    #[test]
+    fn test_parse_commit_with_message() {
+        let source = r#"gitGraph
+    commit "some message""#;
+        let ast = parse_gitgraph(source).unwrap();
+        assert_eq!(ast.commands.len(), 1);
+        if let GitCommand::Commit(c) = &ast.commands[0] {
+            assert_eq!(c.message.as_deref(), Some("some message"));
+        } else {
+            panic!("Expected Commit");
+        }
+    }
+
+    #[test]
+    fn test_parse_commit_with_id_and_tag() {
+        let source = r#"gitGraph
+    commit id:"abc123" tag:"v1.0""#;
+        let ast = parse_gitgraph(source).unwrap();
+        assert_eq!(ast.commands.len(), 1);
+        if let GitCommand::Commit(c) = &ast.commands[0] {
+            assert_eq!(c.id.as_deref(), Some("abc123"));
+            assert_eq!(c.tag.as_deref(), Some("v1.0"));
+        } else {
+            panic!("Expected Commit");
+        }
+    }
+
+    #[test]
+    fn test_parse_commit_with_all_options() {
+        let source = r#"gitGraph
+    commit id:"c1" type: HIGHLIGHT tag:"release""#;
+        let ast = parse_gitgraph(source).unwrap();
+        if let GitCommand::Commit(c) = &ast.commands[0] {
+            assert_eq!(c.id.as_deref(), Some("c1"));
+            assert_eq!(c.commit_type, CommitType::Highlight);
+            assert_eq!(c.tag.as_deref(), Some("release"));
+        } else {
+            panic!("Expected Commit");
+        }
+    }
+
+    #[test]
+    fn test_parse_checkout_and_merge() {
+        let source = r#"gitGraph
+    commit
+    branch feature
+    checkout feature
+    commit
+    checkout main
+    merge feature"#;
+        let ast = parse_gitgraph(source).unwrap();
+        assert_eq!(ast.commands.len(), 6);
+
+        if let GitCommand::Branch(b) = &ast.commands[1] {
+            assert_eq!(b.name, "feature");
+        } else {
+            panic!("Expected Branch");
+        }
+
+        if let GitCommand::Checkout(c) = &ast.commands[2] {
+            assert_eq!(c.name, "feature");
+        } else {
+            panic!("Expected Checkout");
+        }
+
+        if let GitCommand::Checkout(c) = &ast.commands[4] {
+            assert_eq!(c.name, "main");
+        } else {
+            panic!("Expected Checkout");
+        }
+
+        if let GitCommand::Merge(m) = &ast.commands[5] {
+            assert_eq!(m.branch, "feature");
+        } else {
+            panic!("Expected Merge");
+        }
+    }
+
+    #[test]
+    fn test_strip_quotes_helper() {
+        assert_eq!(strip_quotes("\"hello\"".to_string()), "hello");
+        assert_eq!(strip_quotes("noquotes".to_string()), "noquotes");
+        assert_eq!(strip_quotes("\"\"".to_string()), "");
+        assert_eq!(strip_quotes("x".to_string()), "x");
+    }
 }

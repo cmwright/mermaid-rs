@@ -721,4 +721,356 @@ mod tests {
         let source = "sequenceDiagram\n    A->>B: Hello";
         assert_eq!(detect_diagram_kind(source).unwrap(), DiagramKind::Sequence);
     }
+
+    #[test]
+    fn test_parse_actor_keyword() {
+        let source = "sequenceDiagram\n    actor A";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.participants.len(), 1);
+        assert_eq!(ast.participants[0].id, "A");
+        assert_eq!(ast.participants[0].kind, ParticipantKind::Actor);
+    }
+
+    #[test]
+    fn test_parse_actor_with_alias() {
+        let source = "sequenceDiagram\n    actor U as User";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.participants[0].id, "U");
+        assert_eq!(ast.participants[0].display_name.as_deref(), Some("User"));
+        assert_eq!(ast.participants[0].kind, ParticipantKind::Actor);
+    }
+
+    #[test]
+    fn test_parse_autonumber() {
+        let source = "sequenceDiagram\n    autonumber\n    A->>B: Hello";
+        let ast = parse_sequence(source).unwrap();
+        assert!(ast.autonumber);
+    }
+
+    #[test]
+    fn test_parse_autonumber_default_false() {
+        let source = "sequenceDiagram\n    A->>B: Hello";
+        let ast = parse_sequence(source).unwrap();
+        assert!(!ast.autonumber);
+    }
+
+    #[test]
+    fn test_parse_solid_paren_arrow() {
+        let source = "sequenceDiagram\n    A-)B: async msg";
+        let ast = parse_sequence(source).unwrap();
+        if let SequenceStatement::Message(m) = &ast.statements[0] {
+            assert_eq!(m.arrow, ArrowType::SolidParen);
+            assert_eq!(m.label, "async msg");
+        } else {
+            panic!("Expected Message");
+        }
+    }
+
+    #[test]
+    fn test_parse_dotted_paren_arrow() {
+        let source = "sequenceDiagram\n    A--)B: async reply";
+        let ast = parse_sequence(source).unwrap();
+        if let SequenceStatement::Message(m) = &ast.statements[0] {
+            assert_eq!(m.arrow, ArrowType::DottedParen);
+            assert_eq!(m.label, "async reply");
+        } else {
+            panic!("Expected Message");
+        }
+    }
+
+    #[test]
+    fn test_parse_solid_cross_arrow() {
+        let source = "sequenceDiagram\n    A-xB: lost msg";
+        let ast = parse_sequence(source).unwrap();
+        if let SequenceStatement::Message(m) = &ast.statements[0] {
+            assert_eq!(m.arrow, ArrowType::SolidCross);
+            assert_eq!(m.label, "lost msg");
+        } else {
+            panic!("Expected Message");
+        }
+    }
+
+    #[test]
+    fn test_parse_dotted_cross_arrow() {
+        let source = "sequenceDiagram\n    A--xB: lost reply";
+        let ast = parse_sequence(source).unwrap();
+        if let SequenceStatement::Message(m) = &ast.statements[0] {
+            assert_eq!(m.arrow, ArrowType::DottedCross);
+            assert_eq!(m.label, "lost reply");
+        } else {
+            panic!("Expected Message");
+        }
+    }
+
+    #[test]
+    fn test_parse_loop_block() {
+        let source = "sequenceDiagram\n    loop Every minute\n        A->>B: ping\n    end";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.statements.len(), 1);
+        if let SequenceStatement::Block(block) = &ast.statements[0] {
+            assert_eq!(block.kind, BlockKind::Loop);
+            assert_eq!(block.label, "Every minute");
+            assert_eq!(block.sections.len(), 1);
+            assert_eq!(block.sections[0].statements.len(), 1);
+        } else {
+            panic!("Expected Block");
+        }
+    }
+
+    #[test]
+    fn test_parse_opt_block() {
+        let source = "sequenceDiagram\n    opt Extra details\n        A->>B: info\n    end";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.statements.len(), 1);
+        if let SequenceStatement::Block(block) = &ast.statements[0] {
+            assert_eq!(block.kind, BlockKind::Opt);
+            assert_eq!(block.label, "Extra details");
+            assert_eq!(block.sections.len(), 1);
+            assert_eq!(block.sections[0].statements.len(), 1);
+        } else {
+            panic!("Expected Block");
+        }
+    }
+
+    #[test]
+    fn test_parse_par_and_block() {
+        let source = "sequenceDiagram\n    par Alice to Bob\n        A->>B: Hello\n    and Alice to John\n        A->>J: Hello\n    end";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.statements.len(), 1);
+        if let SequenceStatement::Block(block) = &ast.statements[0] {
+            assert_eq!(block.kind, BlockKind::Par);
+            assert_eq!(block.label, "Alice to Bob");
+            assert_eq!(block.sections.len(), 2);
+            assert_eq!(block.sections[0].statements.len(), 1);
+            assert_eq!(block.sections[1].label.as_deref(), Some("Alice to John"));
+            assert_eq!(block.sections[1].statements.len(), 1);
+        } else {
+            panic!("Expected Block");
+        }
+    }
+
+    #[test]
+    fn test_parse_critical_block() {
+        let source = "sequenceDiagram\n    critical Establish connection\n        A->>B: connect\n    end";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.statements.len(), 1);
+        if let SequenceStatement::Block(block) = &ast.statements[0] {
+            assert_eq!(block.kind, BlockKind::Critical);
+            assert_eq!(block.label, "Establish connection");
+            assert_eq!(block.sections.len(), 1);
+            assert_eq!(block.sections[0].statements.len(), 1);
+        } else {
+            panic!("Expected Block");
+        }
+    }
+
+    #[test]
+    fn test_parse_break_block() {
+        let source = "sequenceDiagram\n    break When error\n        A->>B: error\n    end";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.statements.len(), 1);
+        if let SequenceStatement::Block(block) = &ast.statements[0] {
+            assert_eq!(block.kind, BlockKind::Break);
+            assert_eq!(block.label, "When error");
+            assert_eq!(block.sections.len(), 1);
+        } else {
+            panic!("Expected Block");
+        }
+    }
+
+    #[test]
+    fn test_parse_rect_block() {
+        let source = "sequenceDiagram\n    rect rgb(200, 220, 255)\n        A->>B: inside rect\n    end";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.statements.len(), 1);
+        if let SequenceStatement::Block(block) = &ast.statements[0] {
+            assert_eq!(block.kind, BlockKind::Rect);
+            assert_eq!(block.sections.len(), 1);
+            assert_eq!(block.sections[0].statements.len(), 1);
+        } else {
+            panic!("Expected Block");
+        }
+    }
+
+    #[test]
+    fn test_parse_note_left_of() {
+        let source = "sequenceDiagram\n    participant A\n    Note left of A: This is a note";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.statements.len(), 1);
+        if let SequenceStatement::Note(note) = &ast.statements[0] {
+            assert_eq!(note.position, NotePosition::LeftOf);
+            assert_eq!(note.participants, vec!["A"]);
+            assert_eq!(note.text, "This is a note");
+        } else {
+            panic!("Expected Note");
+        }
+    }
+
+    #[test]
+    fn test_parse_note_right_of() {
+        let source = "sequenceDiagram\n    participant A\n    Note right of A: Right note";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.statements.len(), 1);
+        if let SequenceStatement::Note(note) = &ast.statements[0] {
+            assert_eq!(note.position, NotePosition::RightOf);
+            assert_eq!(note.participants, vec!["A"]);
+            assert_eq!(note.text, "Right note");
+        } else {
+            panic!("Expected Note");
+        }
+    }
+
+    #[test]
+    fn test_parse_note_over_single() {
+        let source = "sequenceDiagram\n    participant A\n    Note over A: Over note";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.statements.len(), 1);
+        if let SequenceStatement::Note(note) = &ast.statements[0] {
+            assert_eq!(note.position, NotePosition::Over);
+            assert_eq!(note.participants, vec!["A"]);
+            assert_eq!(note.text, "Over note");
+        } else {
+            panic!("Expected Note");
+        }
+    }
+
+    #[test]
+    fn test_parse_note_over_multiple() {
+        let source = "sequenceDiagram\n    participant A\n    participant B\n    Note over A,B: Spanning note";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.statements.len(), 1);
+        if let SequenceStatement::Note(note) = &ast.statements[0] {
+            assert_eq!(note.position, NotePosition::Over);
+            assert_eq!(note.participants, vec!["A", "B"]);
+            assert_eq!(note.text, "Spanning note");
+        } else {
+            panic!("Expected Note");
+        }
+    }
+
+    #[test]
+    fn test_parse_activate_deactivate() {
+        let source = "sequenceDiagram\n    participant A\n    activate A\n    deactivate A";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.statements.len(), 2);
+        if let SequenceStatement::Activate(id) = &ast.statements[0] {
+            assert_eq!(id, "A");
+        } else {
+            panic!("Expected Activate");
+        }
+        if let SequenceStatement::Deactivate(id) = &ast.statements[1] {
+            assert_eq!(id, "A");
+        } else {
+            panic!("Expected Deactivate");
+        }
+    }
+
+    #[test]
+    fn test_parse_self_message_detailed() {
+        let source = "sequenceDiagram\n    A->>A: self call";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.statements.len(), 1);
+        if let SequenceStatement::Message(m) = &ast.statements[0] {
+            assert_eq!(m.from, "A");
+            assert_eq!(m.to, "A");
+            assert_eq!(m.arrow, ArrowType::SolidArrow);
+            assert_eq!(m.label, "self call");
+        } else {
+            panic!("Expected Message");
+        }
+        // A appears only once as participant
+        assert_eq!(ast.participants.len(), 1);
+        assert_eq!(ast.participants[0].id, "A");
+    }
+
+    #[test]
+    fn test_parse_activation_plus_minus_syntax() {
+        let source = "sequenceDiagram\n    A->>+B: activate\n    A->>-B: deactivate";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.statements.len(), 2);
+        if let SequenceStatement::Message(m) = &ast.statements[0] {
+            assert_eq!(m.from, "A");
+            assert_eq!(m.to, "B");
+            assert!(m.activate_target);
+            assert!(!m.deactivate_source);
+        } else {
+            panic!("Expected Message");
+        }
+        if let SequenceStatement::Message(m) = &ast.statements[1] {
+            assert_eq!(m.from, "A");
+            assert_eq!(m.to, "B");
+            assert!(!m.activate_target);
+            assert!(m.deactivate_source);
+        } else {
+            panic!("Expected Message");
+        }
+    }
+
+    #[test]
+    fn test_parse_implicit_participants_from_blocks() {
+        let source = "sequenceDiagram\n    alt Case\n        X->>Y: hello\n    end";
+        let ast = parse_sequence(source).unwrap();
+        // X and Y should be resolved as implicit participants
+        assert!(ast.participants.iter().any(|p| p.id == "X"));
+        assert!(ast.participants.iter().any(|p| p.id == "Y"));
+    }
+
+    #[test]
+    fn test_parse_implicit_participants_from_activate() {
+        let source = "sequenceDiagram\n    activate Z";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.participants.len(), 1);
+        assert_eq!(ast.participants[0].id, "Z");
+        assert_eq!(ast.participants[0].kind, ParticipantKind::Participant);
+    }
+
+    #[test]
+    fn test_parse_implicit_participants_from_notes() {
+        let source = "sequenceDiagram\n    Note left of Q: note text";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.participants.len(), 1);
+        assert_eq!(ast.participants[0].id, "Q");
+    }
+
+    #[test]
+    fn test_parse_all_arrow_types_explicit() {
+        // Test each arrow individually to ensure exhaustive coverage
+        let cases = vec![
+            ("A-)B: msg", ArrowType::SolidParen),
+            ("A--)B: msg", ArrowType::DottedParen),
+            ("A-xB: msg", ArrowType::SolidCross),
+            ("A--xB: msg", ArrowType::DottedCross),
+            ("A->>B: msg", ArrowType::SolidArrow),
+            ("A-->>B: msg", ArrowType::DottedArrow),
+            ("A->B: msg", ArrowType::SolidOpen),
+            ("A-->B: msg", ArrowType::DottedOpen),
+        ];
+        for (arrow_str, expected) in cases {
+            let source = format!("sequenceDiagram\n    {}", arrow_str);
+            let ast = parse_sequence(&source).unwrap();
+            if let SequenceStatement::Message(m) = &ast.statements[0] {
+                assert_eq!(m.arrow, expected, "Failed for: {}", arrow_str);
+            } else {
+                panic!("Expected Message for: {}", arrow_str);
+            }
+        }
+    }
+
+    #[test]
+    fn test_parse_nested_block_in_body() {
+        let source = "sequenceDiagram\n    loop Outer\n        alt Inner\n            A->>B: msg\n        else Other\n            B->>A: reply\n        end\n    end";
+        let ast = parse_sequence(source).unwrap();
+        if let SequenceStatement::Block(outer) = &ast.statements[0] {
+            assert_eq!(outer.kind, BlockKind::Loop);
+            assert_eq!(outer.sections[0].statements.len(), 1);
+            if let SequenceStatement::Block(inner) = &outer.sections[0].statements[0] {
+                assert_eq!(inner.kind, BlockKind::Alt);
+                assert_eq!(inner.sections.len(), 2);
+            } else {
+                panic!("Expected inner Block");
+            }
+        } else {
+            panic!("Expected outer Block");
+        }
+    }
 }

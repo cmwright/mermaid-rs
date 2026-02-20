@@ -251,3 +251,57 @@ fn render_branch_label(label: &PositionedBranchLabel) -> String {
 
     s
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::render::theme::Theme;
+
+    fn minimal_layout(branch_lines: Vec<PositionedBranchLine>) -> GitGraphLayout {
+        GitGraphLayout {
+            width: 400.0,
+            height: 200.0,
+            branch_labels: vec![],
+            branch_lines,
+            commits: vec![],
+            connections: vec![],
+            tags: vec![],
+        }
+    }
+
+    #[test]
+    fn test_dotted_branch_line_contains_stroke_dasharray() {
+        let layout = minimal_layout(vec![PositionedBranchLine {
+            y: 50.0,
+            x_start: 10.0,
+            x_end: 200.0,
+            color_index: 0,
+            is_dotted: true,
+        }]);
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(
+            svg.contains("stroke-dasharray"),
+            "Dotted branch line SVG should contain stroke-dasharray"
+        );
+    }
+
+    #[test]
+    fn test_solid_branch_line_no_stroke_dasharray() {
+        let layout = minimal_layout(vec![PositionedBranchLine {
+            y: 50.0,
+            x_start: 10.0,
+            x_end: 200.0,
+            color_index: 0,
+            is_dotted: false,
+        }]);
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(
+            !svg.contains("stroke-dasharray"),
+            "Solid branch line SVG should not contain stroke-dasharray"
+        );
+    }
+}

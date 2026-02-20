@@ -97,3 +97,160 @@ fn parse_color(s: &str) -> Color {
         Color::Named(s.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---------------------------------------------------------------
+    // Color::to_css
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn color_none_to_css() {
+        assert_eq!(Color::None.to_css(), "none");
+    }
+
+    #[test]
+    fn color_named_to_css() {
+        assert_eq!(Color::Named("red".into()).to_css(), "red");
+    }
+
+    #[test]
+    fn color_hex_to_css() {
+        assert_eq!(Color::Hex("#fff".into()).to_css(), "#fff");
+    }
+
+    // ---------------------------------------------------------------
+    // StyleProperties::merge – named fields
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn merge_overrides_fill_stroke_stroke_width() {
+        let base = StyleProperties {
+            fill: Some(Color::Named("blue".into())),
+            stroke: Some(Color::Named("black".into())),
+            stroke_width: Some(2.0),
+            ..Default::default()
+        };
+        let other = StyleProperties {
+            fill: Some(Color::Named("red".into())),
+            stroke: Some(Color::Hex("#aaa".into())),
+            stroke_width: Some(5.0),
+            ..Default::default()
+        };
+
+        let merged = base.merge(&other);
+
+        assert_eq!(merged.fill, Some(Color::Named("red".into())));
+        assert_eq!(merged.stroke, Some(Color::Hex("#aaa".into())));
+        assert_eq!(merged.stroke_width, Some(5.0));
+        // base values that were not overridden stay None because other
+        // didn't set them and base didn't either for these fields.
+    }
+
+    #[test]
+    fn merge_keeps_base_when_other_is_none() {
+        let base = StyleProperties {
+            fill: Some(Color::Named("blue".into())),
+            stroke_width: Some(3.0),
+            color: Some(Color::Named("green".into())),
+            font_size: Some(14.0),
+            stroke_dasharray: Some("5 3".into()),
+            ..Default::default()
+        };
+        let other = StyleProperties::default();
+
+        let merged = base.merge(&other);
+
+        assert_eq!(merged.fill, Some(Color::Named("blue".into())));
+        assert_eq!(merged.stroke_width, Some(3.0));
+        assert_eq!(merged.color, Some(Color::Named("green".into())));
+        assert_eq!(merged.font_size, Some(14.0));
+        assert_eq!(merged.stroke_dasharray, Some("5 3".into()));
+    }
+
+    // ---------------------------------------------------------------
+    // StyleProperties::merge – extra field
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn merge_extra_overrides_existing_key_and_appends_new_key() {
+        let base = StyleProperties {
+            extra: vec![("a".into(), "1".into())],
+            ..Default::default()
+        };
+        let other = StyleProperties {
+            extra: vec![("a".into(), "2".into()), ("b".into(), "3".into())],
+            ..Default::default()
+        };
+
+        let merged = base.merge(&other);
+
+        // "a" was overridden from "1" to "2"
+        assert_eq!(
+            merged.extra,
+            vec![("a".into(), "2".into()), ("b".into(), "3".into())]
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // parse_style_string – individual branches
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn parse_stroke_dasharray() {
+        let props = parse_style_string("stroke-dasharray:5 3");
+        assert_eq!(props.stroke_dasharray, Some("5 3".into()));
+    }
+
+    #[test]
+    fn parse_color_property() {
+        let props = parse_style_string("color:red");
+        assert_eq!(props.color, Some(Color::Named("red".into())));
+    }
+
+    #[test]
+    fn parse_font_size() {
+        let props = parse_style_string("font-size:16px");
+        assert_eq!(props.font_size, Some(16.0));
+    }
+
+    #[test]
+    fn parse_unknown_property_goes_to_extra() {
+        let props = parse_style_string("opacity:0.5");
+        assert_eq!(props.extra, vec![("opacity".into(), "0.5".into())]);
+    }
+
+    // ---------------------------------------------------------------
+    // parse_color (private) tested through parse_style_string
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn parse_color_transparent_returns_none_variant() {
+        let props = parse_style_string("fill:transparent");
+        assert_eq!(props.fill, Some(Color::None));
+    }
+
+    #[test]
+    fn parse_color_none_returns_none_variant() {
+        let props = parse_style_string("fill:none");
+        assert_eq!(props.fill, Some(Color::None));
+    }
+
+    // ---------------------------------------------------------------
+    // parse_style_string – multiple properties at once
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn parse_multiple_properties() {
+        let props =
+            parse_style_string("fill:#f9f, stroke:#333, stroke-width:4px, font-size:12px, opacity:0.8");
+
+        assert_eq!(props.fill, Some(Color::Hex("#f9f".into())));
+        assert_eq!(props.stroke, Some(Color::Hex("#333".into())));
+        assert_eq!(props.stroke_width, Some(4.0));
+        assert_eq!(props.font_size, Some(12.0));
+        assert_eq!(props.extra, vec![("opacity".into(), "0.8".into())]);
+    }
+}

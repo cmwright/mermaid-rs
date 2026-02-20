@@ -331,3 +331,230 @@ fn topological_sort(graph: &DiGraph<NodeData, EdgeData>) -> Vec<NodeIndex> {
 
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::flowchart::{EdgeDef, EdgeType, NodeDef, NodeShape, SubgraphDef};
+
+    fn make_node_data(id: &str) -> NodeData {
+        NodeData {
+            id: id.to_string(),
+            label: String::new(),
+            shape: NodeShape::Rectangle,
+            style: Default::default(),
+            width: 40.0,
+            height: 20.0,
+        }
+    }
+
+    fn make_edge_data() -> EdgeData {
+        EdgeData {
+            edge_type: EdgeType::SolidArrow,
+            label: None,
+            label_width: 0.0,
+            label_height: 0.0,
+        }
+    }
+
+    #[test]
+    fn test_assign_ranks_linear_chain() {
+        // A -> B -> C
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node_data("A"));
+        let b = g.add_node(make_node_data("B"));
+        let c = g.add_node(make_node_data("C"));
+        g.add_edge(a, b, make_edge_data());
+        g.add_edge(b, c, make_edge_data());
+
+        let ranks = assign_ranks(&g);
+        assert_eq!(ranks[&a], 0);
+        assert_eq!(ranks[&b], 1);
+        assert_eq!(ranks[&c], 2);
+    }
+
+    #[test]
+    fn test_assign_ranks_fork() {
+        // A -> B, A -> C
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node_data("A"));
+        let b = g.add_node(make_node_data("B"));
+        let c = g.add_node(make_node_data("C"));
+        g.add_edge(a, b, make_edge_data());
+        g.add_edge(a, c, make_edge_data());
+
+        let ranks = assign_ranks(&g);
+        assert_eq!(ranks[&a], 0);
+        assert_eq!(ranks[&b], 1);
+        assert_eq!(ranks[&c], 1);
+    }
+
+    #[test]
+    fn test_assign_ranks_merge() {
+        // A -> C, B -> C
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node_data("A"));
+        let b = g.add_node(make_node_data("B"));
+        let c = g.add_node(make_node_data("C"));
+        g.add_edge(a, c, make_edge_data());
+        g.add_edge(b, c, make_edge_data());
+
+        let ranks = assign_ranks(&g);
+        assert_eq!(ranks[&a], 0);
+        assert_eq!(ranks[&b], 0);
+        assert_eq!(ranks[&c], 1);
+    }
+
+    #[test]
+    fn test_assign_ranks_disconnected() {
+        // A -> B, C (disconnected)
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node_data("A"));
+        let b = g.add_node(make_node_data("B"));
+        let c = g.add_node(make_node_data("C"));
+        g.add_edge(a, b, make_edge_data());
+
+        let ranks = assign_ranks(&g);
+        assert_eq!(ranks[&a], 0);
+        assert_eq!(ranks[&b], 1);
+        assert_eq!(ranks[&c], 0);
+    }
+
+    #[test]
+    fn test_ranks_to_layers() {
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node_data("A"));
+        let b = g.add_node(make_node_data("B"));
+        let c = g.add_node(make_node_data("C"));
+        g.add_edge(a, b, make_edge_data());
+        g.add_edge(a, c, make_edge_data());
+
+        let mut ranks = HashMap::new();
+        ranks.insert(a, 0);
+        ranks.insert(b, 1);
+        ranks.insert(c, 1);
+
+        let layers = ranks_to_layers(&g, &ranks);
+        assert_eq!(layers.len(), 2);
+        assert_eq!(layers[0].len(), 1);
+        assert_eq!(layers[1].len(), 2);
+    }
+
+    #[test]
+    fn test_ranks_to_layers_empty() {
+        let g: DiGraph<NodeData, EdgeData> = DiGraph::new();
+        let ranks: HashMap<NodeIndex, usize> = HashMap::new();
+        let layers = ranks_to_layers(&g, &ranks);
+        assert!(layers.is_empty());
+    }
+
+    #[test]
+    fn test_align_sibling_subgraph_ranks() {
+        // Two sibling subgraphs: Left (A->B, depth 2) and Right (C, depth 1)
+        // After alignment, both should end at the same max rank
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node_data("A"));
+        let b = g.add_node(make_node_data("B"));
+        let c = g.add_node(make_node_data("C"));
+        g.add_edge(a, b, make_edge_data());
+
+        let mut ranks = HashMap::new();
+        ranks.insert(a, 0);
+        ranks.insert(b, 1);
+        ranks.insert(c, 0);
+
+        let ast = FlowchartAst {
+            subgraphs: vec![
+                SubgraphDef {
+                    id: "Left".to_string(),
+                    label: None,
+                    direction: None,
+                    nodes: vec![
+                        NodeDef { id: "A".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
+                        NodeDef { id: "B".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
+                    ],
+                    edges: vec![EdgeDef { from: "A".into(), to: "B".into(), edge_type: EdgeType::SolidArrow, label: None }],
+                    subgraphs: vec![],
+                },
+                SubgraphDef {
+                    id: "Right".to_string(),
+                    label: None,
+                    direction: None,
+                    nodes: vec![
+                        NodeDef { id: "C".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
+                    ],
+                    edges: vec![],
+                    subgraphs: vec![],
+                },
+            ],
+            ..Default::default()
+        };
+
+        align_sibling_subgraph_ranks(&g, &mut ranks, &ast);
+
+        // After alignment, the max rank among Left and Right siblings should be equal
+        let left_max = [ranks[&a], ranks[&b]].iter().max().copied().unwrap();
+        let right_max = ranks[&c];
+        assert_eq!(
+            left_max, right_max,
+            "sibling subgraphs should be aligned to the same max rank (left_max={left_max}, right_max={right_max})"
+        );
+    }
+
+    #[test]
+    fn test_align_sibling_subgraph_ranks_single_subgraph() {
+        // Single subgraph -> no alignment needed
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node_data("A"));
+        let b = g.add_node(make_node_data("B"));
+        g.add_edge(a, b, make_edge_data());
+
+        let mut ranks = HashMap::new();
+        ranks.insert(a, 0);
+        ranks.insert(b, 1);
+
+        let ast = FlowchartAst {
+            subgraphs: vec![SubgraphDef {
+                id: "SG".to_string(),
+                label: None,
+                direction: None,
+                nodes: vec![
+                    NodeDef { id: "A".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
+                    NodeDef { id: "B".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
+                ],
+                edges: vec![],
+                subgraphs: vec![],
+            }],
+            ..Default::default()
+        };
+
+        let orig_ranks = ranks.clone();
+        align_sibling_subgraph_ranks(&g, &mut ranks, &ast);
+
+        // Ranks should be unchanged since there's only one subgraph
+        assert_eq!(ranks[&a], orig_ranks[&a]);
+        assert_eq!(ranks[&b], orig_ranks[&b]);
+    }
+
+    #[test]
+    fn test_propagate_ranks_forward() {
+        // A -> B -> C, but B is at a lower rank than A+1
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node_data("A"));
+        let b = g.add_node(make_node_data("B"));
+        let c = g.add_node(make_node_data("C"));
+        g.add_edge(a, b, make_edge_data());
+        g.add_edge(b, c, make_edge_data());
+
+        let mut ranks = HashMap::new();
+        ranks.insert(a, 0);
+        ranks.insert(b, 0); // Intentionally wrong
+        ranks.insert(c, 0); // Intentionally wrong
+
+        propagate_ranks_forward(&g, &mut ranks);
+
+        assert_eq!(ranks[&a], 0);
+        assert!(ranks[&b] >= 1, "B should be at least rank 1");
+        assert!(ranks[&c] >= 2, "C should be at least rank 2");
+    }
+}

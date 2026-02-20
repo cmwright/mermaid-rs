@@ -274,4 +274,10 @@ mod tests {
         assert!(svg.contains(">A</text>"));
         assert!(svg.contains(">B</text>"));
     }
+
+    #[test]
+    fn test_get_slice_color_fallback() {
+        // PIE_COLORS has 12 entries; index 100 should exceed the array and return the fallback
+        assert_eq!(get_slice_color(100), "#cccccc");
+    }
 }

@@ -59,3 +59,150 @@ pub fn normalize_and_compute_bounds(
 
     (max_x + 8.0, max_y + 8.0)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::flowchart::{EdgeType, NodeShape};
+
+    fn make_node(id: &str, x: f64, y: f64) -> PositionedNode {
+        PositionedNode {
+            id: id.to_string(),
+            label: id.to_string(),
+            shape: NodeShape::Rectangle,
+            style: Default::default(),
+            x,
+            y,
+            width: 40.0,
+            height: 20.0,
+        }
+    }
+
+    fn make_sg(id: &str, x: f64, y: f64) -> PositionedSubgraph {
+        PositionedSubgraph {
+            id: id.to_string(),
+            label: Some(id.to_string()),
+            x,
+            y,
+            width: 100.0,
+            height: 80.0,
+            style: Default::default(),
+        }
+    }
+
+    #[test]
+    fn test_empty_graph() {
+        let (w, h) = normalize_and_compute_bounds(&mut [], &mut [], &mut []);
+        assert!((w - 8.0).abs() < 0.1);
+        assert!((h - 8.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_single_node_at_origin() {
+        let mut nodes = vec![make_node("A", 20.0, 10.0)];
+        let (w, h) = normalize_and_compute_bounds(&mut nodes, &mut [], &mut []);
+        // Node at (20, 10), width=40, height=20
+        // min_x = 20-20=0, min_y = 10-10=0
+        // shift_x=0, shift_y=0
+        // max_x = 20+20 = 40, max_y = 10+10 = 20
+        assert!((w - 48.0).abs() < 0.1, "w={w}"); // 40 + 8
+        assert!((h - 28.0).abs() < 0.1, "h={h}"); // 20 + 8
+    }
+
+    #[test]
+    fn test_negative_coordinates_shifted() {
+        let mut nodes = vec![make_node("A", -50.0, -30.0)];
+        let mut edges = vec![];
+        let mut subgraphs = vec![];
+        normalize_and_compute_bounds(&mut nodes, &mut edges, &mut subgraphs);
+        // min_x = -50 - 20 = -70, shift_x = 70
+        // new x = -50 + 70 = 20
+        assert!(nodes[0].x >= 0.0, "node x should be non-negative after normalize");
+        assert!(nodes[0].y >= 0.0, "node y should be non-negative after normalize");
+    }
+
+    #[test]
+    fn test_edges_shifted_with_nodes() {
+        let mut nodes = vec![
+            make_node("A", -50.0, -30.0),
+            make_node("B", 50.0, 70.0),
+        ];
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("test".into()),
+            label_x: Some(0.0),
+            label_y: Some(20.0),
+            label_width: Some(30.0),
+            label_height: Some(15.0),
+            points: vec![(-30.0, -20.0), (30.0, 60.0)],
+        }];
+        let mut subgraphs = vec![];
+
+        normalize_and_compute_bounds(&mut nodes, &mut edges, &mut subgraphs);
+
+        // All points and labels should be shifted by the same amount as nodes
+        for point in &edges[0].points {
+            assert!(point.0 >= -1.0 && point.1 >= -1.0, "edge point should be non-negative");
+        }
+        assert!(edges[0].label_x.unwrap() >= 0.0);
+        assert!(edges[0].label_y.unwrap() >= 0.0);
+    }
+
+    #[test]
+    fn test_subgraphs_shifted() {
+        let mut nodes = vec![];
+        let mut edges = vec![];
+        let mut subgraphs = vec![make_sg("SG", -20.0, -10.0)];
+
+        normalize_and_compute_bounds(&mut nodes, &mut edges, &mut subgraphs);
+        assert!(
+            subgraphs[0].x >= -0.1,
+            "subgraph x should be non-negative, got {}",
+            subgraphs[0].x
+        );
+        assert!(
+            subgraphs[0].y >= -0.1,
+            "subgraph y should be non-negative, got {}",
+            subgraphs[0].y
+        );
+    }
+
+    #[test]
+    fn test_bounds_account_for_subgraphs() {
+        let mut nodes = vec![make_node("A", 20.0, 10.0)];
+        let mut edges = vec![];
+        // Subgraph extends further than the node
+        let mut subgraphs = vec![make_sg("SG", 0.0, 0.0)]; // extends to (100, 80)
+
+        let (w, h) = normalize_and_compute_bounds(&mut nodes, &mut edges, &mut subgraphs);
+        // Bounds should cover the subgraph
+        assert!(w >= 100.0 + 8.0, "width should cover subgraph, got {w}");
+        assert!(h >= 80.0 + 8.0, "height should cover subgraph, got {h}");
+    }
+
+    #[test]
+    fn test_edge_without_label() {
+        let mut nodes = vec![
+            make_node("A", 0.0, 0.0),
+            make_node("B", 100.0, 100.0),
+        ];
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: None,
+            label_x: None,
+            label_y: None,
+            label_width: None,
+            label_height: None,
+            points: vec![(20.0, 10.0), (80.0, 90.0)],
+        }];
+
+        normalize_and_compute_bounds(&mut nodes, &mut edges, &mut []);
+        // Should not panic on None label coordinates
+        assert!(edges[0].label_x.is_none());
+        assert!(edges[0].label_y.is_none());
+    }
+}

@@ -128,4 +128,59 @@ mod tests {
         assert_eq!(segs[0].text, "plain text");
         assert!(!segs[0].bold);
     }
+
+    #[test]
+    fn test_has_html_with_tags() {
+        assert!(has_html("<b>text</b>"));
+    }
+
+    #[test]
+    fn test_has_html_plain_text() {
+        assert!(!has_html("plain text"));
+    }
+
+    #[test]
+    fn test_has_html_angle_brackets_without_proper_tags() {
+        // has_html checks for both '<' and '>' present, so "< >" returns true
+        assert!(has_html("< >"));
+        // Only '<' without '>' returns false
+        assert!(!has_html("just < but no close"));
+        // Only '>' without '<' returns false
+        assert!(!has_html("just > but no open"));
+    }
+
+    #[test]
+    fn test_parse_segments_unknown_tag_i() {
+        // <i> is not a recognized tag, so it gets skipped; text content is preserved
+        let segs = parse_segments("<i>italic</i> text");
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].text, "italic text");
+        assert!(!segs[0].bold);
+    }
+
+    #[test]
+    fn test_parse_segments_unknown_tag_em() {
+        // <em> is not a recognized tag, so it gets skipped; text content is preserved
+        let segs = parse_segments("<em>emphasis</em>");
+        assert_eq!(segs.len(), 1);
+        assert_eq!(segs[0].text, "emphasis");
+        assert!(!segs[0].bold);
+    }
+
+    #[test]
+    fn test_parse_segments_empty_input() {
+        let segs = parse_segments("");
+        assert!(segs.is_empty());
+    }
+
+    #[test]
+    fn test_parse_segments_strong_tag() {
+        // <strong> is treated the same as <b>
+        let segs = parse_segments("<strong>bold</strong> normal");
+        assert_eq!(segs.len(), 2);
+        assert_eq!(segs[0].text, "bold");
+        assert!(segs[0].bold);
+        assert_eq!(segs[1].text, " normal");
+        assert!(!segs[1].bold);
+    }
 }

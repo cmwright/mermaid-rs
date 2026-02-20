@@ -195,3 +195,117 @@ impl Theme {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: extract the inner hex string from a `Color::Hex`.
+    fn hex(color: &Color) -> &str {
+        match color {
+            Color::Hex(s) => s.as_str(),
+            other => panic!("expected Color::Hex, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn forest_theme_has_forest_specific_colors() {
+        let theme = Theme::forest();
+
+        // Universal
+        assert_eq!(hex(&theme.line_color), "#2b5329");
+        assert_eq!(hex(&theme.text_color), "#2b5329");
+        // background inherits from default via ..Self::default()
+        assert_eq!(hex(&theme.background), "#ffffff");
+
+        // Flowchart
+        assert_eq!(hex(&theme.flowchart.primary_color), "#cde498");
+        assert_eq!(hex(&theme.flowchart.primary_border), "#13540c");
+        assert_eq!(hex(&theme.flowchart.primary_text), "#13540c");
+        assert_eq!(hex(&theme.flowchart.subgraph_fill), "#cde49833");
+        assert_eq!(hex(&theme.flowchart.subgraph_border), "#13540c");
+        assert_eq!(hex(&theme.flowchart.subgraph_text), "#13540c");
+
+        // Sequence
+        assert_eq!(hex(&theme.sequence.actor_fill), "#cde498");
+        assert_eq!(hex(&theme.sequence.actor_border), "#13540c");
+        assert_eq!(hex(&theme.sequence.actor_text), "#13540c");
+        assert_eq!(hex(&theme.sequence.activation_fill), "#cde498");
+        assert_eq!(hex(&theme.sequence.activation_border), "#13540c");
+        assert_eq!(hex(&theme.sequence.loop_fill), "#cde49822");
+        assert_eq!(hex(&theme.sequence.loop_line), "#13540c");
+        assert_eq!(hex(&theme.sequence.label_box_fill), "#cde498");
+        assert_eq!(hex(&theme.sequence.lifeline_color), "#a8d68e");
+    }
+
+    #[test]
+    fn neutral_theme_has_neutral_specific_colors() {
+        let theme = Theme::neutral();
+
+        // Universal
+        assert_eq!(hex(&theme.line_color), "#666666");
+        assert_eq!(hex(&theme.text_color), "#333333");
+        assert_eq!(hex(&theme.background), "#ffffff");
+
+        // Flowchart
+        assert_eq!(hex(&theme.flowchart.primary_color), "#f4f4f4");
+        assert_eq!(hex(&theme.flowchart.primary_border), "#666666");
+        assert_eq!(hex(&theme.flowchart.primary_text), "#333333");
+        assert_eq!(hex(&theme.flowchart.subgraph_fill), "#f4f4f433");
+        assert_eq!(hex(&theme.flowchart.subgraph_border), "#666666");
+        assert_eq!(hex(&theme.flowchart.subgraph_text), "#333333");
+
+        // Sequence
+        assert_eq!(hex(&theme.sequence.actor_fill), "#f4f4f4");
+        assert_eq!(hex(&theme.sequence.actor_border), "#666666");
+        assert_eq!(hex(&theme.sequence.actor_text), "#333333");
+        assert_eq!(hex(&theme.sequence.activation_fill), "#f4f4f4");
+        assert_eq!(hex(&theme.sequence.activation_border), "#666666");
+        assert_eq!(hex(&theme.sequence.loop_fill), "#f4f4f422");
+        assert_eq!(hex(&theme.sequence.loop_line), "#666666");
+        assert_eq!(hex(&theme.sequence.label_box_fill), "#f4f4f4");
+        assert_eq!(hex(&theme.sequence.lifeline_color), "#d9d9d9");
+    }
+
+    #[test]
+    fn by_name_forest_returns_forest_theme() {
+        let theme = Theme::by_name("forest");
+        assert_eq!(hex(&theme.line_color), "#2b5329");
+        assert_eq!(hex(&theme.flowchart.primary_color), "#cde498");
+        assert_eq!(hex(&theme.sequence.actor_fill), "#cde498");
+    }
+
+    #[test]
+    fn by_name_neutral_returns_neutral_theme() {
+        let theme = Theme::by_name("neutral");
+        assert_eq!(hex(&theme.line_color), "#666666");
+        assert_eq!(hex(&theme.flowchart.primary_color), "#f4f4f4");
+        assert_eq!(hex(&theme.sequence.actor_fill), "#f4f4f4");
+    }
+
+    #[test]
+    fn by_name_unknown_returns_default_theme() {
+        let theme = Theme::by_name("unknown");
+        let default_theme = Theme::default();
+        assert_eq!(hex(&theme.line_color), hex(&default_theme.line_color));
+        assert_eq!(hex(&theme.text_color), hex(&default_theme.text_color));
+        assert_eq!(hex(&theme.background), hex(&default_theme.background));
+        assert_eq!(
+            hex(&theme.flowchart.primary_color),
+            hex(&default_theme.flowchart.primary_color)
+        );
+        assert_eq!(
+            hex(&theme.sequence.actor_fill),
+            hex(&default_theme.sequence.actor_fill)
+        );
+    }
+
+    #[test]
+    fn by_name_dark_returns_dark_theme() {
+        let theme = Theme::by_name("dark");
+        assert_eq!(hex(&theme.line_color), "#e0dfdf");
+        assert_eq!(hex(&theme.background), "#1f2020");
+        assert_eq!(hex(&theme.flowchart.primary_border), "#81B1DB");
+        assert_eq!(hex(&theme.sequence.actor_border), "#81B1DB");
+    }
+}

@@ -182,3 +182,158 @@ pub fn build_orthogonal_path(points: &[(f64, f64)]) -> String {
 
     path
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ---------------------------------------------------------------
+    // escape_xml
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn escape_xml_fast_path_no_special_chars() {
+        // Fast path: no special characters, should return the input unchanged.
+        assert_eq!(escape_xml("plain text"), "plain text");
+    }
+
+    #[test]
+    fn escape_xml_all_special_chars() {
+        assert_eq!(
+            escape_xml("a & b < c > d \"e\" 'f'"),
+            "a &amp; b &lt; c &gt; d &quot;e&quot; &#39;f&#39;"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // build_basis_curve_path
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn basis_curve_empty_points() {
+        assert_eq!(build_basis_curve_path(&[]), "");
+    }
+
+    #[test]
+    fn basis_curve_single_point() {
+        assert_eq!(build_basis_curve_path(&[(5.0, 10.0)]), "M 5 10");
+    }
+
+    #[test]
+    fn basis_curve_two_points() {
+        assert_eq!(
+            build_basis_curve_path(&[(0.0, 0.0), (10.0, 10.0)]),
+            "M 0 0 L 10 10"
+        );
+    }
+
+    #[test]
+    fn basis_curve_three_points_has_cubic_bezier() {
+        let path = build_basis_curve_path(&[(0.0, 0.0), (10.0, 20.0), (30.0, 40.0)]);
+        assert!(path.starts_with("M "), "path should start with M: {path}");
+        assert!(path.contains("C "), "path should contain cubic bezier C: {path}");
+    }
+
+    #[test]
+    fn basis_curve_five_points_multiple_cubics() {
+        let path = build_basis_curve_path(&[
+            (0.0, 0.0),
+            (10.0, 20.0),
+            (30.0, 40.0),
+            (50.0, 10.0),
+            (70.0, 30.0),
+        ]);
+        assert!(path.starts_with("M "), "path should start with M: {path}");
+        // With 5 points there should be multiple C segments
+        let c_count = path.matches(" C ").count();
+        assert!(
+            c_count >= 2,
+            "expected multiple C segments, got {c_count}: {path}"
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // build_orthogonal_path
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn orthogonal_empty_points() {
+        assert_eq!(build_orthogonal_path(&[]), "");
+    }
+
+    #[test]
+    fn orthogonal_single_point() {
+        assert_eq!(build_orthogonal_path(&[(5.0, 10.0)]), "M 5 10");
+    }
+
+    #[test]
+    fn orthogonal_two_points_horizontal_first() {
+        // dx (50) > dy (5) => horizontal-first branch
+        let path = build_orthogonal_path(&[(0.0, 0.0), (50.0, 5.0)]);
+        assert!(path.starts_with("M 0 0"), "path should start with M 0 0: {path}");
+        assert!(path.contains("Q "), "path should contain a Q arc: {path}");
+        assert!(path.contains("L 50 5"), "path should end at target: {path}");
+    }
+
+    #[test]
+    fn orthogonal_two_points_vertical_first() {
+        // dy (50) > dx (5) => vertical-first branch (the else at line ~139)
+        let path = build_orthogonal_path(&[(0.0, 0.0), (5.0, 50.0)]);
+        assert!(path.starts_with("M 0 0"), "path should start with M 0 0: {path}");
+        assert!(path.contains("Q "), "path should contain a Q arc: {path}");
+        assert!(path.contains("L 5 50"), "path should end at target: {path}");
+    }
+
+    #[test]
+    fn orthogonal_three_points_prev_horizontal() {
+        // First segment: dx=50 > dy=10  => horizontal first, so prev_horizontal=true
+        // Second segment: from (50,10) to (55,80) => prev_horizontal branch in "else" block
+        let path = build_orthogonal_path(&[(0.0, 0.0), (50.0, 10.0), (55.0, 80.0)]);
+        assert!(path.starts_with("M 0 0"), "path should start with M 0 0: {path}");
+        assert!(path.contains("L 55 80"), "path should reach final point: {path}");
+    }
+
+    #[test]
+    fn orthogonal_three_points_prev_vertical() {
+        // First segment: dy=50 > dx=5  => vertical first, so prev_horizontal=false
+        // Second segment: from (5,50) to (80,55) => !prev_horizontal branch
+        let path = build_orthogonal_path(&[(0.0, 0.0), (5.0, 50.0), (80.0, 55.0)]);
+        assert!(path.starts_with("M 0 0"), "path should start with M 0 0: {path}");
+        assert!(path.contains("L 80 55"), "path should reach final point: {path}");
+    }
+
+    #[test]
+    fn orthogonal_subsequent_prev_horizontal_x2_eq_x1() {
+        // First segment: dx=50 > dy=5 => horizontal, prev_horizontal=true
+        // Second segment: from (50,5) to (50,60) => x2==x1, skips the Q arc in the
+        //   prev_horizontal branch (line 165 condition).
+        let path = build_orthogonal_path(&[(0.0, 0.0), (50.0, 5.0), (50.0, 60.0)]);
+        assert!(path.starts_with("M 0 0"), "path should start with M 0 0: {path}");
+        assert!(path.contains("L 50 60"), "path should reach final point: {path}");
+
+        // The second segment should NOT have a Q for the corner because x2==x1.
+        // Count Q commands - only the first segment should produce one.
+        let q_count = path.matches("Q ").count();
+        assert_eq!(
+            q_count, 1,
+            "expected exactly 1 Q (from first segment only): {path}"
+        );
+    }
+
+    #[test]
+    fn orthogonal_subsequent_prev_vertical_y2_eq_y1() {
+        // First segment: dy=50 > dx=5 => vertical, prev_horizontal=false
+        // Second segment: from (5,50) to (60,50) => y2==y1, skips the Q arc in the
+        //   !prev_horizontal branch (line 174 condition).
+        let path = build_orthogonal_path(&[(0.0, 0.0), (5.0, 50.0), (60.0, 50.0)]);
+        assert!(path.starts_with("M 0 0"), "path should start with M 0 0: {path}");
+        assert!(path.contains("L 60 50"), "path should reach final point: {path}");
+
+        // The second segment should NOT have a Q for the corner because y2==y1.
+        let q_count = path.matches("Q ").count();
+        assert_eq!(
+            q_count, 1,
+            "expected exactly 1 Q (from first segment only): {path}"
+        );
+    }
+}

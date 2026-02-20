@@ -210,4 +210,125 @@ mod tests {
         assert!((layout.slices[0].percentage - 25.0).abs() < 0.01);
         assert!((layout.slices[1].percentage - 75.0).abs() < 0.01);
     }
+
+    #[test]
+    fn test_layout_empty_pie() {
+        // Empty pie chart: no slices (total = 0)
+        let ast = PieAst {
+            title: None,
+            slices: Vec::new(),
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_pie(&ast, &measurer, &theme).unwrap();
+
+        assert!(layout.slices.is_empty());
+        assert!(layout.legend.is_empty());
+        assert!(layout.width > 0.0);
+        assert!(layout.height > 0.0);
+        assert_eq!(layout.pie_radius, PIE_RADIUS);
+    }
+
+    #[test]
+    fn test_layout_empty_pie_zero_values() {
+        // Pie chart with slices that all have zero value
+        let ast = PieAst {
+            title: Some("Empty Data".to_string()),
+            slices: vec![
+                PieSlice {
+                    label: "A".to_string(),
+                    value: 0.0,
+                },
+                PieSlice {
+                    label: "B".to_string(),
+                    value: 0.0,
+                },
+            ],
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_pie(&ast, &measurer, &theme).unwrap();
+
+        // Total is 0, so should return empty slices layout
+        assert!(layout.slices.is_empty());
+        assert_eq!(layout.title.as_deref(), Some("Empty Data"));
+    }
+
+    #[test]
+    fn test_layout_pie_with_title() {
+        let ast = PieAst {
+            title: Some("My Pie Chart".to_string()),
+            slices: vec![
+                PieSlice {
+                    label: "X".to_string(),
+                    value: 30.0,
+                },
+                PieSlice {
+                    label: "Y".to_string(),
+                    value: 70.0,
+                },
+            ],
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_pie(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.title.as_deref(), Some("My Pie Chart"));
+        assert_eq!(layout.title_y, TITLE_PADDING);
+        // Pie center should be shifted down by TITLE_HEIGHT
+        assert!((layout.pie_center_y - (PIE_CENTER_Y + TITLE_HEIGHT)).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_layout_pie_no_title() {
+        let ast = PieAst {
+            title: None,
+            slices: vec![PieSlice {
+                label: "Only".to_string(),
+                value: 100.0,
+            }],
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_pie(&ast, &measurer, &theme).unwrap();
+
+        assert!(layout.title.is_none());
+        assert_eq!(layout.slices.len(), 1);
+        assert!((layout.slices[0].percentage - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_layout_pie_legend_positioning() {
+        let ast = PieAst {
+            title: Some("Legend Test".to_string()),
+            slices: vec![
+                PieSlice {
+                    label: "Alpha".to_string(),
+                    value: 10.0,
+                },
+                PieSlice {
+                    label: "Beta".to_string(),
+                    value: 20.0,
+                },
+                PieSlice {
+                    label: "Gamma".to_string(),
+                    value: 30.0,
+                },
+            ],
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_pie(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.legend.len(), 3);
+        // Legend should be to the right of the pie
+        assert!(layout.legend_x > layout.pie_center_x + layout.pie_radius);
+        // Legend items should be spaced vertically
+        assert!((layout.legend[1].y - layout.legend[0].y - LEGEND_ITEM_HEIGHT).abs() < 0.01);
+    }
 }

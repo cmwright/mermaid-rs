@@ -482,4 +482,130 @@ mod tests {
         assert_eq!(tools.label, "Tools");
         assert_eq!(tools.children.len(), 2);
     }
+
+    #[test]
+    fn test_parse_circle_node() {
+        let source = r#"mindmap
+  root
+    ((Circle Node))"#;
+        let ast = parse_mindmap(source).unwrap();
+        assert_eq!(ast.root.children.len(), 1);
+        assert_eq!(ast.root.children[0].shape, MindmapNodeShape::Circle);
+        assert_eq!(ast.root.children[0].label, "Circle Node");
+    }
+
+    #[test]
+    fn test_parse_cloud_node() {
+        let source = r#"mindmap
+  root
+    )Cloud Node("#;
+        let ast = parse_mindmap(source).unwrap();
+        assert_eq!(ast.root.children.len(), 1);
+        assert_eq!(ast.root.children[0].shape, MindmapNodeShape::Cloud);
+        assert_eq!(ast.root.children[0].label, "Cloud Node");
+    }
+
+    #[test]
+    fn test_parse_bang_node() {
+        let source = r#"mindmap
+  root
+    ))Bang Node(("#;
+        let ast = parse_mindmap(source).unwrap();
+        assert_eq!(ast.root.children.len(), 1);
+        assert_eq!(ast.root.children[0].shape, MindmapNodeShape::Bang);
+        assert_eq!(ast.root.children[0].label, "Bang Node");
+    }
+
+    #[test]
+    fn test_parse_hexagon_node() {
+        let source = r#"mindmap
+  root
+    {{Hexagon Node}}"#;
+        let ast = parse_mindmap(source).unwrap();
+        assert_eq!(ast.root.children.len(), 1);
+        assert_eq!(ast.root.children[0].shape, MindmapNodeShape::Hexagon);
+        assert_eq!(ast.root.children[0].label, "Hexagon Node");
+    }
+
+    #[test]
+    fn test_parse_class_decorator() {
+        let source = r#"mindmap
+  root
+    A
+    :::className"#;
+        let ast = parse_mindmap(source).unwrap();
+        assert_eq!(ast.root.children.len(), 1);
+        assert_eq!(ast.root.children[0].label, "A");
+        assert_eq!(
+            ast.root.children[0].css_class.as_deref(),
+            Some("className")
+        );
+    }
+
+    #[test]
+    fn test_parse_icon_decorator() {
+        let source = r#"mindmap
+  root
+    A
+    ::icon(fa-home)"#;
+        let ast = parse_mindmap(source).unwrap();
+        assert_eq!(ast.root.children.len(), 1);
+        assert_eq!(ast.root.children[0].label, "A");
+        assert_eq!(ast.root.children[0].icon.as_deref(), Some("fa-home"));
+    }
+
+    #[test]
+    fn test_parse_rect_node() {
+        let source = r#"mindmap
+  root
+    [Rect Node]"#;
+        let ast = parse_mindmap(source).unwrap();
+        assert_eq!(ast.root.children[0].shape, MindmapNodeShape::Rect);
+        assert_eq!(ast.root.children[0].label, "Rect Node");
+    }
+
+    #[test]
+    fn test_parse_rounded_rect_node() {
+        let source = r#"mindmap
+  root
+    (Rounded Node)"#;
+        let ast = parse_mindmap(source).unwrap();
+        assert_eq!(ast.root.children[0].shape, MindmapNodeShape::RoundedRect);
+        assert_eq!(ast.root.children[0].label, "Rounded Node");
+    }
+
+    #[test]
+    fn test_parse_bare_node() {
+        let source = r#"mindmap
+  root
+    Just plain text"#;
+        let ast = parse_mindmap(source).unwrap();
+        assert_eq!(ast.root.children[0].shape, MindmapNodeShape::Default);
+        assert_eq!(ast.root.children[0].label, "Just plain text");
+    }
+
+    #[test]
+    fn test_sanitize_id_function() {
+        assert_eq!(sanitize_id("Hello World"), "Hello_World");
+        assert_eq!(sanitize_id("abc123"), "abc123");
+        assert_eq!(sanitize_id("a-b.c"), "a_b_c");
+    }
+
+    #[test]
+    fn test_parse_deeply_nested() {
+        let source = r#"mindmap
+  root
+    A
+      B
+        C
+          D"#;
+        let ast = parse_mindmap(source).unwrap();
+        assert_eq!(ast.root.children[0].label, "A");
+        assert_eq!(ast.root.children[0].children[0].label, "B");
+        assert_eq!(ast.root.children[0].children[0].children[0].label, "C");
+        assert_eq!(
+            ast.root.children[0].children[0].children[0].children[0].label,
+            "D"
+        );
+    }
 }

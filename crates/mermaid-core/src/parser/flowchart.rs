@@ -572,6 +572,246 @@ mod tests {
         assert_eq!(ast.edges[0].label.as_deref(), Some("Link text"));
         assert_eq!(ast.edges[0].edge_type, EdgeType::SolidArrow);
     }
+
+    #[test]
+    fn test_parse_double_circle_shape() {
+        let source = "flowchart TD\n    A(((double circle)))";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.nodes[0].shape, NodeShape::DoubleCircle);
+        assert_eq!(ast.nodes[0].label.as_deref(), Some("double circle"));
+    }
+
+    #[test]
+    fn test_parse_trapezoid_shape() {
+        let source = "flowchart TD\n    A[/trapezoid\\]";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.nodes[0].shape, NodeShape::Trapezoid);
+        assert_eq!(ast.nodes[0].label.as_deref(), Some("trapezoid"));
+    }
+
+    #[test]
+    fn test_parse_trapezoid_alt_shape() {
+        let source = "flowchart TD\n    A[\\trapezoidAlt/]";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.nodes[0].shape, NodeShape::TrapezoidAlt);
+        assert_eq!(ast.nodes[0].label.as_deref(), Some("trapezoidAlt"));
+    }
+
+    #[test]
+    fn test_parse_parallelogram_shape() {
+        let source = "flowchart TD\n    A[/parallelogram/]";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.nodes[0].shape, NodeShape::Parallelogram);
+        assert_eq!(ast.nodes[0].label.as_deref(), Some("parallelogram"));
+    }
+
+    #[test]
+    fn test_parse_parallelogram_alt_shape() {
+        let source = "flowchart TD\n    A[\\parallelogramAlt\\]";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.nodes[0].shape, NodeShape::ParallelogramAlt);
+        assert_eq!(ast.nodes[0].label.as_deref(), Some("parallelogramAlt"));
+    }
+
+    #[test]
+    fn test_parse_asymmetric_shape() {
+        let source = "flowchart TD\n    A>asymmetric]";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.nodes[0].shape, NodeShape::Asymmetric);
+        assert_eq!(ast.nodes[0].label.as_deref(), Some("asymmetric"));
+    }
+
+    #[test]
+    fn test_parse_subroutine_shape() {
+        let source = "flowchart TD\n    A[[subroutine]]";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.nodes[0].shape, NodeShape::Subroutine);
+        assert_eq!(ast.nodes[0].label.as_deref(), Some("subroutine"));
+    }
+
+    #[test]
+    fn test_parse_cylinder_shape() {
+        let source = "flowchart TD\n    A[(cylinder)]";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.nodes[0].shape, NodeShape::Cylinder);
+        assert_eq!(ast.nodes[0].label.as_deref(), Some("cylinder"));
+    }
+
+    #[test]
+    fn test_parse_subgraph_with_quoted_label() {
+        let source = r#"flowchart TD
+    subgraph sg1["My Label"]
+        A --> B
+    end"#;
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.subgraphs.len(), 1);
+        assert_eq!(ast.subgraphs[0].id, "sg1");
+        assert_eq!(ast.subgraphs[0].label.as_deref(), Some("My Label"));
+    }
+
+    #[test]
+    fn test_parse_subgraph_with_bracket_label() {
+        let source = r#"flowchart TD
+    subgraph sg1[Bracket Label]
+        A --> B
+    end"#;
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.subgraphs[0].label.as_deref(), Some("Bracket Label"));
+    }
+
+    #[test]
+    fn test_parse_comment_lines_ignored() {
+        let source = "flowchart TD\n    %% This is a comment\n    A --> B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.nodes.len(), 2);
+        assert_eq!(ast.edges.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_class_def_and_assign() {
+        let source = r#"flowchart TD
+    A[Node A]
+    B[Node B]
+    classDef highlight fill:#ff0,stroke:#333
+    class A,B highlight"#;
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.class_defs.len(), 1);
+        assert_eq!(ast.class_defs[0].name, "highlight");
+        assert!(ast.class_defs[0].properties.fill.is_some());
+        assert_eq!(ast.class_assignments.len(), 1);
+        assert_eq!(ast.class_assignments[0].class_name, "highlight");
+        assert_eq!(ast.class_assignments[0].node_ids, vec!["A", "B"]);
+    }
+
+    #[test]
+    fn test_parse_style_directive() {
+        let source = "flowchart TD\n    A[Node]\n    style A fill:#f00,stroke:#000";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.style_overrides.len(), 1);
+        assert_eq!(ast.style_overrides[0].node_id, "A");
+        assert!(ast.style_overrides[0].properties.fill.is_some());
+    }
+
+    #[test]
+    fn test_parse_all_node_shapes() {
+        let source = r#"flowchart TD
+    A[Rectangle]
+    B(Rounded)
+    C{Diamond}
+    D((Circle))
+    E(((DoubleCircle)))
+    F([Stadium])
+    G[[Subroutine]]
+    H[(Cylinder)]
+    I{{Hexagon}}
+    J>Asymmetric]
+    K[/Trapezoid\]
+    L[\TrapezoidAlt/]
+    M[/Parallelogram/]
+    N[\ParallelogramAlt\]"#;
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.nodes.len(), 14);
+        assert_eq!(ast.nodes[0].shape, NodeShape::Rectangle);
+        assert_eq!(ast.nodes[1].shape, NodeShape::RoundedRectangle);
+        assert_eq!(ast.nodes[2].shape, NodeShape::Diamond);
+        assert_eq!(ast.nodes[3].shape, NodeShape::Circle);
+        assert_eq!(ast.nodes[4].shape, NodeShape::DoubleCircle);
+        assert_eq!(ast.nodes[5].shape, NodeShape::Stadium);
+        assert_eq!(ast.nodes[6].shape, NodeShape::Subroutine);
+        assert_eq!(ast.nodes[7].shape, NodeShape::Cylinder);
+        assert_eq!(ast.nodes[8].shape, NodeShape::Hexagon);
+        assert_eq!(ast.nodes[9].shape, NodeShape::Asymmetric);
+        assert_eq!(ast.nodes[10].shape, NodeShape::Trapezoid);
+        assert_eq!(ast.nodes[11].shape, NodeShape::TrapezoidAlt);
+        assert_eq!(ast.nodes[12].shape, NodeShape::Parallelogram);
+        assert_eq!(ast.nodes[13].shape, NodeShape::ParallelogramAlt);
+    }
+
+    #[test]
+    fn test_parse_direction_bt() {
+        let source = "flowchart BT\n    A --> B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.direction, Direction::BottomToTop);
+    }
+
+    #[test]
+    fn test_parse_direction_rl() {
+        let source = "flowchart RL\n    A --> B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.direction, Direction::RightToLeft);
+    }
+
+    #[test]
+    fn test_parse_thick_line_edge() {
+        let source = "flowchart TD\n    A === B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].edge_type, EdgeType::ThickLine);
+    }
+
+    #[test]
+    fn test_parse_dotted_line_edge() {
+        let source = "flowchart TD\n    A -.- B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].edge_type, EdgeType::DottedLine);
+    }
+
+    #[test]
+    fn test_parse_thick_arrow_labeled() {
+        let source = "flowchart TD\n    A == thick label ==> B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].edge_type, EdgeType::ThickArrow);
+        assert_eq!(ast.edges[0].label.as_deref(), Some("thick label"));
+    }
+
+    #[test]
+    fn test_parse_solid_line_labeled() {
+        let source = "flowchart TD\n    A -- line label --- B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].edge_type, EdgeType::SolidLine);
+        assert_eq!(ast.edges[0].label.as_deref(), Some("line label"));
+    }
+
+    #[test]
+    fn test_parse_class_shorthand() {
+        let source = "flowchart TD\n    A[Node]:::myClass --> B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(
+            ast.nodes[0].class_shorthand.as_deref(),
+            Some("myClass")
+        );
+    }
+
+    #[test]
+    fn test_parse_subgraph_with_direction() {
+        let source = r#"flowchart TD
+    subgraph sg1
+        direction LR
+        A --> B
+    end"#;
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.subgraphs[0].direction, Some(Direction::LeftToRight));
+    }
+
+    #[test]
+    fn test_upsert_node_updates_existing() {
+        let mut nodes = vec![NodeDef {
+            id: "A".to_string(),
+            label: None,
+            shape: NodeShape::Rectangle,
+            class_shorthand: None,
+        }];
+        let new_node = NodeDef {
+            id: "A".to_string(),
+            label: Some("Updated".to_string()),
+            shape: NodeShape::Circle,
+            class_shorthand: Some("cls".to_string()),
+        };
+        upsert_node(&mut nodes, new_node);
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].label.as_deref(), Some("Updated"));
+        assert_eq!(nodes[0].shape, NodeShape::Circle);
+        assert_eq!(nodes[0].class_shorthand.as_deref(), Some("cls"));
+    }
 }
 
 #[test]

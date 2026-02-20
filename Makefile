@@ -6,7 +6,7 @@ BINARY := cargo run --
 FIXTURES := $(wildcard $(FIXTURES_DIR)/*.mmd)
 FIXTURE_SVGS := $(patsubst $(FIXTURES_DIR)/%.mmd,$(OUTPUT_DIR)/%.svg,$(FIXTURES))
 
-.PHONY: test-svgs clean-svgs build test test-examples build-wasm examples serve-examples
+.PHONY: test-svgs clean-svgs build test test-examples build-wasm examples serve-examples coverage
 
 build:
 	cargo build
@@ -42,6 +42,13 @@ examples: build-wasm
 
 serve-examples: examples
 	python3 -m http.server 8080 --directory target
+
+coverage:
+	cargo llvm-cov --workspace --ignore-filename-regex '(mermaid-cli|mermaid-wasm|benches)' --html --output-dir target/coverage
+	@echo "Coverage report: target/coverage/html/index.html"
+
+coverage-summary:
+	cargo llvm-cov --workspace --ignore-filename-regex '(mermaid-cli|mermaid-wasm|benches)' --summary-only
 
 clean-svgs:
 	rm -rf $(OUTPUT_DIR)

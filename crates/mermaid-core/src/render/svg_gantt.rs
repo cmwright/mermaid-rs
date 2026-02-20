@@ -603,4 +603,56 @@ mod tests {
         // Crit tasks should have red stroke
         assert!(svg.contains(CRIT_STROKE));
     }
+
+    #[test]
+    fn test_label_rendered_inside_wide_bar() {
+        // Create a wide task with a short label so the label fits inside the bar.
+        // The condition is: label_width + 16.0 <= width && !is_milestone
+        // With label_width=40.0 and width=300.0, 40+16=56 <= 300 => fits inside.
+        let layout = GanttLayout {
+            width: 800.0,
+            height: 200.0,
+            title: None,
+            title_y: 0.0,
+            tasks: vec![PositionedTask {
+                name: "Wide Task".to_string(),
+                id: "w1".to_string(),
+                x: 100.0,
+                y: 50.0,
+                width: 300.0,
+                height: 24.0,
+                tags: TaskTags::default(),
+                section_index: 0,
+                is_milestone: false,
+                label_width: 40.0,
+            }],
+            sections: vec![],
+            grid_lines: vec![],
+            dependency_edges: vec![],
+            today_x: None,
+            chart_x: 100.0,
+            chart_y: 40.0,
+            chart_width: 600.0,
+            chart_height: 100.0,
+            axis_format: "%Y-%m-%d".to_string(),
+        };
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        // The inside-label path uses text-anchor="middle" and renders the label text
+        assert!(
+            svg.contains(r#"text-anchor="middle"#),
+            "Inside label should use text-anchor=\"middle\""
+        );
+        assert!(
+            svg.contains("Wide Task"),
+            "SVG should contain the task label text"
+        );
+        // Verify it is NOT using text-anchor="start" for this task label (that's the outside path)
+        // The inside label is centered at task.x + task.width / 2.0 = 250.0
+        assert!(
+            svg.contains("x=\"250.0\""),
+            "Inside label x should be centered at task midpoint"
+        );
+    }
 }

@@ -472,3 +472,648 @@ fn segment_intersects_rect(
         seg_max_x > min_x && seg_min_x < max_x && seg_max_y > min_y && seg_min_y < max_y
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::flowchart::{EdgeDef, EdgeType, NodeShape};
+
+    fn make_node(id: &str, x: f64, y: f64, w: f64, h: f64, shape: NodeShape) -> PositionedNode {
+        PositionedNode {
+            id: id.to_string(),
+            label: id.to_string(),
+            shape,
+            style: Default::default(),
+            x,
+            y,
+            width: w,
+            height: h,
+        }
+    }
+
+    fn make_rect_node(id: &str, x: f64, y: f64) -> PositionedNode {
+        make_node(id, x, y, 80.0, 40.0, NodeShape::Rectangle)
+    }
+
+    // -----------------------------------------------------------------------
+    // intersect_shape tests (via route_edges / route_short_edge)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_intersect_diamond_from_above() {
+        let node = make_node("D", 200.0, 200.0, 100.0, 100.0, NodeShape::Diamond);
+        // Ray from center upward (target above)
+        let (ix, iy) = intersect_shape(&node, 200.0, 0.0);
+        // Diamond top vertex is at (cx, cy - ry) = (200, 150)
+        assert!((ix - 200.0).abs() < 1.0, "x should be ~200, got {ix}");
+        assert!((iy - 150.0).abs() < 1.0, "y should be ~150, got {iy}");
+    }
+
+    #[test]
+    fn test_intersect_diamond_from_below() {
+        let node = make_node("D", 200.0, 200.0, 100.0, 100.0, NodeShape::Diamond);
+        let (ix, iy) = intersect_shape(&node, 200.0, 400.0);
+        // Bottom vertex at (200, 250)
+        assert!((ix - 200.0).abs() < 1.0, "x should be ~200, got {ix}");
+        assert!((iy - 250.0).abs() < 1.0, "y should be ~250, got {iy}");
+    }
+
+    #[test]
+    fn test_intersect_diamond_from_left() {
+        let node = make_node("D", 200.0, 200.0, 100.0, 100.0, NodeShape::Diamond);
+        let (ix, iy) = intersect_shape(&node, 0.0, 200.0);
+        // Left vertex at (150, 200)
+        assert!((ix - 150.0).abs() < 1.0, "x should be ~150, got {ix}");
+        assert!((iy - 200.0).abs() < 1.0, "y should be ~200, got {iy}");
+    }
+
+    #[test]
+    fn test_intersect_diamond_from_right() {
+        let node = make_node("D", 200.0, 200.0, 100.0, 100.0, NodeShape::Diamond);
+        let (ix, iy) = intersect_shape(&node, 400.0, 200.0);
+        // Right vertex at (250, 200)
+        assert!((ix - 250.0).abs() < 1.0, "x should be ~250, got {ix}");
+        assert!((iy - 200.0).abs() < 1.0, "y should be ~200, got {iy}");
+    }
+
+    #[test]
+    fn test_intersect_diamond_diagonal() {
+        let node = make_node("D", 200.0, 200.0, 100.0, 100.0, NodeShape::Diamond);
+        // Target at 45 degrees (upper-right)
+        let (ix, iy) = intersect_shape(&node, 400.0, 0.0);
+        // Diamond boundary: |dx|/rx + |dy|/ry = 1
+        // rx=50, ry=50, direction = (200, -200), normalized via diamond formula
+        let dx = ix - 200.0;
+        let dy = iy - 200.0;
+        let boundary = dx.abs() / 50.0 + dy.abs() / 50.0;
+        assert!(
+            (boundary - 1.0).abs() < 0.01,
+            "point ({ix},{iy}) should lie on diamond boundary, |dx|/rx + |dy|/ry = {boundary}"
+        );
+    }
+
+    #[test]
+    fn test_intersect_diamond_degenerate_center() {
+        let node = make_node("D", 200.0, 200.0, 100.0, 100.0, NodeShape::Diamond);
+        // Target at center — degenerate case
+        let (ix, iy) = intersect_shape(&node, 200.0, 200.0);
+        // Should return (cx, cy + height/2) as fallback
+        assert!((ix - 200.0).abs() < 1.0);
+        assert!((iy - 250.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_intersect_circle() {
+        let node = make_node("C", 100.0, 100.0, 60.0, 60.0, NodeShape::Circle);
+        // Radius = 30; target to the right
+        let (ix, iy) = intersect_shape(&node, 200.0, 100.0);
+        assert!((ix - 130.0).abs() < 1.0, "x should be ~130, got {ix}");
+        assert!((iy - 100.0).abs() < 1.0, "y should be ~100, got {iy}");
+    }
+
+    #[test]
+    fn test_intersect_circle_degenerate() {
+        let node = make_node("C", 100.0, 100.0, 60.0, 60.0, NodeShape::Circle);
+        let (ix, iy) = intersect_shape(&node, 100.0, 100.0);
+        assert!((ix - 100.0).abs() < 1.0);
+        assert!((iy - 130.0).abs() < 1.0);
+    }
+
+    #[test]
+    fn test_intersect_rect() {
+        let node = make_rect_node("R", 100.0, 100.0);
+        // Target to the right; hw=40, hh=20
+        let (ix, iy) = intersect_shape(&node, 300.0, 100.0);
+        assert!((ix - 140.0).abs() < 1.0, "x should be ~140, got {ix}");
+        assert!((iy - 100.0).abs() < 1.0, "y should be ~100, got {iy}");
+    }
+
+    // -----------------------------------------------------------------------
+    // route_short_edge S-curve fallback (non-axis-aligned)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_route_short_edge_aligned_vertical() {
+        // Two nodes vertically aligned -> straight line
+        let from = make_rect_node("A", 100.0, 50.0);
+        let to = make_rect_node("B", 100.0, 200.0);
+        let nodes = vec![from.clone(), to.clone()];
+
+        let points = route_short_edge(&from, &to, &nodes, false);
+        // Should be a simple 2-point line
+        assert_eq!(points.len(), 2, "axis-aligned should produce 2 points");
+        assert!(
+            (points[0].0 - points[1].0).abs() < 1.0,
+            "x coords should be nearly identical"
+        );
+    }
+
+    #[test]
+    fn test_route_short_edge_non_aligned_vertical() {
+        // Two nodes NOT vertically aligned -> S-curve with more points
+        let from = make_rect_node("A", 100.0, 50.0);
+        let to = make_rect_node("B", 250.0, 200.0);
+        let nodes = vec![from.clone(), to.clone()];
+
+        let points = route_short_edge(&from, &to, &nodes, false);
+        // S-curve produces more than 2 points
+        assert!(
+            points.len() > 2,
+            "non-aligned edge should produce S-curve with >2 points, got {}",
+            points.len()
+        );
+    }
+
+    #[test]
+    fn test_route_short_edge_non_aligned_horizontal() {
+        // Horizontal layout with non-aligned nodes
+        let from = make_rect_node("A", 50.0, 100.0);
+        let to = make_rect_node("B", 200.0, 250.0);
+        let nodes = vec![from.clone(), to.clone()];
+
+        let points = route_short_edge(&from, &to, &nodes, true);
+        assert!(
+            points.len() > 2,
+            "non-aligned horizontal edge should produce S-curve, got {} points",
+            points.len()
+        );
+    }
+
+    #[test]
+    fn test_route_short_edge_avoids_intermediate_node() {
+        // Place an intermediate node in the path; edge should attempt to avoid it
+        let from = make_rect_node("A", 100.0, 50.0);
+        let to = make_rect_node("B", 100.0, 250.0);
+        let blocker = make_rect_node("C", 100.0, 150.0);
+        let nodes = vec![from.clone(), to.clone(), blocker];
+
+        let points = route_short_edge(&from, &to, &nodes, false);
+        // Should produce more than 2 points because the straight line is blocked
+        assert!(
+            points.len() > 2,
+            "edge blocked by intermediate node should produce S-curve, got {} points",
+            points.len()
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // adjust_labels_for_subgraph_boundaries
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_adjust_labels_no_subgraphs() {
+        // No subgraphs -> labels unchanged
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("test".into()),
+            label_x: Some(100.0),
+            label_y: Some(100.0),
+            label_width: Some(40.0),
+            label_height: Some(20.0),
+            points: vec![(50.0, 50.0), (150.0, 150.0)],
+        }];
+
+        adjust_labels_for_subgraph_boundaries(&mut edges, &[]);
+        assert!((edges[0].label_x.unwrap() - 100.0).abs() < 0.1);
+        assert!((edges[0].label_y.unwrap() - 100.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_adjust_labels_straddling_top_border() {
+        // Label center is just below the subgraph top border, but label top is above it
+        let sg = PositionedSubgraph {
+            id: "sg1".into(),
+            label: Some("SG".into()),
+            x: 50.0,
+            y: 100.0,   // top border at y=100
+            width: 200.0,
+            height: 200.0,
+            style: Default::default(),
+        };
+
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("test".into()),
+            label_x: Some(150.0),  // horizontally inside subgraph
+            label_y: Some(105.0),  // center below border, but label_top = 105 - 10 = 95 < 100
+            label_width: Some(40.0),
+            label_height: Some(20.0),
+            points: vec![(50.0, 50.0), (250.0, 150.0)],
+        }];
+
+        adjust_labels_for_subgraph_boundaries(&mut edges, &[sg]);
+        let new_y = edges[0].label_y.unwrap();
+        // Label center was below border -> pushed below title area
+        let title_bottom = 100.0 + SUBGRAPH_TITLE_HEIGHT + SUBGRAPH_PADDING;
+        assert!(
+            new_y > title_bottom,
+            "label should be pushed below title area (title_bottom={title_bottom}, got y={new_y})"
+        );
+    }
+
+    #[test]
+    fn test_adjust_labels_straddling_bottom_border() {
+        let sg = PositionedSubgraph {
+            id: "sg1".into(),
+            label: Some("SG".into()),
+            x: 50.0,
+            y: 100.0,
+            width: 200.0,
+            height: 200.0,  // bottom border at y=300
+            style: Default::default(),
+        };
+
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("test".into()),
+            label_x: Some(150.0),
+            label_y: Some(305.0),  // center below border; label_top=295 < 300, label_bottom=315 > 300
+            label_width: Some(40.0),
+            label_height: Some(20.0),
+            points: vec![(50.0, 50.0), (250.0, 350.0)],
+        }];
+
+        adjust_labels_for_subgraph_boundaries(&mut edges, &[sg]);
+        let new_y = edges[0].label_y.unwrap();
+        // Center above border -> should be pushed fully below
+        assert!(
+            new_y > 300.0 + 10.0,
+            "label should be pushed below bottom border, got y={new_y}"
+        );
+    }
+
+    #[test]
+    fn test_adjust_labels_straddling_left_border() {
+        let sg = PositionedSubgraph {
+            id: "sg1".into(),
+            label: Some("SG".into()),
+            x: 100.0,  // left border at x=100
+            y: 50.0,
+            width: 200.0,
+            height: 200.0,
+            style: Default::default(),
+        };
+
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("test".into()),
+            label_x: Some(105.0),  // center right of border; label_left=85 < 100, label_right=125 > 100
+            label_y: Some(150.0),  // vertically inside subgraph
+            label_width: Some(40.0),
+            label_height: Some(20.0),
+            points: vec![(50.0, 150.0), (200.0, 150.0)],
+        }];
+
+        adjust_labels_for_subgraph_boundaries(&mut edges, &[sg]);
+        let new_x = edges[0].label_x.unwrap();
+        // Center is right of border -> pushed further right
+        assert!(
+            new_x > 100.0 + 20.0,
+            "label should be pushed right of left border, got x={new_x}"
+        );
+    }
+
+    #[test]
+    fn test_adjust_labels_straddling_right_border() {
+        let sg = PositionedSubgraph {
+            id: "sg1".into(),
+            label: Some("SG".into()),
+            x: 100.0,
+            y: 50.0,
+            width: 200.0,  // right border at x=300
+            height: 200.0,
+            style: Default::default(),
+        };
+
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("test".into()),
+            label_x: Some(295.0),  // label_left=275 < 300, label_right=315 > 300
+            label_y: Some(150.0),
+            label_width: Some(40.0),
+            label_height: Some(20.0),
+            points: vec![(200.0, 150.0), (400.0, 150.0)],
+        }];
+
+        adjust_labels_for_subgraph_boundaries(&mut edges, &[sg]);
+        let new_x = edges[0].label_x.unwrap();
+        // Center is left of right border -> pushed left
+        assert!(
+            new_x < 300.0 - 15.0,
+            "label should be pushed left of right border, got x={new_x}"
+        );
+    }
+
+    #[test]
+    fn test_adjust_labels_title_area_overlap() {
+        let sg = PositionedSubgraph {
+            id: "sg1".into(),
+            label: Some("SG".into()),
+            x: 50.0,
+            y: 100.0,
+            width: 200.0,
+            height: 200.0,
+            style: Default::default(),
+        };
+        let title_bottom = 100.0 + SUBGRAPH_TITLE_HEIGHT + SUBGRAPH_PADDING;
+
+        // Label inside subgraph but overlapping the title area
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("test".into()),
+            label_x: Some(150.0),
+            label_y: Some(title_bottom - 5.0),  // label_top inside title area
+            label_width: Some(40.0),
+            label_height: Some(20.0),
+            points: vec![(50.0, 50.0), (250.0, 250.0)],
+        }];
+
+        adjust_labels_for_subgraph_boundaries(&mut edges, &[sg]);
+        let new_y = edges[0].label_y.unwrap();
+        assert!(
+            new_y >= title_bottom,
+            "label should be pushed below title area (title_bottom={title_bottom}, got y={new_y})"
+        );
+    }
+
+    #[test]
+    fn test_adjust_labels_no_label() {
+        // Edge with no label dimensions -> skip
+        let sg = PositionedSubgraph {
+            id: "sg1".into(),
+            label: Some("SG".into()),
+            x: 50.0,
+            y: 100.0,
+            width: 200.0,
+            height: 200.0,
+            style: Default::default(),
+        };
+
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: None,
+            label_x: None,
+            label_y: None,
+            label_width: None,
+            label_height: None,
+            points: vec![(50.0, 50.0), (250.0, 250.0)],
+        }];
+
+        adjust_labels_for_subgraph_boundaries(&mut edges, &[sg]);
+        assert!(edges[0].label_x.is_none());
+        assert!(edges[0].label_y.is_none());
+    }
+
+    #[test]
+    fn test_adjust_labels_zero_size_label() {
+        // Edge with zero-size label -> skip
+        let sg = PositionedSubgraph {
+            id: "sg1".into(),
+            label: Some("SG".into()),
+            x: 50.0,
+            y: 100.0,
+            width: 200.0,
+            height: 200.0,
+            style: Default::default(),
+        };
+
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("tiny".into()),
+            label_x: Some(150.0),
+            label_y: Some(100.0),
+            label_width: Some(0.5),  // < 1.0
+            label_height: Some(0.5),
+            points: vec![(50.0, 50.0), (250.0, 250.0)],
+        }];
+
+        adjust_labels_for_subgraph_boundaries(&mut edges, &[sg]);
+        // Should be unchanged because label width/height are < 1.0
+        assert!((edges[0].label_x.unwrap() - 150.0).abs() < 0.1);
+        assert!((edges[0].label_y.unwrap() - 100.0).abs() < 0.1);
+    }
+
+    // -----------------------------------------------------------------------
+    // route_edges with bend points (long edge routing)
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_route_with_bend_points() {
+        let from = make_rect_node("A", 100.0, 50.0);
+        let to = make_rect_node("B", 100.0, 350.0);
+        let nodes = vec![from.clone(), to.clone()];
+
+        let bps = vec![(100.0, 150.0), (100.0, 250.0)];
+        let points = route_with_bend_points(&from, &to, &bps, false, &nodes);
+
+        // Should start near from and end near to, passing through bend points
+        assert!(points.len() > 2, "should have more than 2 points");
+        // First point should be near the edge of from (y should be ~ from.y + hh)
+        assert!(
+            (points[0].0 - 100.0).abs() < 5.0,
+            "start x should be near from.x"
+        );
+        // Last point should be near the edge of to
+        let last = points.last().unwrap();
+        assert!(
+            (last.0 - 100.0).abs() < 5.0,
+            "end x should be near to.x"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // route_edges integration test
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_route_edges_with_label_positions() {
+        let from = make_rect_node("A", 100.0, 50.0);
+        let to = make_rect_node("B", 100.0, 200.0);
+        let nodes = vec![from.clone(), to.clone()];
+
+        let edges = vec![EdgeDef {
+            from: "A".into(),
+            to: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("yes".into()),
+        }];
+
+        let mut label_positions = HashMap::new();
+        label_positions.insert(("A".to_string(), "B".to_string()), (100.0, 125.0));
+        let mut label_dimensions = HashMap::new();
+        label_dimensions.insert(("A".to_string(), "B".to_string()), (30.0, 15.0));
+
+        let result = route_edges(&nodes, &edges, false, &HashMap::new(), &label_positions, &label_dimensions);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].label_x.is_some());
+        assert!(result[0].label_y.is_some());
+        assert!((result[0].label_x.unwrap() - 100.0).abs() < 0.1);
+        assert!((result[0].label_y.unwrap() - 125.0).abs() < 0.1);
+        assert!((result[0].label_width.unwrap() - 30.0).abs() < 0.1);
+        assert!((result[0].label_height.unwrap() - 15.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_route_edges_label_fallback_to_anchor() {
+        let from = make_rect_node("A", 100.0, 50.0);
+        let to = make_rect_node("B", 100.0, 200.0);
+        let nodes = vec![from.clone(), to.clone()];
+
+        let edges = vec![EdgeDef {
+            from: "A".into(),
+            to: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("yes".into()),
+        }];
+
+        // No label_positions provided -> should fall back to edge_label_anchor
+        let result = route_edges(&nodes, &edges, false, &HashMap::new(), &HashMap::new(), &HashMap::new());
+        assert_eq!(result.len(), 1);
+        assert!(result[0].label_x.is_some());
+        assert!(result[0].label_y.is_some());
+        // Anchor is midpoint of longest segment
+        assert!(result[0].label_width.is_none());
+        assert!(result[0].label_height.is_none());
+    }
+
+    #[test]
+    fn test_route_edges_no_label() {
+        let from = make_rect_node("A", 100.0, 50.0);
+        let to = make_rect_node("B", 100.0, 200.0);
+        let nodes = vec![from.clone(), to.clone()];
+
+        let edges = vec![EdgeDef {
+            from: "A".into(),
+            to: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: None,
+        }];
+
+        let result = route_edges(&nodes, &edges, false, &HashMap::new(), &HashMap::new(), &HashMap::new());
+        assert_eq!(result.len(), 1);
+        assert!(result[0].label_x.is_none());
+        assert!(result[0].label_y.is_none());
+    }
+
+    #[test]
+    fn test_route_edges_missing_node() {
+        // Edge references a node that doesn't exist -> filtered out
+        let from = make_rect_node("A", 100.0, 50.0);
+        let nodes = vec![from.clone()];
+
+        let edges = vec![EdgeDef {
+            from: "A".into(),
+            to: "NONEXISTENT".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: None,
+        }];
+
+        let result = route_edges(&nodes, &edges, false, &HashMap::new(), &HashMap::new(), &HashMap::new());
+        assert_eq!(result.len(), 0, "edge with missing node should be filtered out");
+    }
+
+    // -----------------------------------------------------------------------
+    // edge_label_anchor
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_edge_label_anchor_empty() {
+        assert_eq!(edge_label_anchor(&[]), (0.0, 0.0));
+    }
+
+    #[test]
+    fn test_edge_label_anchor_single_point() {
+        assert_eq!(edge_label_anchor(&[(5.0, 10.0)]), (5.0, 10.0));
+    }
+
+    #[test]
+    fn test_edge_label_anchor_two_points() {
+        let anchor = edge_label_anchor(&[(0.0, 0.0), (100.0, 0.0)]);
+        assert!((anchor.0 - 50.0).abs() < 0.1);
+        assert!((anchor.1 - 0.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_edge_label_anchor_longest_segment() {
+        // Three points: first segment is short, second is long
+        let anchor = edge_label_anchor(&[(0.0, 0.0), (10.0, 0.0), (110.0, 0.0)]);
+        // Longest segment is (10,0) -> (110,0), midpoint = (60, 0)
+        assert!((anchor.0 - 60.0).abs() < 0.1);
+    }
+
+    // -----------------------------------------------------------------------
+    // path_avoids_nodes
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_path_avoids_nodes_clear_path() {
+        let nodes = vec![
+            make_rect_node("A", 100.0, 50.0),
+            make_rect_node("B", 100.0, 200.0),
+            make_rect_node("C", 300.0, 125.0), // far to the right, not blocking
+        ];
+        let path = vec![(100.0, 70.0), (100.0, 180.0)];
+        assert!(path_avoids_nodes(&path, "A", "B", &nodes));
+    }
+
+    #[test]
+    fn test_path_avoids_nodes_blocked() {
+        let nodes = vec![
+            make_rect_node("A", 100.0, 50.0),
+            make_rect_node("B", 100.0, 300.0),
+            make_rect_node("C", 100.0, 175.0), // directly in the path
+        ];
+        let path = vec![(100.0, 70.0), (100.0, 280.0)];
+        assert!(!path_avoids_nodes(&path, "A", "B", &nodes));
+    }
+
+    // -----------------------------------------------------------------------
+    // segment_intersects_rect
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn test_segment_intersects_rect_horizontal_hit() {
+        assert!(segment_intersects_rect((0.0, 5.0), (10.0, 5.0), 3.0, 0.0, 7.0, 10.0));
+    }
+
+    #[test]
+    fn test_segment_intersects_rect_horizontal_miss() {
+        assert!(!segment_intersects_rect((0.0, 15.0), (10.0, 15.0), 3.0, 0.0, 7.0, 10.0));
+    }
+
+    #[test]
+    fn test_segment_intersects_rect_vertical_hit() {
+        assert!(segment_intersects_rect((5.0, 0.0), (5.0, 10.0), 3.0, 3.0, 7.0, 7.0));
+    }
+
+    #[test]
+    fn test_segment_intersects_rect_vertical_miss() {
+        assert!(!segment_intersects_rect((1.0, 0.0), (1.0, 10.0), 3.0, 3.0, 7.0, 7.0));
+    }
+
+    #[test]
+    fn test_segment_intersects_rect_diagonal_hit() {
+        assert!(segment_intersects_rect((0.0, 0.0), (10.0, 10.0), 3.0, 3.0, 7.0, 7.0));
+    }
+
+    #[test]
+    fn test_segment_intersects_rect_diagonal_miss() {
+        assert!(!segment_intersects_rect((0.0, 0.0), (2.0, 2.0), 5.0, 5.0, 10.0, 10.0));
+    }
+}

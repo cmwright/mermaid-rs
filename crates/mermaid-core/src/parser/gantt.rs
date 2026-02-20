@@ -686,4 +686,208 @@ mod tests {
         assert_eq!(task.depends_on, vec!["a1", "b1"]);
         assert!(matches!(&task.start, TaskStart::After(ids) if ids == &["a1"]));
     }
+
+    #[test]
+    fn test_parse_axis_format_directive() {
+        let source = r#"gantt
+    dateFormat YYYY-MM-DD
+    axisFormat %Y-%m-%d
+    section Test
+    Task :2014-01-01, 3d
+"#;
+        let ast = parse_gantt(source).unwrap();
+        assert_eq!(ast.axis_format.as_deref(), Some("%Y-%m-%d"));
+    }
+
+    #[test]
+    fn test_parse_today_marker_off_directive() {
+        let source = r#"gantt
+    dateFormat YYYY-MM-DD
+    todayMarker off
+    section Test
+    Task :2014-01-01, 3d
+"#;
+        let ast = parse_gantt(source).unwrap();
+        assert_eq!(ast.today_marker, TodayMarker::Off);
+    }
+
+    #[test]
+    fn test_parse_today_marker_custom_style() {
+        let source = r#"gantt
+    dateFormat YYYY-MM-DD
+    todayMarker stroke-dasharray:5
+    section Test
+    Task :2014-01-01, 3d
+"#;
+        let ast = parse_gantt(source).unwrap();
+        // Any non-"off" value leaves today_marker as On
+        assert_eq!(ast.today_marker, TodayMarker::On);
+    }
+
+    #[test]
+    fn test_parse_tick_interval_directive() {
+        let source = r#"gantt
+    dateFormat YYYY-MM-DD
+    tickInterval 1day
+    section Test
+    Task :2014-01-01, 3d
+"#;
+        let ast = parse_gantt(source).unwrap();
+        assert!(ast.tick_interval.is_some());
+        let ti = ast.tick_interval.unwrap();
+        assert_eq!(ti.count, 1);
+        assert_eq!(ti.unit, TickUnit::Day);
+    }
+
+    #[test]
+    fn test_parse_tick_interval_week() {
+        let source = r#"gantt
+    dateFormat YYYY-MM-DD
+    tickInterval 2week
+    section Test
+    Task :2014-01-01, 3d
+"#;
+        let ast = parse_gantt(source).unwrap();
+        let ti = ast.tick_interval.unwrap();
+        assert_eq!(ti.count, 2);
+        assert_eq!(ti.unit, TickUnit::Week);
+    }
+
+    #[test]
+    fn test_parse_tick_interval_month() {
+        let ti = parse_tick_interval("1month").unwrap();
+        assert_eq!(ti.count, 1);
+        assert_eq!(ti.unit, TickUnit::Month);
+    }
+
+    #[test]
+    fn test_parse_tick_interval_with_every_prefix() {
+        let ti = parse_tick_interval("every 1day").unwrap();
+        assert_eq!(ti.count, 1);
+        assert_eq!(ti.unit, TickUnit::Day);
+    }
+
+    #[test]
+    fn test_parse_tick_interval_invalid() {
+        assert!(parse_tick_interval("abc").is_none());
+        assert!(parse_tick_interval("").is_none());
+        assert!(parse_tick_interval("1xyz").is_none());
+    }
+
+    #[test]
+    fn test_parse_task_with_after_dependency() {
+        let source = r#"gantt
+    dateFormat YYYY-MM-DD
+    section Test
+    Task A :a1, 2014-01-01, 3d
+    Task B :after a1, 5d
+"#;
+        let ast = parse_gantt(source).unwrap();
+        let t1 = &ast.sections[0].tasks[1];
+        assert_eq!(t1.name, "Task B");
+        assert!(matches!(&t1.start, TaskStart::After(ids) if ids == &["a1"]));
+        assert!(matches!(&t1.end, TaskEnd::Duration(d) if d == "5d"));
+    }
+
+    #[test]
+    fn test_parse_task_with_crit_active() {
+        let source = r#"gantt
+    dateFormat YYYY-MM-DD
+    section Test
+    Critical Active Task :crit, active, 2024-01-01, 3d
+"#;
+        let ast = parse_gantt(source).unwrap();
+        let task = &ast.sections[0].tasks[0];
+        assert!(task.tags.crit);
+        assert!(task.tags.active);
+        assert!(!task.tags.done);
+        assert!(!task.tags.milestone);
+        assert!(matches!(&task.start, TaskStart::Date(d) if d == "2024-01-01"));
+        assert!(matches!(&task.end, TaskEnd::Duration(d) if d == "3d"));
+    }
+
+    #[test]
+    fn test_parse_task_with_milestone() {
+        let source = r#"gantt
+    dateFormat YYYY-MM-DD
+    section Test
+    Release :milestone, m1, 2024-01-15, 0d
+"#;
+        let ast = parse_gantt(source).unwrap();
+        let task = &ast.sections[0].tasks[0];
+        assert_eq!(task.name, "Release");
+        assert!(task.tags.milestone);
+        assert_eq!(task.id.as_deref(), Some("m1"));
+    }
+
+    #[test]
+    fn test_parse_task_with_until() {
+        let source = r#"gantt
+    dateFormat YYYY-MM-DD
+    section Test
+    Task A :a1, 2024-01-01, 3d
+    Task B :2024-01-01, until a1
+"#;
+        let ast = parse_gantt(source).unwrap();
+        let task = &ast.sections[0].tasks[1];
+        assert!(matches!(&task.end, TaskEnd::Until(ids) if ids == &["a1"]));
+    }
+
+    #[test]
+    fn test_parse_task_before_section() {
+        let source = r#"gantt
+    dateFormat YYYY-MM-DD
+    Task before section :2014-01-01, 3d
+    section Section A
+    Task A1 :2014-01-01, 3d
+"#;
+        let ast = parse_gantt(source).unwrap();
+        assert_eq!(ast.sections.len(), 2);
+        assert_eq!(ast.sections[0].name, "");
+        assert_eq!(ast.sections[0].tasks[0].name, "Task before section");
+    }
+
+    #[test]
+    fn test_parse_task_with_id_start_end() {
+        let source = r#"gantt
+    dateFormat YYYY-MM-DD
+    section Test
+    Task :des1, 2014-01-06, 2014-01-08
+"#;
+        let ast = parse_gantt(source).unwrap();
+        let task = &ast.sections[0].tasks[0];
+        assert_eq!(task.id.as_deref(), Some("des1"));
+        assert!(matches!(&task.start, TaskStart::Date(d) if d == "2014-01-06"));
+        assert!(matches!(&task.end, TaskEnd::Date(d) if d == "2014-01-08"));
+    }
+
+    #[test]
+    fn test_parse_includes_directive() {
+        let source = r#"gantt
+    dateFormat YYYY-MM-DD
+    includes monday
+    section Test
+    Task :2014-01-01, 3d
+"#;
+        let ast = parse_gantt(source).unwrap();
+        assert_eq!(ast.includes, vec!["monday"]);
+    }
+
+    #[test]
+    fn test_parse_task_no_data() {
+        // A task with only tags and no other data
+        let source = r#"gantt
+    dateFormat YYYY-MM-DD
+    section Test
+    Done Task :done, active, crit, milestone
+"#;
+        let ast = parse_gantt(source).unwrap();
+        let task = &ast.sections[0].tasks[0];
+        assert!(task.tags.done);
+        assert!(task.tags.active);
+        assert!(task.tags.crit);
+        assert!(task.tags.milestone);
+        assert!(matches!(&task.start, TaskStart::PrevEnd));
+        assert!(matches!(&task.end, TaskEnd::Duration(d) if d == "1d"));
+    }
 }

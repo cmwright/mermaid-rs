@@ -491,3 +491,158 @@ fn align_to_smallest(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::flowchart::{Direction, EdgeType, NodeShape};
+
+    fn make_node(id: &str) -> NodeData {
+        NodeData {
+            id: id.to_string(),
+            label: String::new(),
+            shape: NodeShape::Rectangle,
+            style: Default::default(),
+            width: 40.0,
+            height: 20.0,
+        }
+    }
+
+    fn make_edge() -> EdgeData {
+        EdgeData {
+            edge_type: EdgeType::SolidArrow,
+            label: None,
+            label_width: 0.0,
+            label_height: 0.0,
+        }
+    }
+
+    #[test]
+    fn test_assign_coordinates_tb() {
+        // A -> B, top-to-bottom
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        g.add_edge(a, b, make_edge());
+
+        let layers = vec![vec![a], vec![b]];
+        let membership = SubgraphMembership::new();
+        let positions = assign_coordinates(&g, &layers, Direction::TopToBottom, &membership, 50.0);
+
+        let (ax, ay) = positions[&a];
+        let (bx, by) = positions[&b];
+        assert!(by > ay, "B should be below A in TB direction");
+        assert!((ax - bx).abs() < 1.0, "A and B should be vertically aligned");
+    }
+
+    #[test]
+    fn test_assign_coordinates_bt() {
+        // A -> B, bottom-to-top: positions should be mirrored on y-axis
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        g.add_edge(a, b, make_edge());
+
+        let layers = vec![vec![a], vec![b]];
+        let membership = SubgraphMembership::new();
+        let positions = assign_coordinates(&g, &layers, Direction::BottomToTop, &membership, 50.0);
+
+        let (ax, ay) = positions[&a];
+        let (bx, by) = positions[&b];
+        // In BT, the y-axis is mirrored: rank 0 (A) should have HIGHER y than rank 1 (B)
+        assert!(
+            ay > by,
+            "In BT, A (rank 0) should have higher y than B (rank 1) (A.y={ay:.1}, B.y={by:.1})"
+        );
+        assert!((ax - bx).abs() < 1.0, "A and B should be vertically aligned");
+    }
+
+    #[test]
+    fn test_assign_coordinates_lr() {
+        // A -> B, left-to-right
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        g.add_edge(a, b, make_edge());
+
+        let layers = vec![vec![a], vec![b]];
+        let membership = SubgraphMembership::new();
+        let positions = assign_coordinates(&g, &layers, Direction::LeftToRight, &membership, 50.0);
+
+        let (ax, ay) = positions[&a];
+        let (bx, by) = positions[&b];
+        assert!(bx > ax, "B should be to the right of A in LR direction");
+        assert!((ay - by).abs() < 1.0, "A and B should be horizontally aligned");
+    }
+
+    #[test]
+    fn test_assign_coordinates_rl() {
+        // A -> B, right-to-left: x-axis mirrored
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        g.add_edge(a, b, make_edge());
+
+        let layers = vec![vec![a], vec![b]];
+        let membership = SubgraphMembership::new();
+        let positions = assign_coordinates(&g, &layers, Direction::RightToLeft, &membership, 50.0);
+
+        let (ax, _ay) = positions[&a];
+        let (bx, _by) = positions[&b];
+        // In RL, rank 0 (A) should have HIGHER x than rank 1 (B)
+        assert!(
+            ax > bx,
+            "In RL, A (rank 0) should have higher x than B (rank 1) (A.x={ax:.1}, B.x={bx:.1})"
+        );
+    }
+
+    #[test]
+    fn test_assign_coordinates_multi_node_layer() {
+        // A -> C, B -> D: two nodes per layer
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        let c = g.add_node(make_node("C"));
+        let d = g.add_node(make_node("D"));
+        g.add_edge(a, c, make_edge());
+        g.add_edge(b, d, make_edge());
+
+        let layers = vec![vec![a, b], vec![c, d]];
+        let membership = SubgraphMembership::new();
+        let positions = assign_coordinates(&g, &layers, Direction::TopToBottom, &membership, 50.0);
+
+        // A and B should be on the same y (same rank), different x
+        let (ax, ay) = positions[&a];
+        let (bx, by) = positions[&b];
+        assert!((ay - by).abs() < 0.1, "same rank nodes should have same y");
+        assert!((ax - bx).abs() > 10.0, "same rank nodes should have different x");
+    }
+
+    #[test]
+    fn test_assign_coordinates_with_subgraph_gap() {
+        // Two nodes in different subgraphs should have extra separation
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        // No edges — just two nodes in same layer
+
+        let layers = vec![vec![a, b]];
+
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A".to_string(), vec!["SG1".to_string()]);
+        membership.insert("B".to_string(), vec!["SG2".to_string()]);
+
+        let positions_with_sg = assign_coordinates(&g, &layers, Direction::TopToBottom, &membership, 50.0);
+
+        let empty_membership = SubgraphMembership::new();
+        let positions_no_sg = assign_coordinates(&g, &layers, Direction::TopToBottom, &empty_membership, 50.0);
+
+        let sep_with = (positions_with_sg[&a].0 - positions_with_sg[&b].0).abs();
+        let sep_without = (positions_no_sg[&a].0 - positions_no_sg[&b].0).abs();
+
+        assert!(
+            sep_with > sep_without,
+            "subgraph gap should increase separation (with={sep_with:.1}, without={sep_without:.1})"
+        );
+    }
+}

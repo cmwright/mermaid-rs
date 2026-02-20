@@ -131,4 +131,64 @@ mod tests {
         assert_eq!(ast.slices[0].value, 33.3);
         assert_eq!(ast.slices[1].value, 66.7);
     }
+
+    #[test]
+    fn test_parse_pie_multiple_slices() {
+        let source = r#"pie
+    "Dogs" : 36
+    "Cats" : 85
+    "Rats" : 15
+    "Birds" : 42"#;
+        let ast = parse_pie(source).unwrap();
+        assert_eq!(ast.title, None);
+        assert_eq!(ast.slices.len(), 4);
+        assert_eq!(ast.slices[0].label, "Dogs");
+        assert_eq!(ast.slices[0].value, 36.0);
+        assert_eq!(ast.slices[1].label, "Cats");
+        assert_eq!(ast.slices[1].value, 85.0);
+        assert_eq!(ast.slices[2].label, "Rats");
+        assert_eq!(ast.slices[2].value, 15.0);
+        assert_eq!(ast.slices[3].label, "Birds");
+        assert_eq!(ast.slices[3].value, 42.0);
+    }
+
+    #[test]
+    fn test_parse_pie_title_with_spaces() {
+        let source = r#"pie title My Pie Chart Title
+    "A" : 50
+    "B" : 50"#;
+        let ast = parse_pie(source).unwrap();
+        assert_eq!(ast.title.as_deref(), Some("My Pie Chart Title"));
+        assert_eq!(ast.slices.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_pie_no_title_no_slices() {
+        let source = "pie";
+        let ast = parse_pie(source).unwrap();
+        assert_eq!(ast.title, None);
+        assert_eq!(ast.slices.len(), 0);
+    }
+
+    #[test]
+    fn test_parse_pie_semicolon_separator() {
+        let source = "pie\n    \"A\" : 30;    \"B\" : 70";
+        let ast = parse_pie(source).unwrap();
+        assert_eq!(ast.slices.len(), 2);
+        assert_eq!(ast.slices[0].label, "A");
+        assert_eq!(ast.slices[0].value, 30.0);
+        assert_eq!(ast.slices[1].label, "B");
+        assert_eq!(ast.slices[1].value, 70.0);
+    }
+
+    #[test]
+    fn test_parse_pie_labels_with_special_chars() {
+        let source = r#"pie
+    "Slice with spaces & stuff!" : 60
+    "Another (slice)" : 40"#;
+        let ast = parse_pie(source).unwrap();
+        assert_eq!(ast.slices.len(), 2);
+        assert_eq!(ast.slices[0].label, "Slice with spaces & stuff!");
+        assert_eq!(ast.slices[1].label, "Another (slice)");
+    }
 }

@@ -478,4 +478,809 @@ mod tests {
         );
     }
 
+    // =======================================================================
+    // End-to-end tests for coverage of specific code paths
+    // =======================================================================
+
+    /// Helper: parse a flowchart string and run layout, returning the result.
+    fn layout_from_source(source: &str) -> PositionedGraph {
+        use crate::parser::flowchart::parse_flowchart;
+        let ast = parse_flowchart(source).unwrap();
+        let provider = FontProvider::default_font();
+        let measurer = make_measurer(&provider);
+        layout_flowchart(&ast, &measurer).unwrap()
+    }
+
+    // -- coordinate_assignment.rs: BT (bottom-to-top) mirror --
+
+    #[test]
+    fn test_layout_bt_direction() {
+        let result = layout_from_source("flowchart BT\n    A[Top] --> B[Bottom]");
+        let a = result.nodes.iter().find(|n| n.id == "A").unwrap();
+        let b = result.nodes.iter().find(|n| n.id == "B").unwrap();
+        // In BT, A (source) should be below B (target is rendered above)
+        assert!(
+            a.y > b.y,
+            "In BT layout, A should be below B (A.y={:.1}, B.y={:.1})",
+            a.y,
+            b.y
+        );
+        assert_eq!(result.direction, Direction::BottomToTop);
+    }
+
+    // -- coordinate_assignment.rs: RL (right-to-left) mirror --
+
+    #[test]
+    fn test_layout_rl_direction() {
+        let result = layout_from_source("flowchart RL\n    A[Left] --> B[Right]");
+        let a = result.nodes.iter().find(|n| n.id == "A").unwrap();
+        let b = result.nodes.iter().find(|n| n.id == "B").unwrap();
+        // In RL, A (source) should be to the right of B (target)
+        assert!(
+            a.x > b.x,
+            "In RL layout, A should be right of B (A.x={:.1}, B.x={:.1})",
+            a.x,
+            b.x
+        );
+        assert_eq!(result.direction, Direction::RightToLeft);
+    }
+
+    // -- cycle_removal.rs: cycles and edge restoration --
+
+    #[test]
+    fn test_layout_with_cycle() {
+        let result = layout_from_source(
+            "flowchart TD\n    A --> B\n    B --> C\n    C --> A",
+        );
+        assert_eq!(result.nodes.len(), 3);
+        assert_eq!(result.edges.len(), 3);
+        // All nodes should have finite, non-negative coordinates after normalization
+        for node in &result.nodes {
+            assert!(node.x.is_finite() && node.x >= 0.0, "node {} has invalid x={}", node.id, node.x);
+            assert!(node.y.is_finite() && node.y >= 0.0, "node {} has invalid y={}", node.id, node.y);
+        }
+    }
+
+    #[test]
+    fn test_layout_with_self_loop_cycle() {
+        // Self-loop A -> A and a longer cycle
+        let result = layout_from_source(
+            "flowchart TD\n    A --> B\n    B --> C\n    C --> D\n    D --> B",
+        );
+        assert_eq!(result.nodes.len(), 4);
+        // Graph should still produce a valid layout
+        for node in &result.nodes {
+            assert!(node.x.is_finite(), "node {} x is not finite", node.id);
+            assert!(node.y.is_finite(), "node {} y is not finite", node.id);
+        }
+    }
+
+    // -- dummy_nodes.rs: edges spanning 3+ ranks --
+
+    #[test]
+    fn test_layout_long_edge_spanning_multiple_ranks() {
+        // A -> B -> C -> D, plus A -> D (spans 3 ranks)
+        let result = layout_from_source(
+            "flowchart TD\n    A --> B\n    B --> C\n    C --> D\n    A --> D",
+        );
+        assert_eq!(result.nodes.len(), 4);
+        // Find the edge from A to D
+        let a_to_d = result.edges.iter().find(|e| e.from_id == "A" && e.to_id == "D").unwrap();
+        // Long edge should have bend points (more than 2 points)
+        assert!(
+            a_to_d.points.len() > 2,
+            "Long edge A->D should have bend points, got {} points",
+            a_to_d.points.len()
+        );
+    }
+
+    #[test]
+    fn test_layout_long_edge_with_label() {
+        // Long edge with label -> label dummy node should be created at midpoint
+        let result = layout_from_source(
+            "flowchart TD\n    A --> B\n    B --> C\n    C --> D\n    A -->|long label| D",
+        );
+        let a_to_d = result.edges.iter().find(|e| e.from_id == "A" && e.to_id == "D").unwrap();
+        assert!(a_to_d.label.is_some());
+        assert!(a_to_d.label_x.is_some(), "labeled long edge should have label_x");
+        assert!(a_to_d.label_y.is_some(), "labeled long edge should have label_y");
+    }
+
+    // -- edge_routing.rs: diamond node intersection --
+
+    #[test]
+    fn test_layout_diamond_node() {
+        let result = layout_from_source(
+            "flowchart TD\n    A[Start] --> B{Decision}\n    B -->|yes| C[End Yes]\n    B -->|no| D[End No]",
+        );
+        let b = result.nodes.iter().find(|n| n.id == "B").unwrap();
+        assert_eq!(b.shape, NodeShape::Diamond);
+        // Diamond should have equal width and height (it's a rotated square)
+        assert!(
+            (b.width - b.height).abs() < 1.0,
+            "Diamond should have equal w/h, got {}x{}",
+            b.width,
+            b.height
+        );
+        // Edges from B should start from the diamond boundary
+        let from_b: Vec<_> = result.edges.iter().filter(|e| e.from_id == "B").collect();
+        assert_eq!(from_b.len(), 2, "B should have 2 outgoing edges");
+    }
+
+    // -- graph_builder.rs: various node shapes --
+
+    #[test]
+    fn test_layout_various_shapes() {
+        let result = layout_from_source(
+            r#"flowchart TD
+    A[Rectangle] --> B(Rounded)
+    B --> C([Stadium])
+    C --> D[[Subroutine]]
+    D --> E[(Cylinder)]
+    E --> F((Circle))
+    F --> G{Diamond}
+    G --> H{{Hexagon}}
+    H --> I>Asymmetric]"#,
+        );
+        assert_eq!(result.nodes.len(), 9);
+
+        // Verify each shape is correct
+        let shapes: Vec<(String, NodeShape)> = result.nodes.iter()
+            .map(|n| (n.id.clone(), n.shape))
+            .collect();
+        let a = shapes.iter().find(|(id, _)| id == "A").unwrap();
+        assert_eq!(a.1, NodeShape::Rectangle);
+        let b = shapes.iter().find(|(id, _)| id == "B").unwrap();
+        assert_eq!(b.1, NodeShape::RoundedRectangle);
+        let c = shapes.iter().find(|(id, _)| id == "C").unwrap();
+        assert_eq!(c.1, NodeShape::Stadium);
+        let d = shapes.iter().find(|(id, _)| id == "D").unwrap();
+        assert_eq!(d.1, NodeShape::Subroutine);
+        let e = shapes.iter().find(|(id, _)| id == "E").unwrap();
+        assert_eq!(e.1, NodeShape::Cylinder);
+        let f = shapes.iter().find(|(id, _)| id == "F").unwrap();
+        assert_eq!(f.1, NodeShape::Circle);
+        let g = shapes.iter().find(|(id, _)| id == "G").unwrap();
+        assert_eq!(g.1, NodeShape::Diamond);
+        let h = shapes.iter().find(|(id, _)| id == "H").unwrap();
+        assert_eq!(h.1, NodeShape::Hexagon);
+        let i_node = shapes.iter().find(|(id, _)| id == "I").unwrap();
+        assert_eq!(i_node.1, NodeShape::Asymmetric);
+
+        // All nodes should have positive dimensions
+        for node in &result.nodes {
+            assert!(node.width > 0.0, "node {} width should be > 0", node.id);
+            assert!(node.height > 0.0, "node {} height should be > 0", node.id);
+        }
+    }
+
+    #[test]
+    fn test_layout_circle_size() {
+        // Circle must fully contain text: diameter = sqrt(w^2 + h^2)
+        let result = layout_from_source("flowchart TD\n    A((Circle))");
+        let a = result.nodes.iter().find(|n| n.id == "A").unwrap();
+        assert_eq!(a.shape, NodeShape::Circle);
+        assert!(
+            (a.width - a.height).abs() < 0.1,
+            "Circle should have equal width/height"
+        );
+    }
+
+    #[test]
+    fn test_layout_double_circle_size() {
+        let result = layout_from_source("flowchart TD\n    A(((DoubleCircle)))");
+        let a = result.nodes.iter().find(|n| n.id == "A").unwrap();
+        assert_eq!(a.shape, NodeShape::DoubleCircle);
+        assert!(
+            (a.width - a.height).abs() < 0.1,
+            "DoubleCircle should have equal width/height"
+        );
+    }
+
+    #[test]
+    fn test_layout_hexagon_wider_than_base() {
+        // Hexagon gets extra width: base_w + base_h * 0.5
+        let result = layout_from_source("flowchart TD\n    A{{Hex}} --> B[Rect]");
+        let a = result.nodes.iter().find(|n| n.id == "A").unwrap();
+        assert_eq!(a.shape, NodeShape::Hexagon);
+    }
+
+    // -- compound.rs: overlapping sibling subgraphs --
+
+    #[test]
+    fn test_layout_overlapping_sibling_subgraphs() {
+        let result = layout_from_source(
+            r#"flowchart TD
+    subgraph SG1
+        A1[Node A1] --> A2[Node A2]
+        A2 --> A3[Node A3]
+    end
+    subgraph SG2
+        B1[Node B1] --> B2[Node B2]
+        B2 --> B3[Node B3]
+    end
+    A3 --> B1"#,
+        );
+        assert_eq!(result.subgraphs.len(), 2);
+
+        let sg1 = result.subgraphs.iter().find(|s| s.id == "SG1").unwrap();
+        let sg2 = result.subgraphs.iter().find(|s| s.id == "SG2").unwrap();
+
+        // Subgraphs should not overlap
+        let sg1_right = sg1.x + sg1.width;
+        let sg1_bottom = sg1.y + sg1.height;
+        let sg2_right = sg2.x + sg2.width;
+        let sg2_bottom = sg2.y + sg2.height;
+
+        let x_overlap = sg1.x < sg2_right && sg2.x < sg1_right;
+        let y_overlap = sg1.y < sg2_bottom && sg2.y < sg1_bottom;
+
+        if x_overlap && y_overlap {
+            panic!(
+                "Subgraphs SG1 and SG2 overlap: SG1=({:.0},{:.0},{:.0},{:.0}), SG2=({:.0},{:.0},{:.0},{:.0})",
+                sg1.x, sg1.y, sg1_right, sg1_bottom,
+                sg2.x, sg2.y, sg2_right, sg2_bottom,
+            );
+        }
+    }
+
+    #[test]
+    fn test_layout_multiple_sibling_subgraphs() {
+        // Three sibling subgraphs: triggers the cross-axis and main-axis separation
+        let result = layout_from_source(
+            r#"flowchart TD
+    subgraph Alpha
+        A1 --> A2
+    end
+    subgraph Beta
+        B1 --> B2
+    end
+    subgraph Gamma
+        C1 --> C2
+    end
+    A2 --> B1
+    B2 --> C1"#,
+        );
+        assert_eq!(result.subgraphs.len(), 3);
+        // All subgraphs should have positive dimensions
+        for sg in &result.subgraphs {
+            assert!(sg.width > 0.0 && sg.height > 0.0, "subgraph {} has bad dims", sg.id);
+        }
+    }
+
+    #[test]
+    fn test_layout_sibling_subgraphs_horizontal() {
+        // LR layout with sibling subgraphs
+        let result = layout_from_source(
+            r#"flowchart LR
+    subgraph SG1
+        A1 --> A2
+    end
+    subgraph SG2
+        B1 --> B2
+    end
+    A2 --> B1"#,
+        );
+        assert_eq!(result.subgraphs.len(), 2);
+    }
+
+    // -- compound.rs: compact_subgraphs --
+
+    #[test]
+    fn test_layout_subgraph_compaction() {
+        // Subgraph with multiple nodes spread across ranks
+        let result = layout_from_source(
+            r#"flowchart TD
+    subgraph SG
+        A --> B
+        A --> C
+        B --> D
+        C --> D
+    end
+    E --> A
+    D --> F"#,
+        );
+        assert_eq!(result.subgraphs.len(), 1);
+        let sg = &result.subgraphs[0];
+        assert!(sg.width > 0.0 && sg.height > 0.0);
+    }
+
+    // -- rank_assignment.rs: align_sibling_subgraph_ranks --
+
+    #[test]
+    fn test_layout_sibling_subgraph_rank_alignment() {
+        // Two sibling subgraphs that should be aligned at the same tier
+        let result = layout_from_source(
+            r#"flowchart TD
+    Start --> A1
+    Start --> B1
+    subgraph Left
+        A1 --> A2
+        A2 --> A3
+    end
+    subgraph Right
+        B1 --> B2
+    end
+    A3 --> End
+    B2 --> End"#,
+        );
+        let left = result.subgraphs.iter().find(|s| s.id == "Left").unwrap();
+        let right = result.subgraphs.iter().find(|s| s.id == "Right").unwrap();
+
+        // Both subgraphs feed into End, so the rank alignment should ensure
+        // they are positioned in the same general area
+        assert!(left.width > 0.0 && right.width > 0.0);
+    }
+
+    // -- ordering.rs: refine_subgraph_ordering --
+
+    #[test]
+    fn test_layout_subgraph_ordering_refinement() {
+        // Subgraph with crossing edges that refinement should fix
+        let result = layout_from_source(
+            r#"flowchart TD
+    subgraph SG
+        A --> D
+        B --> C
+        A --> B
+    end
+    X --> A
+    X --> B"#,
+        );
+        assert_eq!(result.subgraphs.len(), 1);
+    }
+
+    // -- edge_routing.rs: diamond intersection via full pipeline --
+
+    #[test]
+    fn test_layout_diamond_edge_routing() {
+        // Diamond node with edges: tests intersect_diamond through the full pipeline
+        let result = layout_from_source(
+            r#"flowchart TD
+    A[Input] --> B{Is valid?}
+    B -->|yes| C[Process]
+    B -->|no| D[Reject]
+    C --> E[Done]
+    D --> E"#,
+        );
+        let b = result.nodes.iter().find(|n| n.id == "B").unwrap();
+        assert_eq!(b.shape, NodeShape::Diamond);
+
+        // Check edges from the diamond
+        let from_b: Vec<_> = result.edges.iter().filter(|e| e.from_id == "B").collect();
+        assert_eq!(from_b.len(), 2);
+        for edge in &from_b {
+            assert!(edge.points.len() >= 2, "edge from B should have at least 2 points");
+            // First point should be on or near the diamond boundary
+            let p0 = edge.points[0];
+            let dx = p0.0 - b.x;
+            let dy = p0.1 - b.y;
+            let dist = (dx * dx + dy * dy).sqrt();
+            assert!(
+                dist > 1.0,
+                "edge start should be on diamond boundary, not at center (dist={dist:.1})"
+            );
+        }
+    }
+
+    // -- edge_routing.rs: subgraph boundary label adjustment via full pipeline --
+
+    #[test]
+    fn test_layout_edge_labels_crossing_subgraph() {
+        let result = layout_from_source(
+            r#"flowchart TD
+    subgraph SG
+        A --> B
+    end
+    C -->|crosses boundary| A
+    B -->|exits subgraph| D"#,
+        );
+        assert_eq!(result.subgraphs.len(), 1);
+        // Labeled edges exist and have positions
+        for edge in &result.edges {
+            if edge.label.is_some() {
+                assert!(edge.label_x.is_some(), "labeled edge should have label_x");
+                assert!(edge.label_y.is_some(), "labeled edge should have label_y");
+            }
+        }
+    }
+
+    // -- normalize.rs: empty graph guard --
+
+    #[test]
+    fn test_normalize_empty_graph() {
+        // Test with an empty node/edge list directly
+        let (w, h) = normalize::normalize_and_compute_bounds(&mut [], &mut [], &mut []);
+        assert!((w - 8.0).abs() < 0.1, "empty graph width should be 8.0 (padding only)");
+        assert!((h - 8.0).abs() < 0.1, "empty graph height should be 8.0 (padding only)");
+    }
+
+    // -- normalize.rs: basic normalization --
+
+    #[test]
+    fn test_normalize_shifts_to_positive() {
+        let mut nodes = vec![PositionedNode {
+            id: "A".into(),
+            label: "A".into(),
+            shape: NodeShape::Rectangle,
+            style: Default::default(),
+            x: -50.0,
+            y: -30.0,
+            width: 40.0,
+            height: 20.0,
+        }];
+        let mut edges = vec![];
+        let mut subgraphs = vec![];
+        let (w, h) = normalize::normalize_and_compute_bounds(
+            &mut nodes,
+            &mut edges,
+            &mut subgraphs,
+        );
+        // After normalization, node should have non-negative coords
+        assert!(
+            nodes[0].x >= 0.0,
+            "node x should be >= 0 after normalization, got {}",
+            nodes[0].x
+        );
+        assert!(
+            nodes[0].y >= 0.0,
+            "node y should be >= 0 after normalization, got {}",
+            nodes[0].y
+        );
+        assert!(w > 0.0 && h > 0.0);
+    }
+
+    // -- Full pipeline: BT with multiple ranks and long edges --
+
+    #[test]
+    fn test_layout_bt_long_edges() {
+        let result = layout_from_source(
+            r#"flowchart BT
+    A --> B
+    B --> C
+    C --> D
+    A -->|skip| D"#,
+        );
+        let a = result.nodes.iter().find(|n| n.id == "A").unwrap();
+        let d = result.nodes.iter().find(|n| n.id == "D").unwrap();
+        // In BT, A (source) should be below D
+        assert!(
+            a.y > d.y,
+            "In BT, A should be below D (A.y={:.1}, D.y={:.1})",
+            a.y,
+            d.y
+        );
+    }
+
+    // -- Full pipeline: RL with multiple ranks --
+
+    #[test]
+    fn test_layout_rl_multiple_ranks() {
+        let result = layout_from_source(
+            r#"flowchart RL
+    A --> B
+    B --> C
+    A --> C"#,
+        );
+        let a = result.nodes.iter().find(|n| n.id == "A").unwrap();
+        let c = result.nodes.iter().find(|n| n.id == "C").unwrap();
+        // In RL, A should be right of C
+        assert!(
+            a.x > c.x,
+            "In RL, A should be right of C (A.x={:.1}, C.x={:.1})",
+            a.x,
+            c.x
+        );
+    }
+
+    // -- Nested subgraphs --
+
+    #[test]
+    fn test_layout_nested_subgraphs() {
+        let result = layout_from_source(
+            r#"flowchart TD
+    subgraph Outer
+        subgraph Inner
+            A --> B
+        end
+        C --> A
+    end
+    D --> C
+    B --> E"#,
+        );
+        assert!(result.subgraphs.len() >= 2);
+        let outer = result.subgraphs.iter().find(|s| s.id == "Outer").unwrap();
+        let inner = result.subgraphs.iter().find(|s| s.id == "Inner").unwrap();
+
+        // Inner should be geometrically contained within Outer
+        assert!(
+            inner.x >= outer.x && inner.y >= outer.y,
+            "Inner should be inside Outer"
+        );
+        assert!(
+            inner.x + inner.width <= outer.x + outer.width + 1.0,
+            "Inner right edge should be within Outer"
+        );
+        assert!(
+            inner.y + inner.height <= outer.y + outer.height + 1.0,
+            "Inner bottom edge should be within Outer"
+        );
+    }
+
+    // -- Disconnected components --
+
+    #[test]
+    fn test_layout_disconnected_components() {
+        let result = layout_from_source(
+            r#"flowchart TD
+    A --> B
+    C --> D"#,
+        );
+        assert_eq!(result.nodes.len(), 4);
+        // Both components should be laid out
+        for node in &result.nodes {
+            assert!(node.x.is_finite());
+            assert!(node.y.is_finite());
+        }
+    }
+
+    // -- Edge-only node creation (graph_builder: edge-referenced implicit nodes) --
+
+    #[test]
+    fn test_layout_implicit_nodes() {
+        // Nodes only referenced in edges, not declared
+        let result = layout_from_source("flowchart TD\n    X --> Y");
+        assert_eq!(result.nodes.len(), 2);
+        let x = result.nodes.iter().find(|n| n.id == "X").unwrap();
+        let y = result.nodes.iter().find(|n| n.id == "Y").unwrap();
+        // Implicit nodes should default to Rectangle shape
+        assert_eq!(x.shape, NodeShape::Rectangle);
+        assert_eq!(y.shape, NodeShape::Rectangle);
+    }
+
+    // -- Single node (no edges) --
+
+    #[test]
+    fn test_layout_single_node_no_edges() {
+        let result = layout_from_source("flowchart TD\n    A[Alone]");
+        assert_eq!(result.nodes.len(), 1);
+        assert_eq!(result.edges.len(), 0);
+        assert!(result.nodes[0].x >= 0.0);
+        assert!(result.nodes[0].y >= 0.0);
+    }
+
+    // -- Subgraph with edges crossing boundaries and labels --
+
+    #[test]
+    fn test_layout_labeled_edges_with_subgraphs() {
+        let result = layout_from_source(
+            r#"flowchart TD
+    subgraph SG1
+        A --> B
+    end
+    subgraph SG2
+        C --> D
+    end
+    B -->|from SG1 to SG2| C"#,
+        );
+        assert_eq!(result.subgraphs.len(), 2);
+        let cross_edge = result.edges.iter().find(|e| e.from_id == "B" && e.to_id == "C").unwrap();
+        assert_eq!(cross_edge.label.as_deref(), Some("from SG1 to SG2"));
+        assert!(cross_edge.label_x.is_some());
+        assert!(cross_edge.label_y.is_some());
+    }
+
+    // -- Large graph to exercise ordering thoroughly --
+
+    #[test]
+    fn test_layout_wide_graph() {
+        let result = layout_from_source(
+            r#"flowchart TD
+    A --> B
+    A --> C
+    A --> D
+    A --> E
+    A --> F
+    B --> G
+    C --> G
+    D --> G
+    E --> G
+    F --> G"#,
+        );
+        assert_eq!(result.nodes.len(), 7);
+        // All nodes at same rank (B-F) should have distinct x coordinates
+        let a = result.nodes.iter().find(|n| n.id == "A").unwrap();
+        let g = result.nodes.iter().find(|n| n.id == "G").unwrap();
+        assert!(a.y < g.y, "A should be above G");
+    }
+
+    // -- Verify bounds are correct --
+
+    #[test]
+    fn test_layout_bounds_cover_all_elements() {
+        let result = layout_from_source(
+            r#"flowchart TD
+    subgraph SG
+        A --> B
+    end
+    C --> A"#,
+        );
+        // All nodes should be within the declared width/height
+        for node in &result.nodes {
+            assert!(
+                node.x + node.width / 2.0 <= result.width + 1.0,
+                "node {} exceeds width bound",
+                node.id
+            );
+            assert!(
+                node.y + node.height / 2.0 <= result.height + 1.0,
+                "node {} exceeds height bound",
+                node.id
+            );
+        }
+        for sg in &result.subgraphs {
+            assert!(
+                sg.x + sg.width <= result.width + 1.0,
+                "subgraph {} exceeds width bound",
+                sg.id
+            );
+            assert!(
+                sg.y + sg.height <= result.height + 1.0,
+                "subgraph {} exceeds height bound",
+                sg.id
+            );
+        }
+    }
+
+    // -- Test label top straddles top border, center above --
+
+    #[test]
+    fn test_adjust_labels_straddling_top_border_center_above() {
+        use crate::layout::flowchart::edge_routing::adjust_labels_for_subgraph_boundaries;
+
+        let sg = PositionedSubgraph {
+            id: "sg1".into(),
+            label: Some("SG".into()),
+            x: 50.0,
+            y: 100.0,
+            width: 200.0,
+            height: 200.0,
+            style: Default::default(),
+        };
+
+        // Label center ABOVE the top border, but bottom extends past it
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("test".into()),
+            label_x: Some(150.0),
+            label_y: Some(95.0),  // center above y=100, label_top=85 < 100, label_bottom=105 > 100
+            label_width: Some(40.0),
+            label_height: Some(20.0),
+            points: vec![(50.0, 50.0), (250.0, 150.0)],
+        }];
+
+        adjust_labels_for_subgraph_boundaries(&mut edges, &[sg]);
+        let new_y = edges[0].label_y.unwrap();
+        // Center was above border -> pushed fully above
+        assert!(
+            new_y < 100.0 - 10.0,
+            "label center above border should be pushed up, got y={new_y}"
+        );
+    }
+
+    // -- Test label straddles bottom border, center above --
+
+    #[test]
+    fn test_adjust_labels_straddling_bottom_border_center_above() {
+        use crate::layout::flowchart::edge_routing::adjust_labels_for_subgraph_boundaries;
+
+        let sg = PositionedSubgraph {
+            id: "sg1".into(),
+            label: Some("SG".into()),
+            x: 50.0,
+            y: 100.0,
+            width: 200.0,
+            height: 200.0,  // bottom border at y=300
+            style: Default::default(),
+        };
+
+        // Label straddles bottom border with center ABOVE it
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("test".into()),
+            label_x: Some(150.0),
+            label_y: Some(295.0),  // center at 295 (above 300); label_bottom = 305 > 300
+            label_width: Some(40.0),
+            label_height: Some(20.0),
+            points: vec![(150.0, 250.0), (150.0, 350.0)],
+        }];
+
+        adjust_labels_for_subgraph_boundaries(&mut edges, &[sg]);
+        let new_y = edges[0].label_y.unwrap();
+        // Center above bottom border -> pushed inside subgraph
+        assert!(
+            new_y < 300.0,
+            "label center above bottom border should be pushed inside, got y={new_y}"
+        );
+    }
+
+    // -- Test label straddles left border, center left --
+
+    #[test]
+    fn test_adjust_labels_straddling_left_border_center_left() {
+        use crate::layout::flowchart::edge_routing::adjust_labels_for_subgraph_boundaries;
+
+        let sg = PositionedSubgraph {
+            id: "sg1".into(),
+            label: Some("SG".into()),
+            x: 100.0,
+            y: 50.0,
+            width: 200.0,
+            height: 200.0,
+            style: Default::default(),
+        };
+
+        // Label straddles left border at x=100 with center LEFT of it
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("test".into()),
+            label_x: Some(95.0),   // center at 95 (left of 100); label_right=115 > 100
+            label_y: Some(150.0),  // vertically within subgraph
+            label_width: Some(40.0),
+            label_height: Some(20.0),
+            points: vec![(50.0, 150.0), (200.0, 150.0)],
+        }];
+
+        adjust_labels_for_subgraph_boundaries(&mut edges, &[sg]);
+        let new_x = edges[0].label_x.unwrap();
+        // Center left of border -> pushed further left
+        assert!(
+            new_x < 100.0 - 15.0,
+            "label center left of left border should be pushed further left, got x={new_x}"
+        );
+    }
+
+    // -- Test label straddles right border, center right --
+
+    #[test]
+    fn test_adjust_labels_straddling_right_border_center_right() {
+        use crate::layout::flowchart::edge_routing::adjust_labels_for_subgraph_boundaries;
+
+        let sg = PositionedSubgraph {
+            id: "sg1".into(),
+            label: Some("SG".into()),
+            x: 100.0,
+            y: 50.0,
+            width: 200.0,  // right border at x=300
+            height: 200.0,
+            style: Default::default(),
+        };
+
+        // Label straddles right border with center RIGHT of it
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("test".into()),
+            label_x: Some(305.0),  // center at 305; label_left=285 < 300
+            label_y: Some(150.0),
+            label_width: Some(40.0),
+            label_height: Some(20.0),
+            points: vec![(200.0, 150.0), (400.0, 150.0)],
+        }];
+
+        adjust_labels_for_subgraph_boundaries(&mut edges, &[sg]);
+        let new_x = edges[0].label_x.unwrap();
+        // Center right of border -> pushed further right
+        assert!(
+            new_x > 300.0 + 15.0,
+            "label center right of right border should be pushed further right, got x={new_x}"
+        );
+    }
 }

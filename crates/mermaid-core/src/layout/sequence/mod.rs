@@ -826,4 +826,404 @@ mod tests {
         assert!(layout.blocks[0].height > 0.0);
         assert!(layout.blocks[0].width > 0.0);
     }
+
+    #[test]
+    fn test_note_left_of() {
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef {
+                    id: "A".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+                ParticipantDef {
+                    id: "B".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+            ],
+            statements: vec![
+                SequenceStatement::Note(NoteDef {
+                    position: NotePosition::LeftOf,
+                    participants: vec!["A".to_string()],
+                    text: "Left note".to_string(),
+                }),
+            ],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.notes.len(), 1);
+        let note = &layout.notes[0];
+        // Note left of A: note should be positioned to the left of actor A
+        let actor_a_x = layout.actors[0].center_x;
+        assert!(
+            note.x + note.width < actor_a_x,
+            "Note left of A should end before actor A center. note.x={}, note.width={}, actor_a_x={}",
+            note.x, note.width, actor_a_x
+        );
+    }
+
+    #[test]
+    fn test_note_right_of() {
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef {
+                    id: "A".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+                ParticipantDef {
+                    id: "B".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+            ],
+            statements: vec![
+                SequenceStatement::Note(NoteDef {
+                    position: NotePosition::RightOf,
+                    participants: vec!["B".to_string()],
+                    text: "Right note".to_string(),
+                }),
+            ],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.notes.len(), 1);
+        let note = &layout.notes[0];
+        // Note right of B: note x should start after actor B center
+        let actor_b_x = layout.actors[1].center_x;
+        assert!(
+            note.x > actor_b_x,
+            "Note right of B should start after actor B center. note.x={}, actor_b_x={}",
+            note.x, actor_b_x
+        );
+    }
+
+    #[test]
+    fn test_alt_else_block_sections() {
+        // alt with else creates dividers for the non-first sections
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef {
+                    id: "A".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+                ParticipantDef {
+                    id: "B".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+            ],
+            statements: vec![
+                SequenceStatement::Block(BlockDef {
+                    kind: BlockKind::Alt,
+                    label: "condition".to_string(),
+                    sections: vec![
+                        BlockSection {
+                            label: Some("condition".to_string()),
+                            statements: vec![SequenceStatement::Message(MessageDef {
+                                from: "A".to_string(),
+                                to: "B".to_string(),
+                                arrow: ArrowType::SolidArrow,
+                                label: "yes".to_string(),
+                                activate_target: false,
+                                deactivate_source: false,
+                            })],
+                        },
+                        BlockSection {
+                            label: Some("else".to_string()),
+                            statements: vec![SequenceStatement::Message(MessageDef {
+                                from: "A".to_string(),
+                                to: "B".to_string(),
+                                arrow: ArrowType::SolidArrow,
+                                label: "no".to_string(),
+                                activate_target: false,
+                                deactivate_source: false,
+                            })],
+                        },
+                        BlockSection {
+                            label: Some("else other".to_string()),
+                            statements: vec![SequenceStatement::Message(MessageDef {
+                                from: "B".to_string(),
+                                to: "A".to_string(),
+                                arrow: ArrowType::DottedArrow,
+                                label: "maybe".to_string(),
+                                activate_target: false,
+                                deactivate_source: false,
+                            })],
+                        },
+                    ],
+                }),
+            ],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.blocks.len(), 1);
+        // 2 dividers for the 2 non-first sections (else, else other)
+        assert_eq!(layout.blocks[0].sections.len(), 2);
+        assert_eq!(layout.blocks[0].sections[0].label.as_deref(), Some("else"));
+        assert_eq!(layout.blocks[0].sections[1].label.as_deref(), Some("else other"));
+        // Block should contain all 3 messages
+        assert_eq!(layout.messages.len(), 3);
+    }
+
+    #[test]
+    fn test_self_message_layout() {
+        // Self-message (A->>A) should be flagged and take extra vertical space
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef {
+                    id: "A".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+                ParticipantDef {
+                    id: "B".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+            ],
+            statements: vec![
+                SequenceStatement::Message(MessageDef {
+                    from: "A".to_string(),
+                    to: "A".to_string(),
+                    arrow: ArrowType::SolidArrow,
+                    label: "self call".to_string(),
+                    activate_target: false,
+                    deactivate_source: false,
+                }),
+                SequenceStatement::Message(MessageDef {
+                    from: "A".to_string(),
+                    to: "B".to_string(),
+                    arrow: ArrowType::SolidArrow,
+                    label: "normal".to_string(),
+                    activate_target: false,
+                    deactivate_source: false,
+                }),
+            ],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.messages.len(), 2);
+        assert!(layout.messages[0].is_self);
+        assert_eq!(layout.messages[0].from_x, layout.messages[0].to_x);
+        assert!(!layout.messages[1].is_self);
+        // Self message takes extra vertical space
+        let y_gap = layout.messages[1].y - layout.messages[0].y;
+        assert!(y_gap > SELF_MSG_HEIGHT, "Self message should add extra vertical space");
+    }
+
+    #[test]
+    fn test_autonumber_assignment() {
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef {
+                    id: "A".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+                ParticipantDef {
+                    id: "B".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+            ],
+            statements: vec![
+                SequenceStatement::Message(MessageDef {
+                    from: "A".to_string(),
+                    to: "B".to_string(),
+                    arrow: ArrowType::SolidArrow,
+                    label: "first".to_string(),
+                    activate_target: false,
+                    deactivate_source: false,
+                }),
+                SequenceStatement::Message(MessageDef {
+                    from: "B".to_string(),
+                    to: "A".to_string(),
+                    arrow: ArrowType::DottedArrow,
+                    label: "second".to_string(),
+                    activate_target: false,
+                    deactivate_source: false,
+                }),
+                SequenceStatement::Message(MessageDef {
+                    from: "A".to_string(),
+                    to: "B".to_string(),
+                    arrow: ArrowType::SolidArrow,
+                    label: "third".to_string(),
+                    activate_target: false,
+                    deactivate_source: false,
+                }),
+            ],
+            autonumber: true,
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+
+        assert!(layout.autonumber);
+        assert_eq!(layout.messages.len(), 3);
+        assert_eq!(layout.messages[0].number, Some(1));
+        assert_eq!(layout.messages[1].number, Some(2));
+        assert_eq!(layout.messages[2].number, Some(3));
+    }
+
+    #[test]
+    fn test_autonumber_disabled() {
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef {
+                    id: "A".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+                ParticipantDef {
+                    id: "B".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+            ],
+            statements: vec![
+                SequenceStatement::Message(MessageDef {
+                    from: "A".to_string(),
+                    to: "B".to_string(),
+                    arrow: ArrowType::SolidArrow,
+                    label: "msg".to_string(),
+                    activate_target: false,
+                    deactivate_source: false,
+                }),
+            ],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+
+        assert!(!layout.autonumber);
+        assert_eq!(layout.messages[0].number, None);
+    }
+
+    #[test]
+    fn test_actor_kind_stick_figure() {
+        // Actor (stick figure) participants should have different sizing
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef {
+                    id: "Alice".to_string(),
+                    display_name: Some("Alice".to_string()),
+                    kind: ParticipantKind::Actor,
+                },
+                ParticipantDef {
+                    id: "Bob".to_string(),
+                    display_name: Some("Bob".to_string()),
+                    kind: ParticipantKind::Participant,
+                },
+            ],
+            statements: vec![
+                SequenceStatement::Message(MessageDef {
+                    from: "Alice".to_string(),
+                    to: "Bob".to_string(),
+                    arrow: ArrowType::SolidArrow,
+                    label: "Hello".to_string(),
+                    activate_target: false,
+                    deactivate_source: false,
+                }),
+            ],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.actors.len(), 2);
+        assert_eq!(layout.actors[0].kind, ParticipantKind::Actor);
+        assert_eq!(layout.actors[1].kind, ParticipantKind::Participant);
+        // Stick figure height includes STICK_FIGURE_HEIGHT + label gap + text height
+        // so it should be taller than a standard participant box
+        assert!(
+            layout.actors[0].box_height >= STICK_FIGURE_HEIGHT,
+            "Actor (stick figure) box_height={} should be >= STICK_FIGURE_HEIGHT={}",
+            layout.actors[0].box_height, STICK_FIGURE_HEIGHT
+        );
+    }
+
+    #[test]
+    fn test_note_multiline_text() {
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef {
+                    id: "A".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+            ],
+            statements: vec![
+                SequenceStatement::Note(NoteDef {
+                    position: NotePosition::RightOf,
+                    participants: vec!["A".to_string()],
+                    text: "Line one<br/>Line two<br/>Line three".to_string(),
+                }),
+            ],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.notes.len(), 1);
+        let note = &layout.notes[0];
+        // Multi-line note should have height proportional to number of lines
+        assert!(note.height > 0.0);
+        assert!(note.width > 0.0);
+    }
+
+    #[test]
+    fn test_note_over_empty_participants() {
+        // Note with no participants should use fallback position
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef {
+                    id: "A".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+            ],
+            statements: vec![
+                SequenceStatement::Note(NoteDef {
+                    position: NotePosition::Over,
+                    participants: vec![],
+                    text: "Floating note".to_string(),
+                }),
+            ],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.notes.len(), 1);
+        // Falls back to DIAGRAM_PADDING position
+        assert!((layout.notes[0].x - DIAGRAM_PADDING).abs() < 0.01);
+    }
 }
