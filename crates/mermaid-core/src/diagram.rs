@@ -9,6 +9,7 @@ use crate::layout::pie;
 use crate::layout::sequence;
 use crate::layout::text_measure::TextMeasurer;
 use crate::parser::{self, DiagramKind};
+#[cfg(feature = "png")]
 use crate::render::png;
 use crate::render::svg_flowchart;
 use crate::render::svg_gantt;
@@ -22,6 +23,7 @@ use crate::render::theme::Theme;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputFormat {
     Svg,
+    #[cfg(feature = "png")]
     Png,
 }
 
@@ -29,6 +31,7 @@ pub enum OutputFormat {
 #[derive(Debug, Clone)]
 pub enum RenderOutput {
     Svg(String),
+    #[cfg(feature = "png")]
     Png(Vec<u8>),
 }
 
@@ -37,11 +40,13 @@ impl RenderOutput {
     pub fn as_svg(&self) -> Option<&str> {
         match self {
             RenderOutput::Svg(s) => Some(s),
+            #[cfg(feature = "png")]
             RenderOutput::Png(_) => None,
         }
     }
 
     /// Get the PNG bytes if this is PNG output.
+    #[cfg(feature = "png")]
     pub fn as_png(&self) -> Option<&[u8]> {
         match self {
             RenderOutput::Svg(_) => None,
@@ -53,6 +58,7 @@ impl RenderOutput {
     pub fn into_bytes(self) -> Vec<u8> {
         match self {
             RenderOutput::Svg(s) => s.into_bytes(),
+            #[cfg(feature = "png")]
             RenderOutput::Png(b) => b,
         }
     }
@@ -61,6 +67,7 @@ impl RenderOutput {
     pub fn into_svg(self) -> crate::error::Result<String> {
         match self {
             RenderOutput::Svg(s) => Ok(s),
+            #[cfg(feature = "png")]
             RenderOutput::Png(_) => Err(crate::error::MermaidError::Render(
                 "Expected SVG output, but got PNG".to_string(),
             )),
@@ -68,6 +75,7 @@ impl RenderOutput {
     }
 
     /// Convert to PNG bytes, returning an error if this is SVG output.
+    #[cfg(feature = "png")]
     pub fn into_png(self) -> crate::error::Result<Vec<u8>> {
         match self {
             RenderOutput::Svg(_) => Err(crate::error::MermaidError::Render(
@@ -114,6 +122,7 @@ pub fn render(source: &str, config: &RenderConfig) -> Result<RenderOutput> {
 
     match config.output_format {
         OutputFormat::Svg => Ok(RenderOutput::Svg(svg)),
+        #[cfg(feature = "png")]
         OutputFormat::Png => {
             let png = png::render_png(&svg, config)?;
             Ok(RenderOutput::Png(png))
@@ -203,4 +212,127 @@ fn render_mindmap_svg(source: &str, config: &RenderConfig) -> Result<String> {
     let svg = svg_mindmap::render_svg(&layout, &config.theme)?;
 
     Ok(svg)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_config_default() {
+        let config = RenderConfig::default();
+        assert_eq!(config.output_format, OutputFormat::Svg);
+        assert!(config.width.is_none());
+        assert!(config.background.is_none());
+    }
+
+    #[test]
+    fn render_output_as_svg() {
+        let out = RenderOutput::Svg("<svg></svg>".to_string());
+        assert_eq!(out.as_svg(), Some("<svg></svg>"));
+        assert!(out.as_png().is_none());
+    }
+
+    #[cfg(feature = "png")]
+    #[test]
+    fn render_output_as_png() {
+        let out = RenderOutput::Png(vec![0x89, 0x50, 0x4e]);
+        assert!(out.as_svg().is_none());
+        assert_eq!(out.as_png().unwrap(), &[0x89, 0x50, 0x4e]);
+    }
+
+    #[test]
+    fn render_output_into_bytes_svg() {
+        let out = RenderOutput::Svg("<svg></svg>".to_string());
+        let bytes = out.into_bytes();
+        assert_eq!(bytes, b"<svg></svg>");
+    }
+
+    #[cfg(feature = "png")]
+    #[test]
+    fn render_output_into_bytes_png() {
+        let out = RenderOutput::Png(vec![1, 2, 3]);
+        let bytes = out.into_bytes();
+        assert_eq!(bytes, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn render_output_into_svg_ok() {
+        let out = RenderOutput::Svg("svg".to_string());
+        assert!(out.into_svg().is_ok());
+    }
+
+    #[cfg(feature = "png")]
+    #[test]
+    fn render_output_into_svg_err_on_png() {
+        let out = RenderOutput::Png(vec![]);
+        let err = out.into_svg().unwrap_err();
+        assert!(err.to_string().contains("PNG"));
+    }
+
+    #[cfg(feature = "png")]
+    #[test]
+    fn render_output_into_png_ok() {
+        let out = RenderOutput::Png(vec![1, 2, 3]);
+        assert!(out.into_png().is_ok());
+    }
+
+    #[cfg(feature = "png")]
+    #[test]
+    fn render_output_into_png_err_on_svg() {
+        let out = RenderOutput::Svg("x".to_string());
+        let err = out.into_png().unwrap_err();
+        assert!(err.to_string().contains("SVG"));
+    }
+
+    #[test]
+    fn render_flowchart() {
+        let config = RenderConfig::default();
+        let out = render("flowchart LR\n  A --> B", &config).unwrap();
+        let svg = out.as_svg().unwrap();
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("A") || svg.contains("B"));
+    }
+
+    #[test]
+    fn render_sequence() {
+        let config = RenderConfig::default();
+        let out = render("sequenceDiagram\n  A->>B: hi", &config).unwrap();
+        let svg = out.as_svg().unwrap();
+        assert!(svg.contains("<svg"));
+    }
+
+    #[test]
+    fn render_pie() {
+        let config = RenderConfig::default();
+        let out = render(r#"pie
+    "a" : 1
+    "b" : 2"#, &config).unwrap();
+        let svg = out.as_svg().unwrap();
+        assert!(svg.contains("<svg"));
+    }
+
+    #[test]
+    fn render_gantt() {
+        let config = RenderConfig::default();
+        let out = render("gantt\n  title X\n  section S\n  A: 2024-01-01, 1d", &config).unwrap();
+        let svg = out.as_svg().unwrap();
+        assert!(svg.contains("<svg"));
+    }
+
+    #[test]
+    fn render_gitgraph() {
+        let config = RenderConfig::default();
+        let out = render("gitGraph\n  commit", &config).unwrap();
+        let svg = out.as_svg().unwrap();
+        assert!(svg.contains("<svg"));
+    }
+
+    #[test]
+    fn render_mindmap() {
+        let config = RenderConfig::default();
+        let out = render("mindmap\n  root\n    a\n    b", &config).unwrap();
+        let svg = out.as_svg().unwrap();
+        assert!(svg.contains("<svg"));
+    }
 }

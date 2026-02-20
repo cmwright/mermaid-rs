@@ -110,7 +110,7 @@ fn extract_branch_name(pair: pest::iterators::Pair<'_, Rule>) -> String {
     String::new()
 }
 
-fn extract_quoted_value(pair: pest::iterators::Pair<'_, Rule>) -> String {
+pub(crate) fn extract_quoted_value(pair: pest::iterators::Pair<'_, Rule>) -> String {
     let fallback = pair.as_str().to_string();
     for inner in pair.into_inner() {
         if inner.as_rule() == Rule::quoted_value {
@@ -328,5 +328,63 @@ mod tests {
         assert_eq!(strip_quotes("noquotes".to_string()), "noquotes");
         assert_eq!(strip_quotes("\"\"".to_string()), "");
         assert_eq!(strip_quotes("x".to_string()), "x");
+    }
+
+    #[test]
+    fn test_extract_quoted_value_fallback() {
+        // When pair has no inner quoted_value rule, returns pair.as_str()
+        let source = "gitGraph\n    branch mybranch";
+        let ast = parse_gitgraph(source).unwrap();
+        if let GitCommand::Branch(b) = &ast.commands[0] {
+            assert_eq!(b.name, "mybranch");
+        }
+        // Parse again and get the branch_name pair to test extract_quoted_value fallback
+        let pairs = GitGraphPestParser::parse(Rule::gitgraph, source).unwrap();
+        for pair in pairs {
+            if pair.as_rule() == Rule::gitgraph {
+                for inner in pair.into_inner() {
+                    if inner.as_rule() == Rule::branch_stmt {
+                        for sub in inner.into_inner() {
+                            if sub.as_rule() == Rule::branch_name {
+                                // branch_name has no quoted_value - fallback path
+                                let result = extract_quoted_value(sub);
+                                assert_eq!(result, "mybranch");
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        panic!("Could not find branch_name pair");
+    }
+
+    #[test]
+    fn test_parse_gitgraph_error_invalid_input() {
+        let source = "not a valid gitgraph";
+        let result = parse_gitgraph(source);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_commit_with_id_tag_and_message() {
+        let source = r#"gitGraph
+    commit id:"c1" tag:"v1" "Full commit message""#;
+        let ast = parse_gitgraph(source).unwrap();
+        assert_eq!(ast.commands.len(), 1);
+        if let GitCommand::Commit(c) = &ast.commands[0] {
+            assert_eq!(c.id.as_deref(), Some("c1"));
+            assert_eq!(c.tag.as_deref(), Some("v1"));
+            assert_eq!(c.message.as_deref(), Some("Full commit message"));
+        } else {
+            panic!("Expected Commit");
+        }
+    }
+
+    #[test]
+    fn test_parse_gitgraph_header_only() {
+        let source = "gitGraph:";
+        let ast = parse_gitgraph(source).unwrap();
+        assert_eq!(ast.commands.len(), 0);
     }
 }

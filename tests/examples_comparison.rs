@@ -515,15 +515,6 @@ try {{
   console.warn('WASM load failed:', e);
 }}
 
-// Debounce helper
-function debounce(fn, ms) {{
-  let timer;
-  return (...args) => {{
-    clearTimeout(timer);
-    timer = setTimeout(() => fn(...args), ms);
-  }};
-}}
-
 // Live re-render on textarea edit
 let mermaidJsCounter = EXAMPLE_COUNT;
 
@@ -531,7 +522,7 @@ document.querySelectorAll('textarea.source-input').forEach(textarea => {{
   const id = textarea.dataset.exampleId;
   const idx = id.replace('ex-', '');
 
-  textarea.addEventListener('input', debounce(async () => {{
+  textarea.addEventListener('input', async () => {{
     const source = textarea.value;
 
     // Re-render mermaid-rs via WASM
@@ -569,7 +560,7 @@ document.querySelectorAll('textarea.source-input').forEach(textarea => {{
         jsError.style.display = 'block';
       }}
     }}
-  }}, 300));
+  }});
 }});
 </script>
 </body>

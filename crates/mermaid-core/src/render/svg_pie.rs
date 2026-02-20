@@ -280,4 +280,75 @@ mod tests {
         // PIE_COLORS has 12 entries; index 100 should exceed the array and return the fallback
         assert_eq!(get_slice_color(100), "#cccccc");
     }
+
+    #[test]
+    fn test_large_arc_flag_for_dominant_slice() {
+        let layout = PieLayout {
+            width: 600.0,
+            height: 500.0,
+            title: None,
+            title_y: 20.0,
+            pie_center_x: 200.0,
+            pie_center_y: 250.0,
+            pie_radius: 150.0,
+            slices: vec![
+                PositionedSlice {
+                    label: "Big".to_string(),
+                    value: 80.0,
+                    percentage: 80.0,
+                    start_angle: -std::f64::consts::PI / 2.0,
+                    end_angle: -std::f64::consts::PI / 2.0 + 2.0 * std::f64::consts::PI * 0.8,
+                    label_x: 200.0,
+                    label_y: 200.0,
+                    color_index: 0,
+                },
+                PositionedSlice {
+                    label: "Small".to_string(),
+                    value: 20.0,
+                    percentage: 20.0,
+                    start_angle: -std::f64::consts::PI / 2.0 + 2.0 * std::f64::consts::PI * 0.8,
+                    end_angle: 3.0 * std::f64::consts::PI / 2.0,
+                    label_x: 200.0,
+                    label_y: 350.0,
+                    color_index: 1,
+                },
+            ],
+            legend: vec![],
+            legend_x: 400.0,
+            legend_y: 225.0,
+        };
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+        // The large slice (80%) spans > 180°, so the large_arc flag should be 1
+        assert!(svg.contains(" 1 1 "), "expected large_arc=1 for >180° slice");
+    }
+
+    #[test]
+    fn test_tiny_slice_label_hidden() {
+        let layout = PieLayout {
+            width: 600.0,
+            height: 500.0,
+            title: None,
+            title_y: 20.0,
+            pie_center_x: 200.0,
+            pie_center_y: 250.0,
+            pie_radius: 150.0,
+            slices: vec![PositionedSlice {
+                label: "Tiny".to_string(),
+                value: 2.0,
+                percentage: 2.0,
+                start_angle: 0.0,
+                end_angle: 0.04 * std::f64::consts::PI,
+                label_x: 200.0,
+                label_y: 250.0,
+                color_index: 0,
+            }],
+            legend: vec![],
+            legend_x: 400.0,
+            legend_y: 225.0,
+        };
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+        assert!(!svg.contains("2%"), "tiny slice (<3%) should not show percentage label");
+    }
 }

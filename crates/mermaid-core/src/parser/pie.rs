@@ -191,4 +191,23 @@ mod tests {
         assert_eq!(ast.slices[0].label, "Slice with spaces & stuff!");
         assert_eq!(ast.slices[1].label, "Another (slice)");
     }
+
+    #[test]
+    fn test_parse_pie_error_invalid_input() {
+        // Syntactically invalid input triggers parse error (covers Span variant of LineColLocation)
+        let source = "pie\n    \"A\" : not_a_number";
+        let result = parse_pie(source);
+        assert!(result.is_err());
+        if let Err(crate::error::MermaidError::Parse { message, .. }) = result {
+            assert!(message.contains("number") || message.contains("Parse"));
+        }
+    }
+
+    #[test]
+    fn test_parse_pie_error_malformed() {
+        // Completely invalid input - no valid pie structure
+        let source = "not pie chart at all";
+        let result = parse_pie(source);
+        assert!(result.is_err());
+    }
 }

@@ -91,6 +91,21 @@ mod tests {
     }
 
     #[test]
+    fn test_min_from_subgraphs_only() {
+        // min_x/min_y from subgraphs when nodes is empty (line 17-20)
+        let mut nodes = vec![];
+        let mut edges = vec![];
+        let mut subgraphs = vec![
+            make_sg("SG1", 10.0, 20.0),
+            make_sg("SG2", -5.0, -10.0),
+        ];
+        let (w, h) = normalize_and_compute_bounds(&mut nodes, &mut edges, &mut subgraphs);
+        assert!(subgraphs[1].x >= 0.0);
+        assert!(subgraphs[1].y >= 0.0);
+        assert!(w > 0.0 && h > 0.0);
+    }
+
+    #[test]
     fn test_empty_graph() {
         let (w, h) = normalize_and_compute_bounds(&mut [], &mut [], &mut []);
         assert!((w - 8.0).abs() < 0.1);
@@ -204,5 +219,102 @@ mod tests {
         // Should not panic on None label coordinates
         assert!(edges[0].label_x.is_none());
         assert!(edges[0].label_y.is_none());
+    }
+
+    #[test]
+    fn test_edge_label_x_only_shifted() {
+        // Edge with label_x=Some, label_y=None exercises if let Some(ref mut lx) only
+        let mut nodes = vec![
+            make_node("A", -50.0, -30.0),
+            make_node("B", 50.0, 70.0),
+        ];
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("x".into()),
+            label_x: Some(-10.0),
+            label_y: None,
+            label_width: Some(20.0),
+            label_height: None,
+            points: vec![(-30.0, -20.0), (30.0, 60.0)],
+        }];
+        let mut subgraphs = vec![];
+
+        normalize_and_compute_bounds(&mut nodes, &mut edges, &mut subgraphs);
+
+        // shift_x = 70, shift_y = 50
+        assert!(edges[0].label_x.unwrap() >= 0.0, "label_x should be shifted");
+        assert!(edges[0].label_y.is_none());
+    }
+
+    #[test]
+    fn test_edge_label_both_shifted() {
+        // Edge with both label_x and label_y -> both branches (lines 35-39)
+        let mut nodes = vec![
+            make_node("A", -50.0, -30.0),
+            make_node("B", 50.0, 70.0),
+        ];
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("both".into()),
+            label_x: Some(-10.0),
+            label_y: Some(-15.0),
+            label_width: Some(20.0),
+            label_height: Some(15.0),
+            points: vec![(-30.0, -20.0), (30.0, 60.0)],
+        }];
+        let mut subgraphs = vec![];
+
+        normalize_and_compute_bounds(&mut nodes, &mut edges, &mut subgraphs);
+
+        assert!(edges[0].label_x.unwrap() >= 0.0);
+        assert!(edges[0].label_y.unwrap() >= 0.0);
+    }
+
+    #[test]
+    fn test_edge_label_y_only_shifted() {
+        // Edge with label_x=None, label_y=Some exercises if let Some(ref mut ly) only
+        let mut nodes = vec![
+            make_node("A", -50.0, -30.0),
+            make_node("B", 50.0, 70.0),
+        ];
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("y".into()),
+            label_x: None,
+            label_y: Some(-15.0),
+            label_width: None,
+            label_height: Some(15.0),
+            points: vec![(-30.0, -20.0), (30.0, 60.0)],
+        }];
+        let mut subgraphs = vec![];
+
+        normalize_and_compute_bounds(&mut nodes, &mut edges, &mut subgraphs);
+
+        assert!(edges[0].label_x.is_none());
+        assert!(edges[0].label_y.unwrap() >= 0.0, "label_y should be shifted");
+    }
+
+    #[test]
+    fn test_subgraphs_negative_coords_shift() {
+        // Only subgraphs with negative coords; min comes from subgraphs
+        let mut nodes = vec![];
+        let mut edges = vec![];
+        let mut subgraphs = vec![
+            make_sg("SG1", -100.0, -50.0),
+            make_sg("SG2", 10.0, 10.0),
+        ];
+
+        normalize_and_compute_bounds(&mut nodes, &mut edges, &mut subgraphs);
+
+        assert!(subgraphs[0].x >= -0.1, "subgraph with negative x should be shifted");
+        assert!(subgraphs[0].y >= -0.1, "subgraph with negative y should be shifted");
+        assert!((subgraphs[1].x - 110.0).abs() < 0.1, "second subgraph shifted by 100");
+        assert!((subgraphs[1].y - 60.0).abs() < 0.1, "second subgraph shifted by 50");
     }
 }

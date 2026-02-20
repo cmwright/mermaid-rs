@@ -557,4 +557,130 @@ mod tests {
         assert!(ranks[&b] >= 1, "B should be at least rank 1");
         assert!(ranks[&c] >= 2, "C should be at least rank 2");
     }
+
+    #[test]
+    fn test_collect_groups_recursive_empty_subgraphs() {
+        // FlowchartAst with empty subgraphs list - collect_groups_recursive early return
+        let ast = FlowchartAst {
+            subgraphs: vec![],
+            ..Default::default()
+        };
+        let groups = collect_sibling_groups_by_depth(&ast);
+        assert!(groups.is_empty());
+    }
+
+    #[test]
+    fn test_compute_dependency_tiers_empty() {
+        // n == 0 -> return Vec::new() (line 206-208)
+        let g: DiGraph<NodeData, EdgeData> = DiGraph::new();
+        let sg_nodes: Vec<std::collections::HashSet<NodeIndex>> = vec![];
+        let tiers = compute_dependency_tiers(&sg_nodes, &g);
+        assert!(tiers.is_empty());
+    }
+
+    #[test]
+    fn test_compute_dependency_tiers_cycle() {
+        // Sibling subgraphs with cycle: A->B, B->C, C->A
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node_data("A"));
+        let b = g.add_node(make_node_data("B"));
+        let c = g.add_node(make_node_data("C"));
+        g.add_edge(a, b, make_edge_data());
+        g.add_edge(b, c, make_edge_data());
+        g.add_edge(c, a, make_edge_data());
+
+        let sg_nodes = vec![
+            std::collections::HashSet::from([a]),
+            std::collections::HashSet::from([b]),
+            std::collections::HashSet::from([c]),
+        ];
+        let tiers = compute_dependency_tiers(&sg_nodes, &g);
+        // With cycle, processed.len() < n, remaining nodes go to last tier
+        assert!(!tiers.is_empty());
+        assert_eq!(tiers.iter().map(|t| t.len()).sum::<usize>(), 3);
+    }
+
+    #[test]
+    fn test_propagate_ranks_forward_rank_promotion() {
+        // B has rank 0 but predecessor A has rank 0 -> B must be promoted to 1
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node_data("A"));
+        let b = g.add_node(make_node_data("B"));
+        g.add_edge(a, b, make_edge_data());
+
+        let mut ranks = HashMap::new();
+        ranks.insert(a, 0);
+        ranks.insert(b, 0); // Wrong: should be at least 1
+
+        propagate_ranks_forward(&g, &mut ranks);
+        assert_eq!(ranks[&b], 1);
+    }
+
+    #[test]
+    fn test_topological_sort_cycle() {
+        // Graph with cycle: A -> B -> C -> A
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node_data("A"));
+        let b = g.add_node(make_node_data("B"));
+        let c = g.add_node(make_node_data("C"));
+        g.add_edge(a, b, make_edge_data());
+        g.add_edge(b, c, make_edge_data());
+        g.add_edge(c, a, make_edge_data());
+
+        let result = topological_sort(&g);
+        // Cycle: result.len() < node_count, remaining nodes appended
+        assert_eq!(result.len(), 3);
+    }
+
+    #[test]
+    fn test_align_one_sibling_group_delta_positive() {
+        // Two sibling subgraphs where one has lower max rank - delta > 0
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node_data("A"));
+        let b = g.add_node(make_node_data("B"));
+        let c = g.add_node(make_node_data("C"));
+        g.add_edge(a, b, make_edge_data());
+
+        let mut ranks = HashMap::new();
+        ranks.insert(a, 0);
+        ranks.insert(b, 1);
+        ranks.insert(c, 0);
+
+        let ast = FlowchartAst {
+            subgraphs: vec![
+                SubgraphDef {
+                    id: "Left".to_string(),
+                    label: None,
+                    direction: None,
+                    nodes: vec![
+                        NodeDef { id: "A".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
+                        NodeDef { id: "B".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
+                    ],
+                    edges: vec![EdgeDef { from: "A".into(), to: "B".into(), edge_type: EdgeType::SolidArrow, label: None }],
+                    subgraphs: vec![],
+                },
+                SubgraphDef {
+                    id: "Right".to_string(),
+                    label: None,
+                    direction: None,
+                    nodes: vec![
+                        NodeDef { id: "C".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
+                    ],
+                    edges: vec![],
+                    subgraphs: vec![],
+                },
+            ],
+            ..Default::default()
+        };
+
+        let mut id_to_idx = HashMap::new();
+        id_to_idx.insert("A".to_string(), a);
+        id_to_idx.insert("B".to_string(), b);
+        id_to_idx.insert("C".to_string(), c);
+
+        let siblings = &ast.subgraphs;
+        let changed = align_one_sibling_group(siblings, &g, &mut ranks, &id_to_idx);
+        assert!(changed);
+        assert_eq!(ranks[&c], 1, "C should be promoted to match Left's max rank");
+    }
 }

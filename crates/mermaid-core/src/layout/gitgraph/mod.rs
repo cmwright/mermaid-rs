@@ -658,6 +658,135 @@ mod tests {
     }
 
     #[test]
+    fn test_layout_gitgraph_non_main_dotted_continuation() {
+        // Feature branch has commits, then main has more. Feature's last commit < last_x.
+        let ast = GitGraphAst {
+            commands: vec![
+                GitCommand::Commit(CommitDef {
+                    id: Some("c1".to_string()),
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+                GitCommand::Branch(BranchDef {
+                    name: "feature".to_string(),
+                }),
+                GitCommand::Commit(CommitDef {
+                    id: Some("c2".to_string()),
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+                GitCommand::Checkout(CheckoutDef {
+                    name: "main".to_string(),
+                }),
+                GitCommand::Commit(CommitDef {
+                    id: Some("c3".to_string()),
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+            ],
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gitgraph(&ast, &measurer, &theme).unwrap();
+
+        // Feature (color_index 1) has only c2; main has c1 and c3. last_x = c3.
+        // Feature's last_cx = c2 < last_x, so feature gets dotted continuation.
+        let feature_dotted = layout
+            .branch_lines
+            .iter()
+            .any(|l| l.color_index == 1 && l.is_dotted);
+        assert!(
+            feature_dotted,
+            "Feature branch should have dotted continuation when main has later commits"
+        );
+    }
+
+    #[test]
+    fn test_layout_gitgraph_main_dotted_continuation() {
+        // Main has 1 commit, then switch to feature for 2 more commits.
+        // Main's last commit is at x < last_x, so it should get a dotted continuation.
+        let ast = GitGraphAst {
+            commands: vec![
+                GitCommand::Commit(CommitDef {
+                    id: Some("c1".to_string()),
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+                GitCommand::Branch(BranchDef {
+                    name: "feature".to_string(),
+                }),
+                GitCommand::Commit(CommitDef {
+                    id: Some("c2".to_string()),
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+                GitCommand::Commit(CommitDef {
+                    id: Some("c3".to_string()),
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+            ],
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gitgraph(&ast, &measurer, &theme).unwrap();
+
+        // Main has only c1, feature has c2 and c3.
+        // Main's branch line should include a dotted continuation.
+        let main_dotted = layout
+            .branch_lines
+            .iter()
+            .any(|l| l.color_index == 0 && l.is_dotted);
+        assert!(
+            main_dotted,
+            "Main branch should have a dotted continuation line when other branches have later commits"
+        );
+    }
+
+    #[test]
+    fn test_layout_gitgraph_checkout_same_branch_noop() {
+        let ast = GitGraphAst {
+            commands: vec![
+                GitCommand::Commit(CommitDef {
+                    id: Some("c1".to_string()),
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+                GitCommand::Branch(BranchDef {
+                    name: "feature".to_string(),
+                }),
+                // checkout feature right after branch feature is a no-op
+                GitCommand::Checkout(CheckoutDef {
+                    name: "feature".to_string(),
+                }),
+                GitCommand::Commit(CommitDef {
+                    id: Some("c2".to_string()),
+                    message: None,
+                    tag: None,
+                    commit_type: CommitType::Normal,
+                }),
+            ],
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gitgraph(&ast, &measurer, &theme).unwrap();
+
+        // c2 should be on feature branch and should have a branch_source connection
+        assert_eq!(layout.commits.len(), 2);
+        assert!(!layout.connections.is_empty(), "should have a branch-from connection");
+    }
+
+    #[test]
     fn test_layout_gitgraph_empty() {
         let ast = GitGraphAst {
             commands: Vec::new(),

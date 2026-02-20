@@ -77,7 +77,7 @@ fn process_top_level(ast: &mut FlowchartAst, pair: pest::iterators::Pair<'_, Rul
     Ok(())
 }
 
-fn parse_direction(s: &str) -> Result<Direction> {
+pub(crate) fn parse_direction(s: &str) -> Result<Direction> {
     match s.trim() {
         "TB" | "TD" => Ok(Direction::TopToBottom),
         "BT" => Ok(Direction::BottomToTop),
@@ -811,6 +811,77 @@ mod tests {
         assert_eq!(nodes[0].label.as_deref(), Some("Updated"));
         assert_eq!(nodes[0].shape, NodeShape::Circle);
         assert_eq!(nodes[0].class_shorthand.as_deref(), Some("cls"));
+    }
+
+    #[test]
+    fn test_parse_direction_invalid() {
+        let result = parse_direction("INVALID");
+        assert!(result.is_err());
+        if let Err(crate::error::MermaidError::Parse { message, .. }) = result {
+            assert!(message.contains("Unknown direction"));
+        }
+    }
+
+    #[test]
+    fn test_parse_direction_empty_and_whitespace() {
+        let result = parse_direction("  ");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_directive_ignored() {
+        let source = r#"flowchart TD
+    %%{init: {'theme':'base'}}%%
+    A --> B"#;
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.nodes.len(), 2);
+        assert_eq!(ast.edges.len(), 1);
+    }
+
+    #[test]
+    fn test_upsert_node_update_with_no_label_no_class() {
+        // Update existing node with a bare node (no label, no class_shorthand) - no changes
+        let mut nodes = vec![NodeDef {
+            id: "A".to_string(),
+            label: Some("Original".to_string()),
+            shape: NodeShape::Rectangle,
+            class_shorthand: Some("cls".to_string()),
+        }];
+        let bare_node = NodeDef {
+            id: "A".to_string(),
+            label: None,
+            shape: NodeShape::Rectangle,
+            class_shorthand: None,
+        };
+        upsert_node(&mut nodes, bare_node);
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].label.as_deref(), Some("Original"));
+        assert_eq!(nodes[0].class_shorthand.as_deref(), Some("cls"));
+    }
+
+    #[test]
+    fn test_edge_referencing_undeclared_nodes() {
+        // A and B only appear in edges, not in node_stmt - they're implicitly declared
+        let source = "flowchart TD\n    X --> Y\n    Y --> Z";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.nodes.len(), 3);
+        assert_eq!(ast.edges.len(), 2);
+        assert!(ast.nodes.iter().any(|n| n.id == "X"));
+        assert!(ast.nodes.iter().any(|n| n.id == "Y"));
+        assert!(ast.nodes.iter().any(|n| n.id == "Z"));
+    }
+
+    #[test]
+    fn test_class_assign_with_class_keyword() {
+        let source = r#"flowchart TD
+    A[Node A]
+    B[Node B]
+    classDef highlight fill:#ff0
+    class A,B highlight"#;
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.class_assignments.len(), 1);
+        assert_eq!(ast.class_assignments[0].node_ids, vec!["A", "B"]);
+        assert_eq!(ast.class_assignments[0].class_name, "highlight");
     }
 }
 

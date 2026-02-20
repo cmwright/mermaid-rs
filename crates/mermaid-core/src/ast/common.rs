@@ -253,4 +253,23 @@ mod tests {
         assert_eq!(props.font_size, Some(12.0));
         assert_eq!(props.extra, vec![("opacity".into(), "0.8".into())]);
     }
+
+    #[test]
+    fn parse_invalid_stroke_width_returns_none() {
+        let props = parse_style_string("stroke-width:abc");
+        assert_eq!(props.stroke_width, None);
+    }
+
+    #[test]
+    fn parse_invalid_font_size_returns_none() {
+        let props = parse_style_string("font-size:notanumber");
+        assert_eq!(props.font_size, None);
+    }
+
+    #[test]
+    fn parse_no_colon_ignores_token() {
+        let props = parse_style_string("fill:#f9f, garbage, stroke:#333");
+        assert_eq!(props.fill, Some(Color::Hex("#f9f".into())));
+        assert_eq!(props.stroke, Some(Color::Hex("#333".into())));
+    }
 }

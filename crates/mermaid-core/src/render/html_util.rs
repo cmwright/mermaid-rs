@@ -112,6 +112,13 @@ mod tests {
     }
 
     #[test]
+    fn test_normalize_br_uppercase() {
+        assert_eq!(normalize_br("a<BR/>b"), "a\nb");
+        assert_eq!(normalize_br("a<BR />b"), "a\nb");
+        assert_eq!(normalize_br("a<BR>b"), "a\nb");
+    }
+
+    #[test]
     fn test_parse_segments() {
         let segs = parse_segments("<b>Bold</b> normal");
         assert_eq!(segs.len(), 2);
@@ -182,5 +189,30 @@ mod tests {
         assert!(segs[0].bold);
         assert_eq!(segs[1].text, " normal");
         assert!(!segs[1].bold);
+    }
+
+    #[test]
+    fn test_parse_segments_text_before_bold_tag() {
+        // When text precedes <b>, we must push the current segment before setting bold=true.
+        // This exercises the if !current.is_empty() block in the "<b>" | "<strong>" branch.
+        let segs = parse_segments("plain<b>Bold</b>");
+        assert_eq!(segs.len(), 2);
+        assert_eq!(segs[0].text, "plain");
+        assert!(!segs[0].bold);
+        assert_eq!(segs[1].text, "Bold");
+        assert!(segs[1].bold);
+    }
+
+    #[test]
+    fn test_parse_segments_text_before_strong_tag() {
+        // Same for <strong> - text before tag exercises the push+clear path
+        let segs = parse_segments("prefix<strong>bold</strong> suffix");
+        assert_eq!(segs.len(), 3);
+        assert_eq!(segs[0].text, "prefix");
+        assert!(!segs[0].bold);
+        assert_eq!(segs[1].text, "bold");
+        assert!(segs[1].bold);
+        assert_eq!(segs[2].text, " suffix");
+        assert!(!segs[2].bold);
     }
 }

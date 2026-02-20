@@ -5,7 +5,7 @@ use crate::ast::flowchart::{FlowchartAst, SubgraphDef};
 use crate::layout::flowchart::graph_builder::SubgraphMembership;
 use crate::layout::flowchart::types::*;
 
-use super::dummy_nodes::DummyChain;
+        use crate::layout::flowchart::sugiyama::dummy_nodes::DummyChain;
 
 // ---------------------------------------------------------------------------
 // Crossing-count infrastructure (Fenwick / BIT)
@@ -773,6 +773,19 @@ mod tests {
     }
 
     #[test]
+    fn test_count_bilayer_crossings_empty_south() {
+        // south_size == 0 -> early return 0 (line 74-76)
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        g.add_edge(a, b, make_edge());
+
+        let north = vec![a, b];
+        let south: Vec<NodeIndex> = vec![];
+        assert_eq!(count_bilayer_crossings(&g, &north, &south), 0);
+    }
+
+    #[test]
     fn test_count_bilayer_crossings_none() {
         // A -> C, B -> D  (no crossing)
         let mut g = DiGraph::new();
@@ -1067,5 +1080,133 @@ mod tests {
             layers, original,
             "non-contiguous subgraph members should cause skip — layers unchanged"
         );
+    }
+
+    #[test]
+    fn test_minimize_crossings_early_exit_zero() {
+        // When best_cc == 0, minimize_crossings exits early
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        let c = g.add_node(make_node("C"));
+        let d = g.add_node(make_node("D"));
+        g.add_edge(a, c, make_edge());
+        g.add_edge(b, d, make_edge());
+
+        let membership = SubgraphMembership::new();
+        let mut layers = vec![vec![a, b], vec![c, d]];
+        assert_eq!(count_total_crossings(&g, &layers), 0);
+        minimize_crossings(&g, &mut layers, &membership, 24);
+        assert_eq!(count_total_crossings(&g, &layers), 0);
+    }
+
+    #[test]
+    fn test_sort_layer_by_barycenter_equal_barycenters_tie_break() {
+        // Nodes with equal barycenters -> tie-break by original position (lines 271-278)
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        let c = g.add_node(make_node("C"));
+        let d = g.add_node(make_node("D"));
+        g.add_edge(a, c, make_edge());
+        g.add_edge(a, d, make_edge());
+        g.add_edge(b, c, make_edge());
+        g.add_edge(b, d, make_edge());
+
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A".to_string(), vec![]);
+        membership.insert("B".to_string(), vec![]);
+        membership.insert("C".to_string(), vec![]);
+        membership.insert("D".to_string(), vec![]);
+
+        let mut layers = vec![vec![a, b], vec![c, d]];
+        let empty_path: Vec<String> = vec![];
+        let adj_positions = build_position_map(&layers[0]);
+        sort_layer_by_barycenter(
+            &g,
+            &mut layers[1],
+            &adj_positions,
+            petgraph::Direction::Incoming,
+            &membership,
+            &empty_path,
+            true,
+        );
+        assert_eq!(layers[1].len(), 2);
+    }
+
+    #[test]
+    fn test_sort_layer_by_barycenter_bias_right() {
+        // bias_right tie-breaking: when barycenters equal, higher original position wins
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        let c = g.add_node(make_node("C"));
+        let d = g.add_node(make_node("D"));
+        g.add_edge(a, c, make_edge());
+        g.add_edge(a, d, make_edge());
+        g.add_edge(b, c, make_edge());
+        g.add_edge(b, d, make_edge());
+
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A".to_string(), vec![]);
+        membership.insert("B".to_string(), vec![]);
+        membership.insert("C".to_string(), vec![]);
+        membership.insert("D".to_string(), vec![]);
+
+        let mut layers = vec![vec![a, b], vec![c, d]];
+        let _empty_path: Vec<String> = vec![];
+        // Run with enough iterations to hit bias_right (iteration % 4 >= 2)
+        minimize_crossings(&g, &mut layers, &membership, 6);
+        assert_eq!(layers[0].len(), 2);
+        assert_eq!(layers[1].len(), 2);
+    }
+
+    #[test]
+    fn test_build_node_membership_dummy_nodes() {
+        // build_node_membership assigns dummy nodes the LCP of source/target paths
+        use super::super::dummy_nodes::DummyChain;
+
+        let mut g = DiGraph::new();
+        let src = g.add_node(NodeData {
+            id: "A".to_string(),
+            label: String::new(),
+            shape: Default::default(),
+            style: Default::default(),
+            width: 40.0,
+            height: 20.0,
+        });
+        let tgt = g.add_node(NodeData {
+            id: "B".to_string(),
+            label: String::new(),
+            shape: Default::default(),
+            style: Default::default(),
+            width: 40.0,
+            height: 20.0,
+        });
+        let dummy = g.add_node(NodeData {
+            id: "__dummy_0_1".to_string(),
+            label: String::new(),
+            shape: Default::default(),
+            style: Default::default(),
+            width: 0.0,
+            height: 0.0,
+        });
+        g.add_edge(src, dummy, make_edge());
+        g.add_edge(dummy, tgt, make_edge());
+
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A".to_string(), vec!["SG".to_string()]);
+        membership.insert("B".to_string(), vec!["SG".to_string()]);
+
+        let chains = vec![DummyChain {
+            original_source: src,
+            original_target: tgt,
+            edge_data: make_edge(),
+            dummy_nodes: vec![dummy],
+            label_node: None,
+        }];
+
+        let effective = build_node_membership(&g, &membership, &chains);
+        assert_eq!(effective.get(&dummy).unwrap(), &vec!["SG".to_string()]);
     }
 }

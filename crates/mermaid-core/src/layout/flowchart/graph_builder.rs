@@ -302,3 +302,297 @@ fn compute_node_size(shape: &NodeShape, text: &TextMetrics) -> (f64, f64) {
         _ => (base_w, base_h),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::common::{parse_style_string, StyleProperties};
+    use crate::font::FontProvider;
+
+    fn make_measurer(provider: &FontProvider) -> TextMeasurer<'_> {
+        let font = provider.font_ref().unwrap();
+        TextMeasurer::new(font, 14.0)
+    }
+
+    #[test]
+    fn test_collect_subgraph_nodes_nested() {
+        let ast = FlowchartAst {
+            subgraphs: vec![
+                SubgraphDef {
+                    id: "Outer".to_string(),
+                    label: None,
+                    direction: None,
+                    nodes: vec![NodeDef {
+                        id: "A".into(),
+                        label: None,
+                        shape: NodeShape::Rectangle,
+                        class_shorthand: None,
+                    }],
+                    edges: vec![],
+                    subgraphs: vec![SubgraphDef {
+                        id: "Inner".to_string(),
+                        label: None,
+                        direction: None,
+                        nodes: vec![NodeDef {
+                            id: "B".into(),
+                            label: None,
+                            shape: NodeShape::Rectangle,
+                            class_shorthand: None,
+                        }],
+                        edges: vec![],
+                        subgraphs: vec![],
+                    }],
+                },
+            ],
+            ..Default::default()
+        };
+        let class_defs = build_class_map(&ast.class_defs);
+        let all_nodes = collect_all_nodes(&ast, &class_defs);
+        assert!(all_nodes.contains_key("A"));
+        assert!(all_nodes.contains_key("B"));
+    }
+
+    #[test]
+    fn test_resolve_node_style_class_defs_and_overrides() {
+        let ast = FlowchartAst {
+            nodes: vec![NodeDef {
+                id: "A".into(),
+                label: None,
+                shape: NodeShape::Rectangle,
+                class_shorthand: Some("green".into()),
+            }],
+            class_defs: vec![
+                ClassDef {
+                    name: "green".to_string(),
+                    properties: parse_style_string("fill:#9f6"),
+                },
+                ClassDef {
+                    name: "orange".to_string(),
+                    properties: parse_style_string("fill:#f96"),
+                },
+            ],
+            class_assignments: vec![ClassAssignment {
+                node_ids: vec!["B".into()],
+                class_name: "orange".to_string(),
+            }],
+            style_overrides: vec![StyleOverride {
+                node_id: "A".into(),
+                properties: parse_style_string("stroke:#333"),
+            }],
+            edges: vec![],
+            subgraphs: vec![SubgraphDef {
+                id: "SG".to_string(),
+                label: None,
+                direction: None,
+                nodes: vec![NodeDef {
+                    id: "B".into(),
+                    label: None,
+                    shape: NodeShape::Rectangle,
+                    class_shorthand: None,
+                }],
+                edges: vec![],
+                subgraphs: vec![],
+            }],
+            ..Default::default()
+        };
+        let class_defs = build_class_map(&ast.class_defs);
+        let all_nodes = collect_all_nodes(&ast, &class_defs);
+        let (_, style_a) = all_nodes.get("A").unwrap();
+        assert!(style_a.fill.is_some() || style_a.stroke.is_some());
+    }
+
+    #[test]
+    fn test_collect_subgraph_edges_recursive() {
+        let ast = FlowchartAst {
+            subgraphs: vec![
+                SubgraphDef {
+                    id: "Outer".to_string(),
+                    label: None,
+                    direction: None,
+                    nodes: vec![],
+                    edges: vec![EdgeDef {
+                        from: "A".into(),
+                        to: "B".into(),
+                        edge_type: crate::ast::flowchart::EdgeType::SolidArrow,
+                        label: None,
+                    }],
+                    subgraphs: vec![SubgraphDef {
+                        id: "Inner".to_string(),
+                        label: None,
+                        direction: None,
+                        nodes: vec![],
+                        edges: vec![EdgeDef {
+                            from: "C".into(),
+                            to: "D".into(),
+                            edge_type: crate::ast::flowchart::EdgeType::SolidArrow,
+                            label: None,
+                        }],
+                        subgraphs: vec![],
+                    }],
+                },
+            ],
+            ..Default::default()
+        };
+        let all_edges = collect_all_edges(&ast);
+        assert!(all_edges.iter().any(|e| e.from == "A" && e.to == "B"));
+        assert!(all_edges.iter().any(|e| e.from == "C" && e.to == "D"));
+    }
+
+    #[test]
+    fn test_collect_membership_nested() {
+        let ast = FlowchartAst {
+            subgraphs: vec![
+                SubgraphDef {
+                    id: "Outer".to_string(),
+                    label: None,
+                    direction: None,
+                    nodes: vec![NodeDef {
+                        id: "A".into(),
+                        label: None,
+                        shape: NodeShape::Rectangle,
+                        class_shorthand: None,
+                    }],
+                    edges: vec![],
+                    subgraphs: vec![SubgraphDef {
+                        id: "Inner".to_string(),
+                        label: None,
+                        direction: None,
+                        nodes: vec![NodeDef {
+                            id: "B".into(),
+                            label: None,
+                            shape: NodeShape::Rectangle,
+                            class_shorthand: None,
+                        }],
+                        edges: vec![],
+                        subgraphs: vec![],
+                    }],
+                },
+            ],
+            ..Default::default()
+        };
+        let membership = build_subgraph_membership(&ast);
+        assert_eq!(membership.get("A").unwrap(), &vec!["Outer".to_string()]);
+        assert_eq!(
+            membership.get("B").unwrap(),
+            &vec!["Outer".to_string(), "Inner".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_collect_all_nodes_edge_referenced() {
+        // Edge references nodes not in ast.nodes -> or_insert_with (lines 53-60)
+        let ast = FlowchartAst {
+            nodes: vec![],
+            edges: vec![
+                EdgeDef {
+                    from: "A".into(),
+                    to: "B".into(),
+                    edge_type: crate::ast::flowchart::EdgeType::SolidArrow,
+                    label: None,
+                },
+            ],
+            ..Default::default()
+        };
+        let class_defs = build_class_map(&ast.class_defs);
+        let all_nodes = collect_all_nodes(&ast, &class_defs);
+        assert!(all_nodes.contains_key("A"));
+        assert!(all_nodes.contains_key("B"));
+        let (node_a, _) = all_nodes.get("A").unwrap();
+        assert_eq!(node_a.shape, NodeShape::Rectangle);
+    }
+
+    #[test]
+    fn test_collect_subgraph_nodes_edge_referenced() {
+        // Subgraph edge references nodes not in sg.nodes -> or_insert_with (lines 82-89)
+        let ast = FlowchartAst {
+            nodes: vec![],
+            edges: vec![],
+            subgraphs: vec![SubgraphDef {
+                id: "SG".to_string(),
+                label: None,
+                direction: None,
+                nodes: vec![],
+                edges: vec![
+                    EdgeDef {
+                        from: "X".into(),
+                        to: "Y".into(),
+                        edge_type: crate::ast::flowchart::EdgeType::SolidArrow,
+                        label: None,
+                    },
+                ],
+                subgraphs: vec![],
+            }],
+            ..Default::default()
+        };
+        let class_defs = build_class_map(&ast.class_defs);
+        let all_nodes = collect_all_nodes(&ast, &class_defs);
+        assert!(all_nodes.contains_key("X"));
+        assert!(all_nodes.contains_key("Y"));
+    }
+
+    #[test]
+    fn test_compute_node_size_shapes() {
+        let mut all_nodes = HashMap::new();
+        for (id, shape) in [
+            ("D", NodeShape::Diamond),
+            ("C", NodeShape::Circle),
+            ("DC", NodeShape::DoubleCircle),
+            ("H", NodeShape::Hexagon),
+            ("A", NodeShape::Asymmetric),
+        ] {
+            all_nodes.insert(
+                id.to_string(),
+                (
+                    NodeDef {
+                        id: id.to_string(),
+                        label: Some("X".into()),
+                        shape,
+                        class_shorthand: None,
+                    },
+                    StyleProperties::default(),
+                ),
+            );
+        }
+        let edges = vec![
+            EdgeDef {
+                from: "D".into(),
+                to: "C".into(),
+                edge_type: crate::ast::flowchart::EdgeType::SolidArrow,
+                label: None,
+            },
+            EdgeDef {
+                from: "C".into(),
+                to: "DC".into(),
+                edge_type: crate::ast::flowchart::EdgeType::SolidArrow,
+                label: None,
+            },
+            EdgeDef {
+                from: "DC".into(),
+                to: "H".into(),
+                edge_type: crate::ast::flowchart::EdgeType::SolidArrow,
+                label: None,
+            },
+            EdgeDef {
+                from: "H".into(),
+                to: "A".into(),
+                edge_type: crate::ast::flowchart::EdgeType::SolidArrow,
+                label: None,
+            },
+        ];
+        let provider = FontProvider::default_font();
+        let measurer = make_measurer(&provider);
+        let (graph, _) = build_petgraph(&all_nodes, &edges, &measurer).unwrap();
+        for (id, expected_shape) in [
+            ("D", NodeShape::Diamond),
+            ("C", NodeShape::Circle),
+            ("DC", NodeShape::DoubleCircle),
+            ("H", NodeShape::Hexagon),
+            ("A", NodeShape::Asymmetric),
+        ] {
+            let node = graph.node_indices().find(|i| graph[*i].id == id).unwrap();
+            assert_eq!(graph[node].shape, expected_shape);
+            assert!(graph[node].width > 0.0);
+            assert!(graph[node].height > 0.0);
+        }
+    }
+}

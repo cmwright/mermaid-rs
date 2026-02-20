@@ -209,6 +209,12 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "expected Color::Hex")]
+    fn hex_helper_panics_on_non_hex() {
+        hex(&Color::Named("red".to_string()));
+    }
+
+    #[test]
     fn forest_theme_has_forest_specific_colors() {
         let theme = Theme::forest();
 

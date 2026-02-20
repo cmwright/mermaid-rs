@@ -1,4 +1,5 @@
 pub mod html_util;
+#[cfg(feature = "png")]
 pub mod png;
 pub mod svg_flowchart;
 pub mod svg_gantt;

@@ -588,6 +588,30 @@ mod tests {
         assert!((iy - 100.0).abs() < 1.0, "y should be ~100, got {iy}");
     }
 
+    #[test]
+    fn test_intersect_rect_exit_top() {
+        // abs_dy*hw > abs_dx*hh, dy < 0 -> exit top (sy = -hh)
+        let node = make_rect_node("R", 100.0, 100.0);
+        let (_ix, iy) = intersect_shape(&node, 100.0, 0.0);
+        assert!((iy - 80.0).abs() < 1.0, "should exit top, y ~80, got {iy}");
+    }
+
+    #[test]
+    fn test_intersect_rect_exit_bottom() {
+        // abs_dy*hw > abs_dx*hh, dy > 0 -> exit bottom (sy = hh)
+        let node = make_rect_node("R", 100.0, 100.0);
+        let (_ix, iy) = intersect_shape(&node, 100.0, 200.0);
+        assert!((iy - 120.0).abs() < 1.0, "should exit bottom, y ~120, got {iy}");
+    }
+
+    #[test]
+    fn test_intersect_rect_exit_left() {
+        // else branch, dx < 0 -> exit left (sx = -hw)
+        let node = make_rect_node("R", 100.0, 100.0);
+        let (ix, _iy) = intersect_shape(&node, 0.0, 100.0);
+        assert!((ix - 60.0).abs() < 1.0, "should exit left, x ~60, got {ix}");
+    }
+
     // -----------------------------------------------------------------------
     // route_short_edge S-curve fallback (non-axis-aligned)
     // -----------------------------------------------------------------------
@@ -654,6 +678,31 @@ mod tests {
             "edge blocked by intermediate node should produce S-curve, got {} points",
             points.len()
         );
+    }
+
+    #[test]
+    fn test_route_short_edge_last_resort() {
+        // Dense blockers so all offset attempts fail -> last resort (lines 273-282)
+        let from = make_rect_node("A", 50.0, 50.0);
+        let to = make_rect_node("B", 250.0, 250.0);
+        let blockers: Vec<PositionedNode> = (0..20)
+            .flat_map(|i| {
+                (0..20).map(move |j| {
+                    make_rect_node(
+                        &format!("b{i}_{j}"),
+                        70.0 + i as f64 * 10.0,
+                        70.0 + j as f64 * 10.0,
+                    )
+                })
+            })
+            .collect();
+        let mut nodes = vec![from.clone(), to.clone()];
+        nodes.extend(blockers);
+
+        let points = route_short_edge(&from, &to, &nodes, false);
+        assert!(!points.is_empty());
+        // First point is the intersection of the edge with the from-node boundary, not the center
+        assert!(points.len() >= 2);
     }
 
     // -----------------------------------------------------------------------
@@ -741,10 +790,110 @@ mod tests {
 
         adjust_labels_for_subgraph_boundaries(&mut edges, &[sg]);
         let new_y = edges[0].label_y.unwrap();
-        // Center above border -> should be pushed fully below
+        // Center below border (cur_y > sg_bottom) -> should be pushed fully below
         assert!(
             new_y > 300.0 + 10.0,
             "label should be pushed below bottom border, got y={new_y}"
+        );
+    }
+
+    #[test]
+    fn test_adjust_labels_straddling_bottom_border_center_above() {
+        // Label straddles bottom border with center ABOVE it (cur_y <= sg_bottom)
+        let sg = PositionedSubgraph {
+            id: "sg1".into(),
+            label: Some("SG".into()),
+            x: 50.0,
+            y: 100.0,
+            width: 200.0,
+            height: 200.0,  // bottom border at y=300
+            style: Default::default(),
+        };
+
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("test".into()),
+            label_x: Some(150.0),
+            label_y: Some(295.0),  // center above border; label_bottom=305 > 300
+            label_width: Some(40.0),
+            label_height: Some(20.0),
+            points: vec![(150.0, 250.0), (150.0, 350.0)],
+        }];
+
+        adjust_labels_for_subgraph_boundaries(&mut edges, &[sg]);
+        let new_y = edges[0].label_y.unwrap();
+        // Center above -> pushed inside (sg_bottom - hh - clearance)
+        assert!(
+            new_y < 300.0,
+            "label center above border should be pushed inside, got y={new_y}"
+        );
+    }
+
+    #[test]
+    fn test_adjust_labels_straddling_left_border_center_left() {
+        // Label straddles left border with center LEFT of it (cur_x < sg.x)
+        let sg = PositionedSubgraph {
+            id: "sg1".into(),
+            label: Some("SG".into()),
+            x: 100.0,
+            y: 50.0,
+            width: 200.0,
+            height: 200.0,
+            style: Default::default(),
+        };
+
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("test".into()),
+            label_x: Some(95.0),   // center left of border; label_right=115 > 100
+            label_y: Some(150.0),
+            label_width: Some(40.0),
+            label_height: Some(20.0),
+            points: vec![(50.0, 150.0), (200.0, 150.0)],
+        }];
+
+        adjust_labels_for_subgraph_boundaries(&mut edges, &[sg]);
+        let new_x = edges[0].label_x.unwrap();
+        assert!(
+            new_x < 100.0 - 15.0,
+            "label center left of border should be pushed further left, got x={new_x}"
+        );
+    }
+
+    #[test]
+    fn test_adjust_labels_straddling_right_border_center_right() {
+        // Label straddles right border with center RIGHT of it (cur_x > sg_right)
+        let sg = PositionedSubgraph {
+            id: "sg1".into(),
+            label: Some("SG".into()),
+            x: 100.0,
+            y: 50.0,
+            width: 200.0,  // right border at x=300
+            height: 200.0,
+            style: Default::default(),
+        };
+
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("test".into()),
+            label_x: Some(305.0),  // center right of border; label_left=285 < 300
+            label_y: Some(150.0),
+            label_width: Some(40.0),
+            label_height: Some(20.0),
+            points: vec![(200.0, 150.0), (400.0, 150.0)],
+        }];
+
+        adjust_labels_for_subgraph_boundaries(&mut edges, &[sg]);
+        let new_x = edges[0].label_x.unwrap();
+        assert!(
+            new_x > 300.0 + 15.0,
+            "label center right of border should be pushed further right, got x={new_x}"
         );
     }
 

@@ -251,4 +251,77 @@ mod tests {
         assert!((metrics.width - 0.0).abs() < 0.001);
         assert!((metrics.height - 0.0).abs() < 0.001);
     }
+
+    #[test]
+    fn test_measure_multiline_single_line() {
+        // lines.len() == 1 case: total_height = line_height * 1 + line_spacing * 0
+        let fp = FontProvider::default_font();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, 14.0);
+
+        let text = "SingleLine";
+        let metrics = measurer.measure_multiline(text, 2.0);
+        let single = measurer.measure(text);
+        assert!((metrics.width - single.width).abs() < 0.01);
+        assert!((metrics.height - single.height).abs() < 0.01, "single line multiline height should match single measure");
+    }
+
+    #[test]
+    fn test_measure_kerning_path() {
+        // Multi-character text exercises prev_glyph_id = Some branch (kerning)
+        let fp = FontProvider::default_font();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, 14.0);
+
+        // "AV" is a common kerning pair; two chars ensure prev_glyph_id is Some for second char
+        let two_char = measurer.measure("AV");
+        let single_a = measurer.measure("A");
+        let single_v = measurer.measure("V");
+        // With kerning, width may be less than sum of individual widths
+        assert!(two_char.width > 0.0);
+        assert!(two_char.width <= single_a.width + single_v.width + 1.0);
+    }
+
+    #[test]
+    fn test_wrap_text_line_whitespace_only() {
+        // Line exceeding max_width but split_whitespace is empty (lines 63-64)
+        let fp = FontProvider::default_font();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, 14.0);
+        let spaces = " ".repeat(50);
+        let result = measurer.wrap_text(&spaces, 10.0);
+        // After split_whitespace there are no words, so result is an empty string
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_measure_multiline_empty_string_zero_dims() {
+        let fp = FontProvider::default_font();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, 14.0);
+        let m = measurer.measure_multiline("", 2.0);
+        assert_eq!(m.width, 0.0);
+        assert_eq!(m.height, 0.0);
+    }
+
+    #[test]
+    fn test_wrap_text_words_exceed_max_width_individually() {
+        // Line that needs wrapping where each word exceeds max_width
+        let fp = FontProvider::default_font();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, 14.0);
+
+        // Both words longer than 30px at 14pt
+        let text = "Supercalifragilistic Verylongwordexceeding";
+        let result = measurer.wrap_text(text, 30.0);
+        let lines: Vec<&str> = result.split('\n').collect();
+        assert!(
+            lines.len() >= 2,
+            "words exceeding max_width individually should wrap, got {} lines: {:?}",
+            lines.len(),
+            lines
+        );
+        // First word on its own line, second on next
+        assert!(lines[0].contains("Supercalifragilistic") || lines[0].contains("Verylongwordexceeding"));
+    }
 }

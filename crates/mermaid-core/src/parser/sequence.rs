@@ -1073,4 +1073,144 @@ mod tests {
             panic!("Expected outer Block");
         }
     }
+
+    #[test]
+    fn test_parse_sequence_error_invalid_input() {
+        let source = "not a sequence diagram";
+        let result = parse_sequence(source);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_note_over_single_vs_multiple() {
+        let single = "sequenceDiagram\n    participant A\n    Note over A: Single";
+        let ast_single = parse_sequence(single).unwrap();
+        if let SequenceStatement::Note(n) = &ast_single.statements[0] {
+            assert_eq!(n.position, NotePosition::Over);
+            assert_eq!(n.participants, vec!["A"]);
+        }
+
+        let multi = "sequenceDiagram\n    participant A\n    participant B\n    Note over A,B: Multiple";
+        let ast_multi = parse_sequence(multi).unwrap();
+        if let SequenceStatement::Note(n) = &ast_multi.statements[0] {
+            assert_eq!(n.participants, vec!["A", "B"]);
+        }
+    }
+
+    #[test]
+    fn test_parse_block_sections_non_empty_current_stmts() {
+        // alt with else - sections non-empty, first body has stmts
+        let source = "sequenceDiagram\n    alt First\n        A->>B: msg1\n    else Second\n        B->>A: msg2\n    end";
+        let ast = parse_sequence(source).unwrap();
+        if let SequenceStatement::Block(block) = &ast.statements[0] {
+            assert_eq!(block.sections.len(), 2);
+            assert_eq!(block.sections[0].statements.len(), 1);
+            assert_eq!(block.sections[1].statements.len(), 1);
+        }
+    }
+
+    #[test]
+    fn test_parse_opt_critical_break_blocks() {
+        let opt = "sequenceDiagram\n    opt Optional\n        A->>B: msg\n    end";
+        let ast_opt = parse_sequence(opt).unwrap();
+        if let SequenceStatement::Block(b) = &ast_opt.statements[0] {
+            assert_eq!(b.kind, BlockKind::Opt);
+        }
+
+        let critical = "sequenceDiagram\n    critical Critical\n        A->>B: msg\n    end";
+        let ast_crit = parse_sequence(critical).unwrap();
+        if let SequenceStatement::Block(b) = &ast_crit.statements[0] {
+            assert_eq!(b.kind, BlockKind::Critical);
+        }
+
+        let break_block = "sequenceDiagram\n    break Break\n        A->>B: msg\n    end";
+        let ast_break = parse_sequence(break_block).unwrap();
+        if let SequenceStatement::Block(b) = &ast_break.statements[0] {
+            assert_eq!(b.kind, BlockKind::Break);
+        }
+    }
+
+    #[test]
+    fn test_parse_note_edge_cases() {
+        // Note with empty text
+        let source = "sequenceDiagram\n    participant A\n    Note over A:";
+        let ast = parse_sequence(source).unwrap();
+        if let SequenceStatement::Note(n) = &ast.statements[0] {
+            assert_eq!(n.text, "");
+        }
+    }
+
+    #[test]
+    fn test_parse_deeply_nested_blocks_in_rect() {
+        // Comprehensive test: rect block containing activate, deactivate, note,
+        // and ALL nested block types (alt, loop, opt, par, critical, break, rect).
+        // Exercises parse_block_body branches for nested statements.
+        let source = r#"sequenceDiagram
+    participant A
+    participant B
+    rect rgb(200, 220, 255)
+        activate A
+        deactivate A
+        Note right of A: inside rect
+        A->>B: msg inside rect
+        alt Nested alt
+            A->>B: alt msg
+        end
+        loop Nested loop
+            A->>B: loop msg
+        end
+        opt Nested opt
+            A->>B: opt msg
+        end
+        par Nested par
+            A->>B: par msg
+        end
+        critical Nested critical
+            A->>B: critical msg
+        end
+        break Nested break
+            A->>B: break msg
+        end
+        rect rgb(100, 100, 100)
+            A->>B: nested rect msg
+        end
+    end"#;
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.statements.len(), 1);
+        if let SequenceStatement::Block(outer) = &ast.statements[0] {
+            assert_eq!(outer.kind, BlockKind::Rect);
+            let stmts = &outer.sections[0].statements;
+            // activate, deactivate, note, message, alt, loop, opt, par, critical, break, rect
+            assert!(stmts.len() >= 11);
+
+            // Verify activate and deactivate inside block
+            let has_activate = stmts.iter().any(|s| matches!(s, SequenceStatement::Activate(_)));
+            let has_deactivate = stmts.iter().any(|s| matches!(s, SequenceStatement::Deactivate(_)));
+            let has_note = stmts.iter().any(|s| matches!(s, SequenceStatement::Note(_)));
+            assert!(has_activate);
+            assert!(has_deactivate);
+            assert!(has_note);
+
+            // Verify nested blocks
+            let blocks: Vec<_> = stmts
+                .iter()
+                .filter_map(|s| {
+                    if let SequenceStatement::Block(b) = s {
+                        Some(b.kind)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            assert!(blocks.contains(&BlockKind::Alt));
+            assert!(blocks.contains(&BlockKind::Loop));
+            assert!(blocks.contains(&BlockKind::Opt));
+            assert!(blocks.contains(&BlockKind::Par));
+            assert!(blocks.contains(&BlockKind::Critical));
+            assert!(blocks.contains(&BlockKind::Break));
+            assert!(blocks.contains(&BlockKind::Rect));
+        } else {
+            panic!("Expected Block");
+        }
+    }
 }

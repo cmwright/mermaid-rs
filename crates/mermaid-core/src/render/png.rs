@@ -147,6 +147,7 @@ fn encode_png(pixmap: &resvg::tiny_skia::Pixmap) -> Result<Vec<u8>> {
 mod tests {
     use super::*;
     use crate::diagram::RenderConfig;
+    use crate::font::FontProvider;
 
     fn test_svg() -> String {
         "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 100 100\" width=\"100\" height=\"100\">\n            <rect x=\"10\" y=\"10\" width=\"80\" height=\"80\" fill=\"#ff0000\"/>\n        </svg>".to_string()
@@ -201,6 +202,28 @@ mod tests {
     }
 
     #[test]
+    fn test_hex_to_rgba_invalid_length() {
+        // Lengths not 3, 6, or 8 should hit the _ fallback
+        assert_eq!(hex_to_rgba("#ab"), (0, 0, 0, 255));
+        assert_eq!(hex_to_rgba("#abcde"), (0, 0, 0, 255));
+        assert_eq!(hex_to_rgba("#abcdefaa0"), (0, 0, 0, 255));
+    }
+
+    #[test]
+    fn test_color_to_pixmap_color_named() {
+        let color = Color::Named("red".to_string());
+        let pixmap_color = color_to_pixmap_color(&color);
+        assert!(pixmap_color.red() > 0.9);
+    }
+
+    #[test]
+    fn test_color_to_pixmap_color_none() {
+        let color = Color::None;
+        let pixmap_color = color_to_pixmap_color(&color);
+        assert!(pixmap_color.alpha() < 0.01);
+    }
+
+    #[test]
     fn test_named_color_to_rgba() {
         assert_eq!(named_color_to_rgba("white"), (255, 255, 255, 255));
         assert_eq!(named_color_to_rgba("WHITE"), (255, 255, 255, 255));
@@ -208,6 +231,9 @@ mod tests {
         assert_eq!(named_color_to_rgba("red"), (255, 0, 0, 255));
         assert_eq!(named_color_to_rgba("green"), (0, 128, 0, 255));
         assert_eq!(named_color_to_rgba("blue"), (0, 0, 255, 255));
+        assert_eq!(named_color_to_rgba("yellow"), (255, 255, 0, 255));
+        assert_eq!(named_color_to_rgba("cyan"), (0, 255, 255, 255));
+        assert_eq!(named_color_to_rgba("magenta"), (255, 0, 255, 255));
         assert_eq!(named_color_to_rgba("transparent"), (0, 0, 0, 0));
         assert_eq!(named_color_to_rgba("unknown"), (0, 0, 0, 255));
     }
@@ -237,6 +263,22 @@ mod tests {
     fn test_render_png_with_transparent_background() {
         let mut config = RenderConfig::default();
         config.background = Some(Color::None);
+
+        let svg = test_svg();
+        let png = render_png(&svg, &config);
+        assert!(png.is_ok());
+        assert!(png.unwrap().len() > 100);
+    }
+
+    #[test]
+    fn test_render_png_with_custom_font_provider() {
+        // Exercise the font loading path: config.font_provider.font_ref().is_ok()
+        // and fontdb.load_font_source with custom font data (FontData::Owned path)
+        let default_provider = FontProvider::default_font();
+        let font_bytes = default_provider.font_data();
+        let custom_provider = FontProvider::from_bytes(font_bytes).expect("valid font bytes");
+        let mut config = RenderConfig::default();
+        config.font_provider = custom_provider;
 
         let svg = test_svg();
         let png = render_png(&svg, &config);

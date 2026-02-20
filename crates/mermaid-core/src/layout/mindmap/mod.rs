@@ -669,4 +669,117 @@ mod tests {
         let d = layout.nodes.iter().find(|n| n.id == "d").unwrap();
         assert_eq!(d.depth, 4);
     }
+
+    #[test]
+    fn test_shape_padding_cloud_and_bang() {
+        // Cloud and Bang shapes use (NODE_PAD_H * 1.8, NODE_PAD_V * 1.5) - larger than default
+        let ast = MindmapAst {
+            root: MindmapNode {
+                id: "root".to_string(),
+                label: "R".to_string(),
+                shape: MindmapNodeShape::Circle,
+                children: vec![
+                    MindmapNode {
+                        id: "cloud".to_string(),
+                        label: "Cloud".to_string(),
+                        shape: MindmapNodeShape::Cloud,
+                        children: Vec::new(),
+                        icon: None,
+                        css_class: None,
+                    },
+                    MindmapNode {
+                        id: "bang".to_string(),
+                        label: "Bang".to_string(),
+                        shape: MindmapNodeShape::Bang,
+                        children: Vec::new(),
+                        icon: None,
+                        css_class: None,
+                    },
+                    MindmapNode {
+                        id: "rect".to_string(),
+                        label: "Rect".to_string(),
+                        shape: MindmapNodeShape::Rect,
+                        children: Vec::new(),
+                        icon: None,
+                        css_class: None,
+                    },
+                ],
+                icon: None,
+                css_class: None,
+            },
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_mindmap(&ast, &measurer, &theme).unwrap();
+
+        let cloud = layout.nodes.iter().find(|n| n.id == "cloud").unwrap();
+        let bang = layout.nodes.iter().find(|n| n.id == "bang").unwrap();
+        let rect = layout.nodes.iter().find(|n| n.id == "rect").unwrap();
+        // Cloud and Bang use 1.8x horizontal padding vs 1.0x for Rect
+        assert!(
+            cloud.width >= rect.width,
+            "Cloud shape should have >= width of Rect (cloud={}, rect={})",
+            cloud.width,
+            rect.width
+        );
+        assert!(
+            bang.width >= rect.width,
+            "Bang shape should have >= width of Rect (bang={}, rect={})",
+            bang.width,
+            rect.width
+        );
+    }
+
+    #[test]
+    fn test_word_wrap_empty_line() {
+        // Label with a line that is only whitespace triggers words.is_empty() branch
+        let ast = MindmapAst {
+            root: MindmapNode {
+                id: "root".to_string(),
+                label: "A\n   \nB".to_string(),
+                shape: MindmapNodeShape::Circle,
+                children: Vec::new(),
+                icon: None,
+                css_class: None,
+            },
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_mindmap(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.nodes.len(), 1);
+        assert!(layout.nodes[0].width > 0.0);
+    }
+
+    #[test]
+    fn test_position_subtree_radial_empty_children() {
+        // Node with one child that has no children - position_subtree_radial early return
+        // when called with empty children (leaf nodes)
+        let ast = MindmapAst {
+            root: MindmapNode {
+                id: "root".to_string(),
+                label: "R".to_string(),
+                shape: MindmapNodeShape::Circle,
+                children: vec![MindmapNode {
+                    id: "leaf".to_string(),
+                    label: "L".to_string(),
+                    shape: MindmapNodeShape::Rect,
+                    children: Vec::new(),
+                    icon: None,
+                    css_class: None,
+                }],
+                icon: None,
+                css_class: None,
+            },
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_mindmap(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.nodes.len(), 2);
+        assert_eq!(layout.edges.len(), 1);
+        let leaf = layout.nodes.iter().find(|n| n.id == "leaf").unwrap();
+        assert_eq!(leaf.depth, 1);
+    }
 }

@@ -1226,4 +1226,595 @@ mod tests {
         // Falls back to DIAGRAM_PADDING position
         assert!((layout.notes[0].x - DIAGRAM_PADDING).abs() < 0.01);
     }
+
+    #[test]
+    fn test_widen_for_messages() {
+        // Message with long label requires extra space between actors
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef {
+                    id: "A".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+                ParticipantDef {
+                    id: "B".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+                ParticipantDef {
+                    id: "C".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+            ],
+            statements: vec![
+                SequenceStatement::Message(MessageDef {
+                    from: "A".to_string(),
+                    to: "C".to_string(),
+                    arrow: ArrowType::SolidArrow,
+                    label: "This is a very long message label that should require extra space between A and C".to_string(),
+                    activate_target: false,
+                    deactivate_source: false,
+                }),
+            ],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+        let a = layout.actors.iter().find(|x| x.id == "A").unwrap();
+        let c = layout.actors.iter().find(|x| x.id == "C").unwrap();
+        assert!(c.center_x - a.center_x > 50.0, "widen_for_messages should add space for long labels");
+    }
+
+    #[test]
+    fn test_note_over_multiple_participants() {
+        // NotePosition::Over with multiple participants spans across them
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef {
+                    id: "A".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+                ParticipantDef {
+                    id: "B".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+                ParticipantDef {
+                    id: "C".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+            ],
+            statements: vec![
+                SequenceStatement::Note(NoteDef {
+                    position: NotePosition::Over,
+                    participants: vec!["A".to_string(), "B".to_string(), "C".to_string()],
+                    text: "Note over A, B, C".to_string(),
+                }),
+            ],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.notes.len(), 1);
+        let note = &layout.notes[0];
+        assert!(note.width > 0.0);
+        assert!(note.height > 0.0);
+    }
+
+    #[test]
+    fn test_compute_block_bounds_fallback() {
+        // Block with no message references to actors - min_idx == usize::MAX fallback
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef {
+                    id: "A".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+                ParticipantDef {
+                    id: "B".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+            ],
+            statements: vec![
+                SequenceStatement::Block(BlockDef {
+                    kind: BlockKind::Alt,
+                    label: "empty".to_string(),
+                    sections: vec![BlockSection {
+                        label: Some("opt".to_string()),
+                        statements: vec![],
+                    }],
+                }),
+            ],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.blocks.len(), 1);
+        assert!(layout.blocks[0].width > 0.0);
+    }
+
+    #[test]
+    fn test_activation_deactivation() {
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef {
+                    id: "A".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+                ParticipantDef {
+                    id: "B".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+            ],
+            statements: vec![
+                SequenceStatement::Message(MessageDef {
+                    from: "A".to_string(),
+                    to: "B".to_string(),
+                    arrow: ArrowType::SolidArrow,
+                    label: "call".to_string(),
+                    activate_target: true,
+                    deactivate_source: false,
+                }),
+                SequenceStatement::Message(MessageDef {
+                    from: "B".to_string(),
+                    to: "A".to_string(),
+                    arrow: ArrowType::SolidArrow,
+                    label: "return".to_string(),
+                    activate_target: false,
+                    deactivate_source: true,
+                }),
+            ],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+        assert!(!layout.activations.is_empty());
+    }
+
+    #[test]
+    fn test_unknown_participant_defaults() {
+        // Message to/from unknown participant uses 0.0 for position
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef {
+                    id: "A".to_string(),
+                    display_name: None,
+                    kind: ParticipantKind::Participant,
+                },
+            ],
+            statements: vec![
+                SequenceStatement::Message(MessageDef {
+                    from: "A".to_string(),
+                    to: "Unknown".to_string(),
+                    arrow: ArrowType::SolidArrow,
+                    label: "msg".to_string(),
+                    activate_target: false,
+                    deactivate_source: false,
+                }),
+            ],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.messages.len(), 1);
+        assert_eq!(layout.messages[0].to_x, 0.0);
+    }
+
+    #[test]
+    fn test_unclosed_activations_closed() {
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef { id: "A".to_string(), display_name: None, kind: ParticipantKind::Participant },
+                ParticipantDef { id: "B".to_string(), display_name: None, kind: ParticipantKind::Participant },
+            ],
+            statements: vec![
+                SequenceStatement::Activate("A".to_string()),
+                SequenceStatement::Message(MessageDef {
+                    from: "A".to_string(),
+                    to: "B".to_string(),
+                    arrow: ArrowType::SolidArrow,
+                    label: "call".to_string(),
+                    activate_target: false,
+                    deactivate_source: false,
+                }),
+            ],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+        assert!(!layout.activations.is_empty());
+    }
+
+    #[test]
+    fn test_message_multiline_label_widen() {
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef { id: "A".to_string(), display_name: None, kind: ParticipantKind::Participant },
+                ParticipantDef { id: "B".to_string(), display_name: None, kind: ParticipantKind::Participant },
+                ParticipantDef { id: "C".to_string(), display_name: None, kind: ParticipantKind::Participant },
+            ],
+            statements: vec![SequenceStatement::Message(MessageDef {
+                from: "A".to_string(),
+                to: "C".to_string(),
+                arrow: ArrowType::SolidArrow,
+                label: "Line one\nLine two\nLine three".to_string(),
+                activate_target: false,
+                deactivate_source: false,
+            })],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+        assert!(layout.actors[2].center_x - layout.actors[0].center_x > 50.0);
+    }
+
+    #[test]
+    fn test_message_multiline_extra_vertical_space() {
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef { id: "A".to_string(), display_name: None, kind: ParticipantKind::Participant },
+                ParticipantDef { id: "B".to_string(), display_name: None, kind: ParticipantKind::Participant },
+            ],
+            statements: vec![
+                SequenceStatement::Message(MessageDef {
+                    from: "A".to_string(),
+                    to: "B".to_string(),
+                    arrow: ArrowType::SolidArrow,
+                    label: "First\nSecond\nThird line".to_string(),
+                    activate_target: false,
+                    deactivate_source: false,
+                }),
+                SequenceStatement::Message(MessageDef {
+                    from: "B".to_string(),
+                    to: "A".to_string(),
+                    arrow: ArrowType::SolidArrow,
+                    label: "Reply".to_string(),
+                    activate_target: false,
+                    deactivate_source: false,
+                }),
+            ],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+        // Multiline label on first message should increase spacing vs single-line
+        assert!(layout.messages[1].y > layout.messages[0].y);
+    }
+
+    #[test]
+    fn test_deactivate_source_modifier() {
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef { id: "A".to_string(), display_name: None, kind: ParticipantKind::Participant },
+                ParticipantDef { id: "B".to_string(), display_name: None, kind: ParticipantKind::Participant },
+            ],
+            statements: vec![
+                SequenceStatement::Message(MessageDef {
+                    from: "A".to_string(),
+                    to: "B".to_string(),
+                    arrow: ArrowType::SolidArrow,
+                    label: "call".to_string(),
+                    activate_target: true,
+                    deactivate_source: false,
+                }),
+                SequenceStatement::Message(MessageDef {
+                    from: "B".to_string(),
+                    to: "A".to_string(),
+                    arrow: ArrowType::SolidArrow,
+                    label: "return".to_string(),
+                    activate_target: false,
+                    deactivate_source: true,
+                }),
+            ],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+        assert!(!layout.activations.is_empty());
+    }
+
+    #[test]
+    fn test_explicit_deactivate_statement() {
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef { id: "A".to_string(), display_name: None, kind: ParticipantKind::Participant },
+                ParticipantDef { id: "B".to_string(), display_name: None, kind: ParticipantKind::Participant },
+            ],
+            statements: vec![
+                SequenceStatement::Activate("A".to_string()),
+                SequenceStatement::Message(MessageDef {
+                    from: "A".to_string(),
+                    to: "B".to_string(),
+                    arrow: ArrowType::SolidArrow,
+                    label: "msg".to_string(),
+                    activate_target: false,
+                    deactivate_source: false,
+                }),
+                SequenceStatement::Deactivate("A".to_string()),
+            ],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+        assert!(!layout.activations.is_empty());
+    }
+
+    #[test]
+    fn test_note_over_two_participants() {
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef { id: "A".to_string(), display_name: None, kind: ParticipantKind::Participant },
+                ParticipantDef { id: "B".to_string(), display_name: None, kind: ParticipantKind::Participant },
+            ],
+            statements: vec![SequenceStatement::Note(NoteDef {
+                position: NotePosition::Over,
+                participants: vec!["A".to_string(), "B".to_string()],
+                text: "Note over A and B".to_string(),
+            })],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.notes.len(), 1);
+        assert!(layout.notes[0].width > 0.0);
+    }
+
+    #[test]
+    fn test_block_with_self_message_label_extents() {
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef { id: "A".to_string(), display_name: None, kind: ParticipantKind::Participant },
+                ParticipantDef { id: "B".to_string(), display_name: None, kind: ParticipantKind::Participant },
+            ],
+            statements: vec![SequenceStatement::Block(BlockDef {
+                kind: BlockKind::Alt,
+                label: "opt".to_string(),
+                sections: vec![BlockSection {
+                    label: Some("case".to_string()),
+                    statements: vec![SequenceStatement::Message(MessageDef {
+                        from: "A".to_string(),
+                        to: "A".to_string(),
+                        arrow: ArrowType::SolidArrow,
+                        label: "Self call with label".to_string(),
+                        activate_target: false,
+                        deactivate_source: false,
+                    })],
+                }],
+            })],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.blocks.len(), 1);
+        assert!(layout.blocks[0].width > 0.0);
+    }
+
+    #[test]
+    fn test_block_self_message_multiline_label() {
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef { id: "A".to_string(), display_name: None, kind: ParticipantKind::Participant },
+            ],
+            statements: vec![SequenceStatement::Block(BlockDef {
+                kind: BlockKind::Alt,
+                label: "opt".to_string(),
+                sections: vec![BlockSection {
+                    label: Some("case".to_string()),
+                    statements: vec![SequenceStatement::Message(MessageDef {
+                        from: "A".to_string(),
+                        to: "A".to_string(),
+                        arrow: ArrowType::SolidArrow,
+                        label: "Line1\nLine2".to_string(),
+                        activate_target: false,
+                        deactivate_source: false,
+                    })],
+                }],
+            })],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.blocks.len(), 1);
+    }
+
+    // Line 360: widen_for_messages continue when lo >= len, hi >= len, or lo == hi.
+    // This is a safety check. required_gaps only gets (lo, hi) from collect_message_gaps
+    // which skips self-messages and only adds when both from/to are in actor_idx.
+    // The lo == hi case would require a self-message in required_gaps, which we never add.
+    // Testing with a block containing messages that span actors exercises the block recursion.
+    #[test]
+    fn test_widen_for_messages_block_with_spanning_message() {
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef { id: "A".to_string(), display_name: None, kind: ParticipantKind::Participant },
+                ParticipantDef { id: "B".to_string(), display_name: None, kind: ParticipantKind::Participant },
+                ParticipantDef { id: "C".to_string(), display_name: None, kind: ParticipantKind::Participant },
+            ],
+            statements: vec![SequenceStatement::Block(BlockDef {
+                kind: BlockKind::Alt,
+                label: "test".to_string(),
+                sections: vec![BlockSection {
+                    label: Some("case".to_string()),
+                    statements: vec![SequenceStatement::Message(MessageDef {
+                        from: "A".to_string(),
+                        to: "C".to_string(),
+                        arrow: ArrowType::SolidArrow,
+                        label: "Long label spanning A to C".to_string(),
+                        activate_target: false,
+                        deactivate_source: false,
+                    })],
+                }],
+            })],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+        assert!(layout.actors[2].center_x - layout.actors[0].center_x > 50.0);
+    }
+
+    /// Line 456: deactivate_source handler when the from participant has an activation stack entry.
+    /// A->>+B: start activates B; B-->>-A: reply has deactivate_source=true, so we pop from B's stack.
+    #[test]
+    fn test_deactivate_source_with_activation_stack_entry() {
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef { id: "A".to_string(), display_name: None, kind: ParticipantKind::Participant },
+                ParticipantDef { id: "B".to_string(), display_name: None, kind: ParticipantKind::Participant },
+            ],
+            statements: vec![
+                SequenceStatement::Message(MessageDef {
+                    from: "A".to_string(),
+                    to: "B".to_string(),
+                    arrow: ArrowType::SolidArrow,
+                    label: "start".to_string(),
+                    activate_target: true,
+                    deactivate_source: false,
+                }),
+                SequenceStatement::Message(MessageDef {
+                    from: "B".to_string(),
+                    to: "A".to_string(),
+                    arrow: ArrowType::DottedArrow,
+                    label: "reply".to_string(),
+                    activate_target: false,
+                    deactivate_source: true,
+                }),
+            ],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+        // B was activated by first message; second message deactivates B (source)
+        assert!(!layout.activations.is_empty());
+        let b_activation = layout
+            .activations
+            .iter()
+            .find(|a| a.actor_id == "B")
+            .expect("should have activation for B from deactivate_source");
+        assert!(b_activation.y_end > b_activation.y_start);
+    }
+
+    /// Lines 486-487: Deactivate handler when stack has entry - stack.pop() returns Some(y_start).
+    /// activate A; A->>B: msg; deactivate A - the explicit Deactivate pops from A's stack.
+    #[test]
+    fn test_explicit_deactivate_pops_stack() {
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef { id: "A".to_string(), display_name: None, kind: ParticipantKind::Participant },
+                ParticipantDef { id: "B".to_string(), display_name: None, kind: ParticipantKind::Participant },
+            ],
+            statements: vec![
+                SequenceStatement::Activate("A".to_string()),
+                SequenceStatement::Message(MessageDef {
+                    from: "A".to_string(),
+                    to: "B".to_string(),
+                    arrow: ArrowType::SolidArrow,
+                    label: "msg".to_string(),
+                    activate_target: false,
+                    deactivate_source: false,
+                }),
+                SequenceStatement::Deactivate("A".to_string()),
+            ],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+        let a_activation = layout
+            .activations
+            .iter()
+            .find(|a| a.actor_id == "A")
+            .expect("Deactivate should create activation from stack.pop()");
+        assert!(a_activation.y_end > a_activation.y_start);
+    }
+
+    /// Lines 621-625: NotePosition::Over with single participant (Note over A: text).
+    /// Different from Note over A,B which uses the multi-participant branch.
+    #[test]
+    fn test_note_over_single_participant() {
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef { id: "A".to_string(), display_name: None, kind: ParticipantKind::Participant },
+                ParticipantDef { id: "B".to_string(), display_name: None, kind: ParticipantKind::Participant },
+            ],
+            statements: vec![SequenceStatement::Note(NoteDef {
+                position: NotePosition::Over,
+                participants: vec!["A".to_string()],
+                text: "Note over A only".to_string(),
+            })],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.notes.len(), 1);
+        let note = &layout.notes[0];
+        let actor_a_x = layout.actors.iter().find(|a| a.id == "A").unwrap().center_x;
+        // Single-participant Over: note centered on actor, so note.x + note.width/2 ≈ actor_a_x
+        assert!(
+            (note.x + note.width / 2.0 - actor_a_x).abs() < 50.0,
+            "Note over single A should be centered on A"
+        );
+    }
+
+    /// Lines 690, 692: Self-message inside block in compute_block_bounds (scan_for_actors_and_self_messages).
+    /// sequenceDiagram participant A alt test A->>A: self msg end
+    #[test]
+    fn test_block_self_message_compute_block_bounds() {
+        let ast = SequenceAst {
+            participants: vec![
+                ParticipantDef { id: "A".to_string(), display_name: None, kind: ParticipantKind::Participant },
+            ],
+            statements: vec![SequenceStatement::Block(BlockDef {
+                kind: BlockKind::Alt,
+                label: "test".to_string(),
+                sections: vec![BlockSection {
+                    label: Some("case".to_string()),
+                    statements: vec![SequenceStatement::Message(MessageDef {
+                        from: "A".to_string(),
+                        to: "A".to_string(),
+                        arrow: ArrowType::SolidArrow,
+                        label: "self msg".to_string(),
+                        activate_target: false,
+                        deactivate_source: false,
+                    })],
+                }],
+            })],
+            autonumber: false,
+        };
+        let (fp, theme) = make_measurer();
+        let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.blocks.len(), 1);
+        assert!(layout.blocks[0].width > 0.0);
+        assert_eq!(layout.messages.len(), 1);
+        assert!(layout.messages[0].is_self);
+    }
 }

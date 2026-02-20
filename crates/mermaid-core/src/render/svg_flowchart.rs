@@ -1490,6 +1490,75 @@ mod tests {
     // ---------------------------------------------------------------
 
     #[test]
+    fn test_edge_with_single_point_skipped() {
+        let edge = PositionedEdge {
+            from_id: "a".to_string(),
+            to_id: "b".to_string(),
+            edge_type: EdgeType::SolidArrow,
+            label: None,
+            label_x: None,
+            label_y: None,
+            label_width: None,
+            label_height: None,
+            points: vec![(50.0, 50.0)],
+        };
+        let nodes = vec![
+            make_node("a", "A", NodeShape::Rectangle),
+            make_node("b", "B", NodeShape::Rectangle),
+        ];
+        let graph = make_graph(nodes, vec![edge], vec![]);
+        let theme = Theme::default();
+        let svg = render_svg(&graph, &theme).unwrap();
+        let after_defs = svg.split("</defs>").nth(1).unwrap_or("");
+        assert!(
+            !after_defs.contains("<path d=\"M"),
+            "Edge with < 2 points should not render a path"
+        );
+    }
+
+    #[test]
+    fn test_edge_label_without_measured_dimensions() {
+        let edge = PositionedEdge {
+            from_id: "a".to_string(),
+            to_id: "b".to_string(),
+            edge_type: EdgeType::SolidArrow,
+            label: Some("fallback".to_string()),
+            label_x: Some(150.0),
+            label_y: Some(150.0),
+            label_width: None,
+            label_height: None,
+            points: vec![(50.0, 50.0), (100.0, 100.0), (150.0, 150.0)],
+        };
+        let nodes = vec![
+            make_node("a", "A", NodeShape::Rectangle),
+            make_node("b", "B", NodeShape::Rectangle),
+        ];
+        let graph = make_graph(nodes, vec![edge], vec![]);
+        let theme = Theme::default();
+        let svg = render_svg(&graph, &theme).unwrap();
+        assert!(svg.contains("fallback"), "edge label should appear even without measured dims");
+    }
+
+    #[test]
+    fn test_build_defs_uses_min_arrowhead_size() {
+        // build_defs uses arrowhead_size.max(8.0) - when theme has smaller value, uses 8
+        let mut theme = Theme::default();
+        theme.flowchart.arrowhead_size = 5.0;
+        let edge = make_edge("a", "b", EdgeType::SolidArrow, None);
+        let nodes = vec![
+            make_node("a", "A", NodeShape::Rectangle),
+            make_node("b", "B", NodeShape::Rectangle),
+        ];
+        let graph = make_graph(nodes, vec![edge], vec![]);
+        let svg = render_svg(&graph, &theme).unwrap();
+        // markerWidth/markerHeight should be at least 8 (6.4 from 8*0.8)
+        assert!(
+            svg.contains("markerWidth="),
+            "defs should contain marker dimensions"
+        );
+    }
+
+    #[test]
     fn test_edge_label_with_br_tag() {
         let edge = make_edge("a", "b", EdgeType::SolidArrow, Some("Top<br/>Bottom"));
         let nodes = vec![
@@ -1503,6 +1572,31 @@ mod tests {
         assert!(
             svg.contains("<tspan"),
             "Edge label with <br/> should produce tspan elements. SVG: {}",
+            svg
+        );
+    }
+
+    #[test]
+    fn test_edge_label_with_html_tags_stripped() {
+        // Single-line edge label with HTML - exercises strip_html_tags in the
+        // lines.len() <= 1 branch of edge label rendering
+        let edge = make_edge("a", "b", EdgeType::SolidArrow, Some("<b>bold</b> text"));
+        let nodes = vec![
+            make_node("a", "A", NodeShape::Rectangle),
+            make_node("b", "B", NodeShape::Rectangle),
+        ];
+        let graph = make_graph(nodes, vec![edge], vec![]);
+        let theme = Theme::default();
+        let svg = render_svg(&graph, &theme).unwrap();
+
+        assert!(
+            svg.contains("bold text"),
+            "HTML tags should be stripped from single-line edge label. SVG: {}",
+            svg
+        );
+        assert!(
+            !svg.contains("<b>"),
+            "Raw HTML tags should not appear in output. SVG: {}",
             svg
         );
     }

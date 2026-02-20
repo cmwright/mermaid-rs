@@ -569,6 +569,58 @@ mod tests {
     }
 
     #[test]
+    fn test_dependency_edge_with_invalid_index_skipped() {
+        // Exercise the continue branch when edge.from_task_index >= task_count
+        // or edge.to_task_index >= task_count (line 209-210)
+        let layout = GanttLayout {
+            width: 800.0,
+            height: 200.0,
+            title: None,
+            title_y: 0.0,
+            tasks: vec![PositionedTask {
+                name: "Only Task".to_string(),
+                id: "t1".to_string(),
+                x: 220.0,
+                y: 80.0,
+                width: 100.0,
+                height: 24.0,
+                tags: TaskTags::default(),
+                section_index: 0,
+                is_milestone: false,
+                label_width: 60.0,
+            }],
+            sections: vec![PositionedSection {
+                name: "S1".to_string(),
+                y_start: 80.0,
+                y_end: 120.0,
+                index: 0,
+            }],
+            grid_lines: vec![],
+            dependency_edges: vec![
+                DependencyEdge {
+                    from_task_index: 0,
+                    to_task_index: 99, // invalid: >= task_count (1)
+                },
+                DependencyEdge {
+                    from_task_index: 99, // invalid
+                    to_task_index: 0,
+                },
+            ],
+            today_x: None,
+            chart_x: 200.0,
+            chart_y: 50.0,
+            chart_width: 580.0,
+            chart_height: 100.0,
+            axis_format: "%Y-%m-%d".to_string(),
+        };
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+        // Should render without panic; invalid edges are skipped
+        assert!(svg.contains("Only Task"));
+        assert!(svg.contains("<svg"));
+    }
+
+    #[test]
     fn test_hex_luminance() {
         // Black should be ~0
         assert!(hex_luminance("#000000") < 0.01);
@@ -602,6 +654,211 @@ mod tests {
 
         // Crit tasks should have red stroke
         assert!(svg.contains(CRIT_STROKE));
+    }
+
+    #[test]
+    fn test_hex_luminance_malformed() {
+        let lum = hex_luminance("#ab");
+        assert!((lum - 0.5).abs() < 0.01, "malformed hex should fallback to 0.5");
+    }
+
+    #[test]
+    fn test_hex_luminance_bright_color() {
+        // #ffffff is white, linearize path where c > 0.03928
+        let lum = hex_luminance("#ffffff");
+        assert!(lum > 0.99);
+    }
+
+    #[test]
+    fn test_hex_luminance_dark_color_low_srgb() {
+        // #050505 → r=g=b≈0.0196, which is <= 0.03928 → linearize via c/12.92
+        let lum = hex_luminance("#050505");
+        assert!(lum < 0.01);
+    }
+
+    #[test]
+    fn test_empty_section_name_skipped() {
+        let layout = GanttLayout {
+            width: 800.0,
+            height: 200.0,
+            title: None,
+            title_y: 0.0,
+            tasks: vec![],
+            sections: vec![PositionedSection {
+                name: String::new(),
+                y_start: 50.0,
+                y_end: 100.0,
+                index: 0,
+            }],
+            grid_lines: vec![],
+            dependency_edges: vec![],
+            today_x: None,
+            chart_x: 100.0,
+            chart_y: 40.0,
+            chart_width: 600.0,
+            chart_height: 100.0,
+            axis_format: "%Y-%m-%d".to_string(),
+        };
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+        let after_style = svg.split("</style>").nth(1).unwrap_or("");
+        assert!(
+            !after_style.contains("gantt-section-label"),
+            "empty section name should not render a section label text element"
+        );
+    }
+
+    #[test]
+    fn test_grid_line_hidden_label() {
+        let layout = GanttLayout {
+            width: 800.0,
+            height: 200.0,
+            title: None,
+            title_y: 0.0,
+            tasks: vec![],
+            sections: vec![],
+            grid_lines: vec![GridLine {
+                x: 200.0,
+                label: "Hidden".to_string(),
+                show_label: false,
+            }],
+            dependency_edges: vec![],
+            today_x: None,
+            chart_x: 100.0,
+            chart_y: 40.0,
+            chart_width: 600.0,
+            chart_height: 100.0,
+            axis_format: "%Y-%m-%d".to_string(),
+        };
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+        assert!(
+            !svg.contains("Hidden"),
+            "hidden grid line should not render its label text"
+        );
+    }
+
+    #[test]
+    fn test_no_today_marker() {
+        let layout = GanttLayout {
+            width: 800.0,
+            height: 200.0,
+            title: None,
+            title_y: 0.0,
+            tasks: vec![],
+            sections: vec![],
+            grid_lines: vec![],
+            dependency_edges: vec![],
+            today_x: None,
+            chart_x: 100.0,
+            chart_y: 40.0,
+            chart_width: 600.0,
+            chart_height: 100.0,
+            axis_format: "%Y-%m-%d".to_string(),
+        };
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+        let after_style = svg.split("</style>").nth(1).unwrap_or("");
+        assert!(
+            !after_style.contains("gantt-today"),
+            "no today_x should produce no today marker line element"
+        );
+    }
+
+    #[test]
+    fn test_done_task_uses_done_fill() {
+        // Task with done=true should use TASK_DONE_FILL (#b8bedd for section 0)
+        let mut layout = create_test_layout();
+        layout.tasks[0].tags.done = true;
+        layout.tasks[0].width = 200.0; // ensure label fits inside
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+        // TASK_DONE_FILL[0] is #b8bedd
+        assert!(
+            svg.contains("#b8bedd"),
+            "done task should use TASK_DONE_FILL color"
+        );
+    }
+
+    #[test]
+    fn test_port_y_multiple_dependency_edges() {
+        // Task with 2+ outgoing edges exercises port_y when total > 1
+        let layout = GanttLayout {
+            width: 800.0,
+            height: 300.0,
+            title: None,
+            title_y: 0.0,
+            tasks: vec![
+                PositionedTask {
+                    name: "A".to_string(),
+                    id: "a1".to_string(),
+                    x: 100.0,
+                    y: 80.0,
+                    width: 80.0,
+                    height: 24.0,
+                    tags: TaskTags::default(),
+                    section_index: 0,
+                    is_milestone: false,
+                    label_width: 20.0,
+                },
+                PositionedTask {
+                    name: "B".to_string(),
+                    id: "b1".to_string(),
+                    x: 220.0,
+                    y: 80.0,
+                    width: 80.0,
+                    height: 24.0,
+                    tags: TaskTags::default(),
+                    section_index: 0,
+                    is_milestone: false,
+                    label_width: 20.0,
+                },
+                PositionedTask {
+                    name: "C".to_string(),
+                    id: "c1".to_string(),
+                    x: 220.0,
+                    y: 108.0,
+                    width: 80.0,
+                    height: 24.0,
+                    tags: TaskTags::default(),
+                    section_index: 0,
+                    is_milestone: false,
+                    label_width: 20.0,
+                },
+            ],
+            sections: vec![PositionedSection {
+                name: "S".to_string(),
+                y_start: 80.0,
+                y_end: 140.0,
+                index: 0,
+            }],
+            grid_lines: vec![],
+            dependency_edges: vec![
+                DependencyEdge {
+                    from_task_index: 0,
+                    to_task_index: 1,
+                },
+                DependencyEdge {
+                    from_task_index: 0,
+                    to_task_index: 2,
+                },
+            ],
+            today_x: None,
+            chart_x: 80.0,
+            chart_y: 50.0,
+            chart_width: 300.0,
+            chart_height: 90.0,
+            axis_format: "%Y-%m-%d".to_string(),
+        };
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+        // Multiple edges from task 0 should produce distinct paths (port_y varies by slot)
+        assert!(
+            svg.contains("gantt-dependency"),
+            "multiple dependency edges should render"
+        );
+        let path_count = svg.matches("class=\"gantt-dependency\"").count();
+        assert_eq!(path_count, 2, "should have 2 dependency paths");
     }
 
     #[test]

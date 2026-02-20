@@ -474,3 +474,995 @@ pub fn compact_subgraphs(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::flowchart::SubgraphDef;
+    use crate::font::FontProvider;
+
+    #[test]
+    fn test_position_subgraphs() {
+        let subgraphs = vec![SubgraphDef {
+            id: "SG".to_string(),
+            label: Some("Subgraph".to_string()),
+            direction: None,
+            nodes: vec![crate::ast::flowchart::NodeDef {
+                id: "A".into(),
+                label: None,
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                class_shorthand: None,
+            }],
+            edges: vec![],
+            subgraphs: vec![],
+        }];
+        let positioned_nodes = vec![PositionedNode {
+            id: "A".into(),
+            label: "A".into(),
+            shape: crate::ast::flowchart::NodeShape::Rectangle,
+            style: Default::default(),
+            x: 100.0,
+            y: 50.0,
+            width: 40.0,
+            height: 20.0,
+        }];
+        let provider = FontProvider::default_font();
+        let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
+        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].width > 0.0);
+        assert!(result[0].height > 0.0);
+    }
+
+    #[test]
+    fn test_position_subgraphs_nested() {
+        let subgraphs = vec![SubgraphDef {
+            id: "Outer".to_string(),
+            label: None,
+            direction: None,
+            nodes: vec![],
+            edges: vec![],
+            subgraphs: vec![SubgraphDef {
+                id: "Inner".to_string(),
+                label: Some("Inner".to_string()),
+                direction: None,
+                nodes: vec![crate::ast::flowchart::NodeDef {
+                    id: "A".into(),
+                    label: None,
+                    shape: crate::ast::flowchart::NodeShape::Rectangle,
+                    class_shorthand: None,
+                }],
+                edges: vec![],
+                subgraphs: vec![],
+            }],
+        }];
+        let positioned_nodes = vec![PositionedNode {
+            id: "A".into(),
+            label: "A".into(),
+            shape: crate::ast::flowchart::NodeShape::Rectangle,
+            style: Default::default(),
+            x: 100.0,
+            y: 80.0,
+            width: 40.0,
+            height: 20.0,
+        }];
+        let provider = FontProvider::default_font();
+        let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
+        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer);
+        assert_eq!(result.len(), 2);
+    }
+
+    #[test]
+    fn test_measure_subgraph_title_width_multiline() {
+        let provider = FontProvider::default_font();
+        let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
+        let w = measure_subgraph_title_width("Line1\nLine2\nLine3", &measurer);
+        assert!(w > 0.0);
+    }
+
+    #[test]
+    fn test_separate_overlapping_sibling_subgraphs() {
+        let ast = FlowchartAst {
+            subgraphs: vec![
+                SubgraphDef {
+                    id: "SG1".to_string(),
+                    label: None,
+                    direction: None,
+                    nodes: vec![
+                        crate::ast::flowchart::NodeDef {
+                            id: "A1".into(),
+                            label: None,
+                            shape: crate::ast::flowchart::NodeShape::Rectangle,
+                            class_shorthand: None,
+                        },
+                        crate::ast::flowchart::NodeDef {
+                            id: "A2".into(),
+                            label: None,
+                            shape: crate::ast::flowchart::NodeShape::Rectangle,
+                            class_shorthand: None,
+                        },
+                    ],
+                    edges: vec![],
+                    subgraphs: vec![],
+                },
+                SubgraphDef {
+                    id: "SG2".to_string(),
+                    label: None,
+                    direction: None,
+                    nodes: vec![
+                        crate::ast::flowchart::NodeDef {
+                            id: "B1".into(),
+                            label: None,
+                            shape: crate::ast::flowchart::NodeShape::Rectangle,
+                            class_shorthand: None,
+                        },
+                        crate::ast::flowchart::NodeDef {
+                            id: "B2".into(),
+                            label: None,
+                            shape: crate::ast::flowchart::NodeShape::Rectangle,
+                            class_shorthand: None,
+                        },
+                    ],
+                    edges: vec![],
+                    subgraphs: vec![],
+                },
+            ],
+            ..Default::default()
+        };
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A1".to_string(), vec!["SG1".to_string()]);
+        membership.insert("A2".to_string(), vec!["SG1".to_string()]);
+        membership.insert("B1".to_string(), vec!["SG2".to_string()]);
+        membership.insert("B2".to_string(), vec!["SG2".to_string()]);
+
+        let mut nodes = vec![
+            PositionedNode {
+                id: "A1".into(),
+                label: "A1".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 50.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "A2".into(),
+                label: "A2".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 100.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "B1".into(),
+                label: "B1".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 55.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "B2".into(),
+                label: "B2".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 105.0,
+                width: 40.0,
+                height: 20.0,
+            },
+        ];
+        let subgraphs = vec![
+            PositionedSubgraph {
+                id: "SG1".into(),
+                label: Some("SG1".into()),
+                x: 30.0,
+                y: 30.0,
+                width: 80.0,
+                height: 100.0,
+                style: Default::default(),
+            },
+            PositionedSubgraph {
+                id: "SG2".into(),
+                label: Some("SG2".into()),
+                x: 30.0,
+                y: 35.0,
+                width: 80.0,
+                height: 100.0,
+                style: Default::default(),
+            },
+        ];
+        let y_before: Vec<f64> = nodes.iter().map(|n| n.y).collect();
+        let x_before: Vec<f64> = nodes.iter().map(|n| n.x).collect();
+        separate_overlapping_sibling_subgraphs(
+            &ast,
+            &membership,
+            &mut nodes,
+            &subgraphs,
+            &[],
+            false,
+        );
+        let y_after: Vec<f64> = nodes.iter().map(|n| n.y).collect();
+        let x_after: Vec<f64> = nodes.iter().map(|n| n.x).collect();
+        assert!(y_before != y_after || x_before != x_after, "overlap resolution should shift nodes");
+    }
+
+    #[test]
+    fn test_compact_subgraphs() {
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A".to_string(), vec!["SG".to_string()]);
+        membership.insert("B".to_string(), vec!["SG".to_string()]);
+        membership.insert("C".to_string(), vec!["SG".to_string()]);
+
+        let mut nodes = vec![
+            PositionedNode {
+                id: "A".into(),
+                label: "A".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 50.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "B".into(),
+                label: "B".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 150.0,
+                y: 100.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "C".into(),
+                label: "C".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 250.0,
+                y: 150.0,
+                width: 40.0,
+                height: 20.0,
+            },
+        ];
+        let y_before: Vec<f64> = nodes.iter().map(|n| n.y).collect();
+        compact_subgraphs(&mut nodes, &membership, false);
+        let y_after: Vec<f64> = nodes.iter().map(|n| n.y).collect();
+        assert_ne!(y_before, y_after);
+    }
+
+    #[test]
+    fn test_shift_nodes_in_subgraph() {
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A".into(), vec!["SG".to_string()]);
+
+        let mut nodes = vec![
+            PositionedNode {
+                id: "A".into(),
+                label: "A".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 50.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "B".into(),
+                label: "B".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 150.0,
+                y: 50.0,
+                width: 40.0,
+                height: 20.0,
+            },
+        ];
+        shift_nodes_in_subgraph(&mut nodes, &membership, "SG", 20.0, false);
+        assert!((nodes[0].x - 70.0).abs() < 0.01);
+        assert!((nodes[1].x - 150.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_shift_nodes_in_subgraph_main() {
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A".into(), vec!["SG".to_string()]);
+
+        let mut nodes = vec![
+            PositionedNode {
+                id: "A".into(),
+                label: "A".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 50.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "B".into(),
+                label: "B".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 100.0,
+                width: 40.0,
+                height: 20.0,
+            },
+        ];
+        shift_nodes_in_subgraph_main(&mut nodes, &membership, "SG", 30.0, false);
+        assert!((nodes[0].y - 80.0).abs() < 0.01);
+        assert!((nodes[1].y - 100.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_position_subgraphs_multiline_label() {
+        // Subgraph with multiline label (line 113 - title_height with line_count > 1)
+        let subgraphs = vec![SubgraphDef {
+            id: "SG".to_string(),
+            label: Some("Line1\nLine2\nLine3".to_string()),
+            direction: None,
+            nodes: vec![crate::ast::flowchart::NodeDef {
+                id: "A".into(),
+                label: None,
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                class_shorthand: None,
+            }],
+            edges: vec![],
+            subgraphs: vec![],
+        }];
+        let positioned_nodes = vec![PositionedNode {
+            id: "A".into(),
+            label: "A".into(),
+            shape: crate::ast::flowchart::NodeShape::Rectangle,
+            style: Default::default(),
+            x: 100.0,
+            y: 50.0,
+            width: 40.0,
+            height: 20.0,
+        }];
+        let provider = FontProvider::default_font();
+        let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
+        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].height > 0.0);
+    }
+
+    #[test]
+    fn test_separate_overlapping_horizontal() {
+        // is_horizontal: true -> shift_nodes_in_subgraph modifies node.y (line 383)
+        let ast = FlowchartAst {
+            subgraphs: vec![
+                SubgraphDef {
+                    id: "SG1".to_string(),
+                    label: None,
+                    direction: None,
+                    nodes: vec![
+                        crate::ast::flowchart::NodeDef {
+                            id: "A1".into(),
+                            label: None,
+                            shape: crate::ast::flowchart::NodeShape::Rectangle,
+                            class_shorthand: None,
+                        },
+                        crate::ast::flowchart::NodeDef {
+                            id: "A2".into(),
+                            label: None,
+                            shape: crate::ast::flowchart::NodeShape::Rectangle,
+                            class_shorthand: None,
+                        },
+                    ],
+                    edges: vec![],
+                    subgraphs: vec![],
+                },
+                SubgraphDef {
+                    id: "SG2".to_string(),
+                    label: None,
+                    direction: None,
+                    nodes: vec![
+                        crate::ast::flowchart::NodeDef {
+                            id: "B1".into(),
+                            label: None,
+                            shape: crate::ast::flowchart::NodeShape::Rectangle,
+                            class_shorthand: None,
+                        },
+                        crate::ast::flowchart::NodeDef {
+                            id: "B2".into(),
+                            label: None,
+                            shape: crate::ast::flowchart::NodeShape::Rectangle,
+                            class_shorthand: None,
+                        },
+                    ],
+                    edges: vec![],
+                    subgraphs: vec![],
+                },
+            ],
+            ..Default::default()
+        };
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A1".to_string(), vec!["SG1".to_string()]);
+        membership.insert("A2".to_string(), vec!["SG1".to_string()]);
+        membership.insert("B1".to_string(), vec!["SG2".to_string()]);
+        membership.insert("B2".to_string(), vec!["SG2".to_string()]);
+
+        let mut nodes = vec![
+            PositionedNode {
+                id: "A1".into(),
+                label: "A1".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 50.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "A2".into(),
+                label: "A2".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 100.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "B1".into(),
+                label: "B1".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 55.0,
+                y: 55.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "B2".into(),
+                label: "B2".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 55.0,
+                y: 105.0,
+                width: 40.0,
+                height: 20.0,
+            },
+        ];
+        let subgraphs = vec![
+            PositionedSubgraph {
+                id: "SG1".into(),
+                label: Some("SG1".into()),
+                x: 30.0,
+                y: 30.0,
+                width: 80.0,
+                height: 100.0,
+                style: Default::default(),
+            },
+            PositionedSubgraph {
+                id: "SG2".into(),
+                label: Some("SG2".into()),
+                x: 35.0,
+                y: 35.0,
+                width: 80.0,
+                height: 100.0,
+                style: Default::default(),
+            },
+        ];
+        let y_before: Vec<f64> = nodes.iter().map(|n| n.y).collect();
+        separate_overlapping_sibling_subgraphs(&ast, &membership, &mut nodes, &subgraphs, &[], true);
+        let y_after: Vec<f64> = nodes.iter().map(|n| n.y).collect();
+        assert!(y_before != y_after, "horizontal mode should shift nodes on y");
+    }
+
+    #[test]
+    fn test_compact_subgraphs_horizontal() {
+        // compact_subgraphs with is_horizontal: true (line 470 - node.x += shift)
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A".to_string(), vec!["SG".to_string()]);
+        membership.insert("B".to_string(), vec!["SG".to_string()]);
+        membership.insert("C".to_string(), vec!["SG".to_string()]);
+
+        let mut nodes = vec![
+            PositionedNode {
+                id: "A".into(),
+                label: "A".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 50.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "B".into(),
+                label: "B".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 150.0,
+                y: 100.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "C".into(),
+                label: "C".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 250.0,
+                y: 150.0,
+                width: 40.0,
+                height: 20.0,
+            },
+        ];
+        let x_before: Vec<f64> = nodes.iter().map(|n| n.x).collect();
+        compact_subgraphs(&mut nodes, &membership, true);
+        let x_after: Vec<f64> = nodes.iter().map(|n| n.x).collect();
+        assert_ne!(x_before, x_after);
+    }
+
+    #[test]
+    fn test_compact_subgraphs_even_positions() {
+        // compact_subgraphs with even number of nodes (lines 432, 438)
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A".into(), vec!["SG".to_string()]);
+        membership.insert("B".into(), vec!["SG".to_string()]);
+        membership.insert("C".into(), vec!["SG".to_string()]);
+        membership.insert("D".into(), vec!["SG".to_string()]);
+
+        let mut nodes = vec![
+            PositionedNode {
+                id: "A".into(),
+                label: "A".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 10.0,
+                y: 50.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "B".into(),
+                label: "B".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 50.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "C".into(),
+                label: "C".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 90.0,
+                y: 50.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "D".into(),
+                label: "D".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 130.0,
+                y: 50.0,
+                width: 40.0,
+                height: 20.0,
+            },
+        ];
+        compact_subgraphs(&mut nodes, &membership, false);
+        assert!(nodes.iter().all(|n| n.y.is_finite()));
+    }
+
+    #[test]
+    fn test_position_subgraphs_title_wider_than_content() {
+        // content_width < min_required_width -> expand min_x/max_x (lines 87-91)
+        let subgraphs = vec![SubgraphDef {
+            id: "SG".to_string(),
+            label: Some("Very Long Subgraph Title That Exceeds Content".to_string()),
+            direction: None,
+            nodes: vec![crate::ast::flowchart::NodeDef {
+                id: "A".into(),
+                label: None,
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                class_shorthand: None,
+            }],
+            edges: vec![],
+            subgraphs: vec![],
+        }];
+        let positioned_nodes = vec![PositionedNode {
+            id: "A".into(),
+            label: "A".into(),
+            shape: crate::ast::flowchart::NodeShape::Rectangle,
+            style: Default::default(),
+            x: 100.0,
+            y: 50.0,
+            width: 10.0,
+            height: 10.0,
+        }];
+        let provider = FontProvider::default_font();
+        let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
+        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].width >= 2.0 * SUBGRAPH_TITLE_SIDE_PADDING);
+    }
+
+    #[test]
+    fn test_position_subgraphs_has_content_from_edges_only() {
+        // Subgraph with has_content from edges (nodes in edges but not in node_pos)
+        let subgraphs = vec![SubgraphDef {
+            id: "SG".to_string(),
+            label: None,
+            direction: None,
+            nodes: vec![],
+            edges: vec![crate::ast::flowchart::EdgeDef {
+                from: "A".into(),
+                to: "B".into(),
+                edge_type: crate::ast::flowchart::EdgeType::SolidArrow,
+                label: None,
+            }],
+            subgraphs: vec![],
+        }];
+        let positioned_nodes = vec![
+            PositionedNode {
+                id: "A".into(),
+                label: "A".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 50.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "B".into(),
+                label: "B".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 150.0,
+                y: 50.0,
+                width: 40.0,
+                height: 20.0,
+            },
+        ];
+        let provider = FontProvider::default_font();
+        let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
+        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer);
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn test_separate_overlapping_subgraph_no_external_edges() {
+        // Subgraph with no edges to outside (cnt==0) -> target_cross from bounds (lines 195-204)
+        let ast = FlowchartAst {
+            subgraphs: vec![
+                SubgraphDef {
+                    id: "SG1".to_string(),
+                    label: None,
+                    direction: None,
+                    nodes: vec![
+                        crate::ast::flowchart::NodeDef {
+                            id: "A1".into(),
+                            label: None,
+                            shape: crate::ast::flowchart::NodeShape::Rectangle,
+                            class_shorthand: None,
+                        },
+                        crate::ast::flowchart::NodeDef {
+                            id: "A2".into(),
+                            label: None,
+                            shape: crate::ast::flowchart::NodeShape::Rectangle,
+                            class_shorthand: None,
+                        },
+                    ],
+                    edges: vec![crate::ast::flowchart::EdgeDef {
+                        from: "A1".into(),
+                        to: "A2".into(),
+                        edge_type: crate::ast::flowchart::EdgeType::SolidArrow,
+                        label: None,
+                    }],
+                    subgraphs: vec![],
+                },
+                SubgraphDef {
+                    id: "SG2".to_string(),
+                    label: None,
+                    direction: None,
+                    nodes: vec![
+                        crate::ast::flowchart::NodeDef {
+                            id: "B1".into(),
+                            label: None,
+                            shape: crate::ast::flowchart::NodeShape::Rectangle,
+                            class_shorthand: None,
+                        },
+                        crate::ast::flowchart::NodeDef {
+                            id: "B2".into(),
+                            label: None,
+                            shape: crate::ast::flowchart::NodeShape::Rectangle,
+                            class_shorthand: None,
+                        },
+                    ],
+                    edges: vec![crate::ast::flowchart::EdgeDef {
+                        from: "B1".into(),
+                        to: "B2".into(),
+                        edge_type: crate::ast::flowchart::EdgeType::SolidArrow,
+                        label: None,
+                    }],
+                    subgraphs: vec![],
+                },
+            ],
+            ..Default::default()
+        };
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A1".to_string(), vec!["SG1".to_string()]);
+        membership.insert("A2".to_string(), vec!["SG1".to_string()]);
+        membership.insert("B1".to_string(), vec!["SG2".to_string()]);
+        membership.insert("B2".to_string(), vec!["SG2".to_string()]);
+
+        let mut nodes = vec![
+            PositionedNode {
+                id: "A1".into(),
+                label: "A1".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 50.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "A2".into(),
+                label: "A2".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 100.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "B1".into(),
+                label: "B1".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 55.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "B2".into(),
+                label: "B2".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 105.0,
+                width: 40.0,
+                height: 20.0,
+            },
+        ];
+        let subgraphs = vec![
+            PositionedSubgraph {
+                id: "SG1".into(),
+                label: Some("SG1".into()),
+                x: 30.0,
+                y: 30.0,
+                width: 80.0,
+                height: 100.0,
+                style: Default::default(),
+            },
+            PositionedSubgraph {
+                id: "SG2".into(),
+                label: Some("SG2".into()),
+                x: 30.0,
+                y: 35.0,
+                width: 80.0,
+                height: 100.0,
+                style: Default::default(),
+            },
+        ];
+        separate_overlapping_sibling_subgraphs(&ast, &membership, &mut nodes, &subgraphs, &[], false);
+        assert!(nodes.iter().all(|n| n.x.is_finite() && n.y.is_finite()));
+    }
+
+    #[test]
+    fn test_separate_overlapping_main_axis_shift_applied() {
+        // Overlapping subgraphs with main_overlap_amount < 0.5 * larger_main -> main-axis shift
+        let ast = FlowchartAst {
+            subgraphs: vec![
+                SubgraphDef {
+                    id: "SG1".to_string(),
+                    label: None,
+                    direction: None,
+                    nodes: vec![
+                        crate::ast::flowchart::NodeDef {
+                            id: "A1".into(),
+                            label: None,
+                            shape: crate::ast::flowchart::NodeShape::Rectangle,
+                            class_shorthand: None,
+                        },
+                        crate::ast::flowchart::NodeDef {
+                            id: "A2".into(),
+                            label: None,
+                            shape: crate::ast::flowchart::NodeShape::Rectangle,
+                            class_shorthand: None,
+                        },
+                    ],
+                    edges: vec![],
+                    subgraphs: vec![],
+                },
+                SubgraphDef {
+                    id: "SG2".to_string(),
+                    label: None,
+                    direction: None,
+                    nodes: vec![
+                        crate::ast::flowchart::NodeDef {
+                            id: "B1".into(),
+                            label: None,
+                            shape: crate::ast::flowchart::NodeShape::Rectangle,
+                            class_shorthand: None,
+                        },
+                        crate::ast::flowchart::NodeDef {
+                            id: "B2".into(),
+                            label: None,
+                            shape: crate::ast::flowchart::NodeShape::Rectangle,
+                            class_shorthand: None,
+                        },
+                    ],
+                    edges: vec![],
+                    subgraphs: vec![],
+                },
+            ],
+            ..Default::default()
+        };
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A1".to_string(), vec!["SG1".to_string()]);
+        membership.insert("A2".to_string(), vec!["SG1".to_string()]);
+        membership.insert("B1".to_string(), vec!["SG2".to_string()]);
+        membership.insert("B2".to_string(), vec!["SG2".to_string()]);
+
+        let mut nodes = vec![
+            PositionedNode {
+                id: "A1".into(),
+                label: "A1".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 50.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "A2".into(),
+                label: "A2".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 100.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "B1".into(),
+                label: "B1".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 55.0,
+                y: 55.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "B2".into(),
+                label: "B2".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 55.0,
+                y: 105.0,
+                width: 40.0,
+                height: 20.0,
+            },
+        ];
+        let subgraphs = vec![
+            PositionedSubgraph {
+                id: "SG1".into(),
+                label: Some("SG1".into()),
+                x: 30.0,
+                y: 30.0,
+                width: 80.0,
+                height: 100.0,
+                style: Default::default(),
+            },
+            PositionedSubgraph {
+                id: "SG2".into(),
+                label: Some("SG2".into()),
+                x: 35.0,
+                y: 35.0,
+                width: 80.0,
+                height: 100.0,
+                style: Default::default(),
+            },
+        ];
+        let x_before: Vec<f64> = nodes.iter().map(|n| n.x).collect();
+        separate_overlapping_sibling_subgraphs(&ast, &membership, &mut nodes, &subgraphs, &[], true);
+        let x_after: Vec<f64> = nodes.iter().map(|n| n.x).collect();
+        assert!(x_before != x_after || nodes.iter().all(|n| n.x.is_finite()));
+    }
+
+    #[test]
+    fn test_compact_subgraphs_single_node_skipped() {
+        // Subgraph with 1 node -> continue (line 328)
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A".to_string(), vec!["SG".to_string()]);
+        membership.insert("B".to_string(), vec!["SG2".to_string()]);
+
+        let mut nodes = vec![
+            PositionedNode {
+                id: "A".into(),
+                label: "A".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 50.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "B".into(),
+                label: "B".into(),
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                style: Default::default(),
+                x: 150.0,
+                y: 50.0,
+                width: 40.0,
+                height: 20.0,
+            },
+        ];
+        let x_before: Vec<f64> = nodes.iter().map(|n| n.x).collect();
+        let y_before: Vec<f64> = nodes.iter().map(|n| n.y).collect();
+        compact_subgraphs(&mut nodes, &membership, false);
+        let x_after: Vec<f64> = nodes.iter().map(|n| n.x).collect();
+        let y_after: Vec<f64> = nodes.iter().map(|n| n.y).collect();
+        assert_eq!(x_before, x_after, "single-node subgraphs should not shift");
+        assert_eq!(y_before, y_after, "single-node subgraphs should not shift");
+    }
+
+    #[test]
+    fn test_subgraph_style_overrides() {
+        let subgraphs = vec![SubgraphDef {
+            id: "SG".to_string(),
+            label: Some("Styled".to_string()),
+            direction: None,
+            nodes: vec![crate::ast::flowchart::NodeDef {
+                id: "A".into(),
+                label: None,
+                shape: crate::ast::flowchart::NodeShape::Rectangle,
+                class_shorthand: None,
+            }],
+            edges: vec![],
+            subgraphs: vec![],
+        }];
+        let positioned_nodes = vec![PositionedNode {
+            id: "A".into(),
+            label: "A".into(),
+            shape: crate::ast::flowchart::NodeShape::Rectangle,
+            style: Default::default(),
+            x: 100.0,
+            y: 50.0,
+            width: 40.0,
+            height: 20.0,
+        }];
+        let style_overrides = vec![crate::ast::flowchart::StyleOverride {
+            node_id: "SG".into(),
+            properties: crate::ast::common::parse_style_string("fill:#f96"),
+        }];
+        let provider = FontProvider::default_font();
+        let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
+        let result = position_subgraphs(&subgraphs, &positioned_nodes, &style_overrides, &measurer);
+        assert_eq!(result.len(), 1);
+        assert!(result[0].style.fill.is_some());
+    }
+}

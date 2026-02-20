@@ -1415,6 +1415,27 @@ mod tests {
     }
 
     #[test]
+    fn activation_with_depth_zero() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.activations.push(PositionedActivation {
+            actor_id: "A".to_string(),
+            x: 100.0,
+            y_start: 90.0,
+            y_end: 150.0,
+            depth: 0,
+        });
+
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        // depth=0 produces x_offset=0.0, exercises the x_offset calculation path
+        assert!(
+            svg.contains("<rect "),
+            "expected activation rect with depth 0"
+        );
+    }
+
+    #[test]
     fn message_without_number_no_circle() {
         let theme = default_theme();
         let mut layout = empty_layout();

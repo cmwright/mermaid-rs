@@ -645,4 +645,42 @@ mod tests {
             "subgraph gap should increase separation (with={sep_with:.1}, without={sep_without:.1})"
         );
     }
+
+    #[test]
+    fn test_assign_coordinates_rl_multi_layer_compaction() {
+        // RL with 3 layers - exercises right-to-left compaction (min_succ.is_finite())
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        let c = g.add_node(make_node("C"));
+        g.add_edge(a, b, make_edge());
+        g.add_edge(b, c, make_edge());
+
+        let layers = vec![vec![a], vec![b], vec![c]];
+        let membership = SubgraphMembership::new();
+        let positions = assign_coordinates(&g, &layers, Direction::RightToLeft, &membership, 50.0);
+        let (ax, _) = positions[&a];
+        let (cx, _) = positions[&c];
+        assert!(ax > cx, "In RL, A should have higher x than C");
+    }
+
+    #[test]
+    fn test_node_separation_different_subgraphs() {
+        // node_separation when u_path != v_path adds SUBGRAPH_GROUP_GAP
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        let layers = vec![vec![a, b]];
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A".to_string(), vec!["SG1".to_string()]);
+        membership.insert("B".to_string(), vec!["SG2".to_string()]);
+
+        let positions_sg = assign_coordinates(&g, &layers, Direction::TopToBottom, &membership, 50.0);
+        let empty_membership = SubgraphMembership::new();
+        let positions_no_sg = assign_coordinates(&g, &layers, Direction::TopToBottom, &empty_membership, 50.0);
+
+        let sep_sg = (positions_sg[&a].0 - positions_sg[&b].0).abs();
+        let sep_no = (positions_no_sg[&a].0 - positions_no_sg[&b].0).abs();
+        assert!(sep_sg > sep_no, "subgraph gap should increase separation (with={sep_sg}, without={sep_no})");
+    }
 }

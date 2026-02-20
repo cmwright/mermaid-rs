@@ -22,12 +22,8 @@ pub enum DiagramKind {
 pub fn detect_diagram_kind(source: &str) -> Result<DiagramKind> {
     for line in source.lines() {
         let trimmed = line.trim();
-        // Skip empty lines, comments, frontmatter, and directives
+        // Skip empty lines, comments (%%...), directives (%%{...}%%), and frontmatter (---)
         if trimmed.is_empty() || trimmed.starts_with("%%") || trimmed == "---" {
-            continue;
-        }
-        // Skip directives (but don't skip lines starting with %%{ that aren't on their own line)
-        if trimmed.starts_with("%%{") {
             continue;
         }
 
@@ -181,5 +177,12 @@ mod tests {
     fn test_detect_with_mixed_comments_and_frontmatter() {
         let source = "---\n%% comment inside frontmatter\n---\n%% standalone comment\npie\n    \"A\": 50";
         assert_eq!(detect_diagram_kind(source).unwrap(), DiagramKind::Pie);
+    }
+
+    #[test]
+    fn test_detect_whitespace_only_returns_error() {
+        let source = "   \t  ";
+        let result = detect_diagram_kind(source);
+        assert!(result.is_err(), "whitespace-only content should return an error");
     }
 }

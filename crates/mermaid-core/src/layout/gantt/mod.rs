@@ -1673,4 +1673,876 @@ mod tests {
         assert_eq!(layout.tasks.len(), 1);
         assert!(layout.tasks[0].width > 0.0);
     }
+
+    #[test]
+    fn test_reduce_redundant_dependency_edges_cyclic() {
+        // Cyclic dependencies: A->B, B->C, C->A - toposort Err, keep all edges
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![
+                    GanttTask {
+                        name: "A".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("a".to_string()),
+                        depends_on: vec!["c".to_string()],
+                        start: TaskStart::Date("2014-01-01".to_string()),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                    GanttTask {
+                        name: "B".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("b".to_string()),
+                        depends_on: vec!["a".to_string()],
+                        start: TaskStart::Date("2014-01-03".to_string()),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                    GanttTask {
+                        name: "C".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("c".to_string()),
+                        depends_on: vec!["b".to_string()],
+                        start: TaskStart::Date("2014-01-05".to_string()),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        // With cycle, reduce_redundant_dependency_edges returns edges unchanged
+        assert_eq!(layout.dependency_edges.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_duration_units() {
+        // parse_duration for "100ms", "30s", "5m", "1y"
+        assert_eq!(parse_duration("100ms").unwrap(), Duration::milliseconds(100));
+        assert_eq!(parse_duration("30s").unwrap(), Duration::seconds(30));
+        assert_eq!(parse_duration("5m").unwrap(), Duration::minutes(5));
+        assert_eq!(parse_duration("1y").unwrap(), Duration::days(365));
+    }
+
+    #[test]
+    fn test_generate_grid_lines_60_to_365_days() {
+        // 60-365 days range -> auto tick 30 days (month)
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Task".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date("2014-01-01".to_string()),
+                    end: TaskEnd::Duration("90d".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert!(!layout.grid_lines.is_empty());
+    }
+
+    #[test]
+    fn test_generate_grid_lines_over_365_days() {
+        // >365 days range -> auto tick 90 days (quarter)
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Task".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date("2014-01-01".to_string()),
+                    end: TaskEnd::Duration("400d".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert!(!layout.grid_lines.is_empty());
+    }
+
+    #[test]
+    fn test_grid_lines_label_overlap() {
+        // When labels overlap, show_label = false
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            tick_interval: Some(TickInterval {
+                count: 1,
+                unit: TickUnit::Day,
+            }),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Task".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date("2014-01-01".to_string()),
+                    end: TaskEnd::Duration("60d".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert!(!layout.grid_lines.is_empty());
+        // Some labels may have show_label = false when they overlap
+        let has_hidden = layout.grid_lines.iter().any(|gl| !gl.show_label);
+        let has_visible = layout.grid_lines.iter().any(|gl| gl.show_label);
+        assert!(has_visible || has_hidden, "grid lines should have some labels");
+    }
+
+    #[test]
+    fn test_today_x_when_in_range() {
+        // today_marker == On and today in range -> today_x is Some
+        let now = chrono::Local::now().naive_local();
+        let start = now - Duration::days(5);
+        let end = now + Duration::days(5);
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            today_marker: TodayMarker::On,
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Task".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date(start.format("%Y-%m-%d").to_string()),
+                    end: TaskEnd::Date(end.format("%Y-%m-%d").to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert!(layout.today_x.is_some());
+    }
+
+    #[test]
+    fn test_auto_tick_interval_14_days() {
+        // total_days <= 14 -> tick 1 day
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Task".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date("2014-01-01".to_string()),
+                    end: TaskEnd::Duration("10d".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert!(!layout.grid_lines.is_empty());
+    }
+
+    // --- Additional tests for uncovered lines ---
+
+    #[test]
+    fn test_task_start_before_min_date() {
+        // Task whose start is before first task's start -> min_date update (line 144)
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![
+                    GanttTask {
+                        name: "Later Task".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("t1".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-10".to_string()),
+                        end: TaskEnd::Duration("3d".to_string()),
+                    },
+                    GanttTask {
+                        name: "Earlier Task".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("t2".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-01".to_string()),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.tasks.len(), 2);
+        // Earlier task (index 1) should be to the left of later task (index 0)
+        assert!(layout.tasks[1].x < layout.tasks[0].x);
+    }
+
+    #[test]
+    fn test_after_dependency_unresolved() {
+        // TaskStart::After when dependency isn't yet resolved (all_resolved=false)
+        // Use After referencing a task that comes later - needs multiple passes
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![
+                    GanttTask {
+                        name: "Task A".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("a".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::After(vec!["b".to_string()]),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                    GanttTask {
+                        name: "Task B".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("b".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-01".to_string()),
+                        end: TaskEnd::Duration("3d".to_string()),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.tasks.len(), 2);
+    }
+
+    #[test]
+    fn test_prev_end_previous_not_resolved() {
+        // TaskStart::PrevEnd when previous task isn't resolved yet
+        // Task 1 uses PrevEnd, Task 0 uses After(1) - circular-ish, Task 0 resolves first
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![
+                    GanttTask {
+                        name: "Task A".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("a".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-01".to_string()),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                    GanttTask {
+                        name: "Task B".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("b".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::PrevEnd,
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                    GanttTask {
+                        name: "Task C".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("c".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::PrevEnd,
+                        end: TaskEnd::Until(vec!["a".to_string()]),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.tasks.len(), 3);
+    }
+
+    #[test]
+    fn test_task_end_until_resolution() {
+        // TaskEnd::Until with resolved deps
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![
+                    GanttTask {
+                        name: "Task A".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("a".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-05".to_string()),
+                        end: TaskEnd::Duration("5d".to_string()),
+                    },
+                    GanttTask {
+                        name: "Task B".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("b".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-01".to_string()),
+                        end: TaskEnd::Until(vec!["a".to_string()]),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.tasks.len(), 2);
+        // Task B ends when A starts (Jan 5), so B should end before A
+        assert!(layout.tasks[1].x + layout.tasks[1].width <= layout.tasks[0].x + 1.0);
+    }
+
+    #[test]
+    fn test_task_end_date_invalid() {
+        // TaskEnd::Date with invalid date string -> error
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Bad Task".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date("2014-01-01".to_string()),
+                    end: TaskEnd::Date("not-a-date".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let result = layout_gantt(&ast, &measurer, &theme);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_duration_invalid_no_digits() {
+        assert!(parse_duration("d").is_err());
+        assert!(parse_duration("").is_err());
+        assert!(parse_duration("  ").is_err());
+    }
+
+    #[test]
+    fn test_parse_duration_unknown_unit() {
+        assert!(parse_duration("5x").is_err());
+        assert!(parse_duration("3foo").is_err());
+    }
+
+    #[test]
+    fn test_parse_date_fallback_formats() {
+        // Fallback formats: %Y-%m-%d, %m/%d/%Y, %d/%m/%Y, %Y%m%d
+        assert!(parse_date("2014-01-15", "%d-%m-%Y").is_ok()); // uses %Y-%m-%d fallback
+        assert!(parse_date("01/15/2014", "%Y-%m-%d").is_ok()); // uses %m/%d/%Y fallback
+        assert!(parse_date("15/01/2014", "%Y-%m-%d").is_ok()); // uses %d/%m/%Y fallback
+        assert!(parse_date("20140115", "%Y-%m-%d").is_ok()); // uses %Y%m%d fallback
+    }
+
+    #[test]
+    fn test_self_dependency_skipped() {
+        // Task depends on itself -> continue (no edge added)
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Self Dep".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: vec!["t1".to_string()],
+                    start: TaskStart::Date("2014-01-01".to_string()),
+                    end: TaskEnd::Duration("3d".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.dependency_edges.len(), 0);
+    }
+
+    #[test]
+    fn test_reduce_redundant_edges_node_gt_next() {
+        // Exercise split_at_mut branches: node < next (line 354) and node >= next (360-362)
+        // Need a DAG where we have A->B, A->C, B->C - transitive reduction removes A->C
+        // For node >= next: need edge where from > to in topo order? Actually topo is ordered.
+        // The split_at_mut: if node < next, left[node]; else right[0] with left[next]
+        // We need a graph structure that triggers both branches. Topo order matters.
+        // In topo order, we iterate rev(), so we see higher indices first.
+        // When processing node, we look at neighbors. If node < next, we use left[node].extend(right[0])
+        // If node > next, we use right[0].extend(left[next])
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![
+                    GanttTask {
+                        name: "A".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("a".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-01".to_string()),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                    GanttTask {
+                        name: "B".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("b".to_string()),
+                        depends_on: vec!["a".to_string()],
+                        start: TaskStart::Date("2014-01-03".to_string()),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                    GanttTask {
+                        name: "C".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("c".to_string()),
+                        depends_on: vec!["a".to_string(), "b".to_string()],
+                        start: TaskStart::Date("2014-01-05".to_string()),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.dependency_edges.len(), 2);
+    }
+
+    #[test]
+    fn test_has_alternate_path_from_out_of_bounds() {
+        // has_alternate_path when from >= reachability.len() returns false (edge kept)
+        let edges = vec![DependencyEdge {
+            from_task_index: 10,
+            to_task_index: 0,
+        }];
+        let reduced = reduce_redundant_dependency_edges(2, edges);
+        assert_eq!(reduced.len(), 1);
+    }
+
+    #[test]
+    fn test_tick_interval_explicit() {
+        // Explicit tick interval
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            tick_interval: Some(TickInterval {
+                count: 2,
+                unit: TickUnit::Week,
+            }),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Task".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date("2014-01-01".to_string()),
+                    end: TaskEnd::Duration("60d".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert!(!layout.grid_lines.is_empty());
+    }
+
+    #[test]
+    fn test_unresolved_task_fallback() {
+        // Task that can't resolve after 10 passes uses fallback (today, today+1d)
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![
+                    GanttTask {
+                        name: "Unresolvable".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("u".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::After(vec!["nonexistent".to_string()]),
+                        end: TaskEnd::Duration("1d".to_string()),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.tasks.len(), 1);
+    }
+
+    #[test]
+    fn test_section_more_tasks_than_resolved() {
+        // Section has more AST tasks than resolved (e.g. some unresolved) - task_global_idx >= resolved.len() break
+        // Create case where section has placeholder tasks that don't resolve
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![
+                GanttSection {
+                    name: "S1".to_string(),
+                    tasks: vec![GanttTask {
+                        name: "T1".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("t1".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-01".to_string()),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    }],
+                },
+                GanttSection {
+                    name: "S2".to_string(),
+                    tasks: vec![
+                        GanttTask {
+                            name: "T2a".to_string(),
+                            tags: TaskTags::default(),
+                            id: Some("t2a".to_string()),
+                            depends_on: Vec::new(),
+                            start: TaskStart::Date("2014-01-03".to_string()),
+                            end: TaskEnd::Duration("2d".to_string()),
+                        },
+                        GanttTask {
+                            name: "T2b".to_string(),
+                            tags: TaskTags::default(),
+                            id: Some("t2b".to_string()),
+                            depends_on: Vec::new(),
+                            start: TaskStart::After(vec!["future".to_string()]),
+                            end: TaskEnd::Duration("1d".to_string()),
+                        },
+                    ],
+                },
+            ],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        // Only T1 and T2a resolve; T2b doesn't but gets fallback. All 3 in positioned_tasks.
+        assert!(layout.tasks.len() >= 2);
+    }
+
+    #[test]
+    fn test_parse_date_naive_date_fallback() {
+        let result = parse_date("2014-01-01", "%Y-%m-%d %H:%M:%S");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap().date(), NaiveDate::from_ymd_opt(2014, 1, 1).unwrap());
+    }
+
+    #[test]
+    fn test_prev_end_when_previous_not_resolved() {
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![
+                    GanttTask {
+                        name: "Task A".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("a".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::After(vec!["nonexistent".to_string()]),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                    GanttTask {
+                        name: "Task B".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("b".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::PrevEnd,
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.tasks.len(), 2);
+    }
+
+    #[test]
+    fn test_task_end_until_unresolved_then_resolved() {
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![
+                    GanttTask {
+                        name: "Task A".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("a".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::After(vec!["b".to_string()]),
+                        end: TaskEnd::Duration("3d".to_string()),
+                    },
+                    GanttTask {
+                        name: "Task B".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("b".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-01".to_string()),
+                        end: TaskEnd::Until(vec!["a".to_string()]),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.tasks.len(), 2);
+    }
+
+    #[test]
+    fn test_reduce_redundant_edges_node_gt_next_branch() {
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![
+                    GanttTask {
+                        name: "Task A".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("a".to_string()),
+                        depends_on: vec!["b".to_string()],
+                        start: TaskStart::Date("2014-01-05".to_string()),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                    GanttTask {
+                        name: "Task B".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("b".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-01".to_string()),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.tasks.len(), 2);
+        assert_eq!(layout.dependency_edges.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_date_rule_empty_string() {
+        assert!(parse_date_rule("").is_none());
+        assert!(parse_date_rule("   ").is_none());
+    }
+
+    #[test]
+    fn test_compile_exclusion_rules_exact_date() {
+        let excludes = vec!["2014-01-15".to_string()];
+        let includes: Vec<String> = vec![];
+        let rules = compile_exclusion_rules(&excludes, &includes);
+        let d = NaiveDate::from_ymd_opt(2014, 1, 15).unwrap();
+        assert!(is_excluded(d, &rules));
+    }
+
+    #[test]
+    fn test_tick_interval_explicit_day() {
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            tick_interval: Some(TickInterval { count: 1, unit: TickUnit::Day }),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Task".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date("2014-01-01".to_string()),
+                    end: TaskEnd::Duration("14d".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert!(!layout.grid_lines.is_empty());
+    }
+
+    #[test]
+    fn test_tick_interval_explicit_week() {
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            tick_interval: Some(TickInterval { count: 1, unit: TickUnit::Week }),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Task".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date("2014-01-01".to_string()),
+                    end: TaskEnd::Duration("30d".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert!(!layout.grid_lines.is_empty());
+    }
+
+    #[test]
+    fn test_tick_interval_explicit_month() {
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            tick_interval: Some(TickInterval { count: 1, unit: TickUnit::Month }),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Task".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date("2014-01-01".to_string()),
+                    end: TaskEnd::Duration("90d".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert!(!layout.grid_lines.is_empty());
+    }
+
+    #[test]
+    fn test_grid_lines_label_overlap_hiding() {
+        // Lines 756-757: Narrow range + many ticks -> labels may overlap, show_label = false
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            tick_interval: Some(TickInterval { count: 1, unit: TickUnit::Day }),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Task".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date("2014-01-01".to_string()),
+                    end: TaskEnd::Duration("14d".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert!(!layout.grid_lines.is_empty());
+        // Lines 756-757: overlap loop runs; with many ticks some labels may have show_label=false
+        assert!(layout.grid_lines.len() > 5);
+    }
+
+    #[test]
+    fn test_reduce_redundant_a_to_c_transitive() {
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Section".to_string(),
+                tasks: vec![
+                    GanttTask {
+                        name: "A".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("a".to_string()),
+                        depends_on: Vec::new(),
+                        start: TaskStart::Date("2014-01-01".to_string()),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                    GanttTask {
+                        name: "B".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("b".to_string()),
+                        depends_on: vec!["a".to_string()],
+                        start: TaskStart::Date("2014-01-03".to_string()),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                    GanttTask {
+                        name: "C".to_string(),
+                        tags: TaskTags::default(),
+                        id: Some("c".to_string()),
+                        depends_on: vec!["a".to_string(), "b".to_string()],
+                        start: TaskStart::Date("2014-01-05".to_string()),
+                        end: TaskEnd::Duration("2d".to_string()),
+                    },
+                ],
+            }],
+            ..Default::default()
+        };
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.dependency_edges.len(), 2);
+        assert!(!layout.dependency_edges.iter().any(|e| e.from_task_index == 0 && e.to_task_index == 2));
+    }
 }

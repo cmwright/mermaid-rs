@@ -577,6 +577,7 @@ mod tests {
     #[test]
     fn test_layout_long_edge_with_label() {
         // Long edge with label -> label dummy node should be created at midpoint
+        // Exercises build_edge_bend_points with label_node present
         let result = layout_from_source(
             "flowchart TD\n    A --> B\n    B --> C\n    C --> D\n    A -->|long label| D",
         );
@@ -584,6 +585,279 @@ mod tests {
         assert!(a_to_d.label.is_some());
         assert!(a_to_d.label_x.is_some(), "labeled long edge should have label_x");
         assert!(a_to_d.label_y.is_some(), "labeled long edge should have label_y");
+        assert!(a_to_d.label_width.is_some(), "labeled long edge should have label_width from label_node");
+        assert!(a_to_d.label_height.is_some(), "labeled long edge should have label_height from label_node");
+    }
+
+    #[test]
+    fn test_sync_dummy_positions_skip_when_source_missing_from_node_pos() {
+        use petgraph::graph::DiGraph;
+        use sugiyama::dummy_nodes::DummyChain;
+        use crate::layout::flowchart::types::*;
+
+        let mut graph = DiGraph::new();
+        let a = graph.add_node(NodeData {
+            id: "A".to_string(),
+            label: "A".to_string(),
+            shape: NodeShape::Rectangle,
+            style: Default::default(),
+            width: 40.0,
+            height: 20.0,
+        });
+        let b = graph.add_node(NodeData {
+            id: "B".to_string(),
+            label: "B".to_string(),
+            shape: NodeShape::Rectangle,
+            style: Default::default(),
+            width: 40.0,
+            height: 20.0,
+        });
+
+        let chain = DummyChain {
+            original_source: a,
+            original_target: b,
+            edge_data: EdgeData {
+                label: None,
+                edge_type: EdgeType::SolidArrow,
+                label_width: 0.0,
+                label_height: 0.0,
+            },
+            dummy_nodes: vec![],
+            label_node: None,
+        };
+
+        // positioned_nodes has only B, not A - sync_dummy_positions should continue (skip chain)
+        let positioned_nodes = vec![PositionedNode {
+            id: "B".into(),
+            label: "B".into(),
+            shape: NodeShape::Rectangle,
+            style: Default::default(),
+            x: 100.0,
+            y: 150.0,
+            width: 40.0,
+            height: 20.0,
+        }];
+        let mut positions = std::collections::HashMap::new();
+        positions.insert(a, (50.0, 50.0));
+        positions.insert(b, (100.0, 150.0));
+
+        sync_dummy_positions(&graph, &[chain], &positioned_nodes, &mut positions);
+        assert_eq!(positions.get(&a).unwrap().0, 50.0);
+    }
+
+    #[test]
+    fn test_sync_dummy_positions_skip_when_target_missing_from_node_pos() {
+        use petgraph::graph::DiGraph;
+        use sugiyama::dummy_nodes::DummyChain;
+        use crate::layout::flowchart::types::*;
+
+        let mut graph = DiGraph::new();
+        let a = graph.add_node(NodeData {
+            id: "A".to_string(),
+            label: "A".to_string(),
+            shape: NodeShape::Rectangle,
+            style: Default::default(),
+            width: 40.0,
+            height: 20.0,
+        });
+        let b = graph.add_node(NodeData {
+            id: "B".to_string(),
+            label: "B".to_string(),
+            shape: NodeShape::Rectangle,
+            style: Default::default(),
+            width: 40.0,
+            height: 20.0,
+        });
+
+        let chain = DummyChain {
+            original_source: a,
+            original_target: b,
+            edge_data: EdgeData {
+                label: None,
+                edge_type: EdgeType::SolidArrow,
+                label_width: 0.0,
+                label_height: 0.0,
+            },
+            dummy_nodes: vec![],
+            label_node: None,
+        };
+
+        // positioned_nodes has only A, not B - sync_dummy_positions should continue (line 161)
+        let positioned_nodes = vec![PositionedNode {
+            id: "A".into(),
+            label: "A".into(),
+            shape: NodeShape::Rectangle,
+            style: Default::default(),
+            x: 100.0,
+            y: 50.0,
+            width: 40.0,
+            height: 20.0,
+        }];
+        let mut positions = std::collections::HashMap::new();
+        positions.insert(a, (50.0, 50.0));
+        positions.insert(b, (100.0, 150.0));
+
+        sync_dummy_positions(&graph, &[chain], &positioned_nodes, &mut positions);
+        assert_eq!(positions.get(&b).unwrap().0, 100.0);
+    }
+
+    #[test]
+    fn test_sync_dummy_positions_skip_when_old_src_missing_from_positions() {
+        use petgraph::graph::DiGraph;
+        use sugiyama::dummy_nodes::DummyChain;
+        use crate::layout::flowchart::types::*;
+
+        let mut graph = DiGraph::new();
+        let a = graph.add_node(NodeData {
+            id: "A".to_string(),
+            label: "A".to_string(),
+            shape: NodeShape::Rectangle,
+            style: Default::default(),
+            width: 40.0,
+            height: 20.0,
+        });
+        let b = graph.add_node(NodeData {
+            id: "B".to_string(),
+            label: "B".to_string(),
+            shape: NodeShape::Rectangle,
+            style: Default::default(),
+            width: 40.0,
+            height: 20.0,
+        });
+
+        let chain = DummyChain {
+            original_source: a,
+            original_target: b,
+            edge_data: EdgeData {
+                label: None,
+                edge_type: EdgeType::SolidArrow,
+                label_width: 0.0,
+                label_height: 0.0,
+            },
+            dummy_nodes: vec![],
+            label_node: None,
+        };
+
+        let positioned_nodes = vec![
+            PositionedNode { id: "A".into(), label: "A".into(), shape: NodeShape::Rectangle, style: Default::default(), x: 60.0, y: 50.0, width: 40.0, height: 20.0 },
+            PositionedNode { id: "B".into(), label: "B".into(), shape: NodeShape::Rectangle, style: Default::default(), x: 100.0, y: 150.0, width: 40.0, height: 20.0 },
+        ];
+        let mut positions = std::collections::HashMap::new();
+        positions.insert(b, (100.0, 150.0));
+        // a is missing from positions - should continue (line 164)
+
+        sync_dummy_positions(&graph, &[chain], &positioned_nodes, &mut positions);
+        assert!(!positions.contains_key(&a));
+    }
+
+    #[test]
+    fn test_sync_dummy_positions_skip_when_old_tgt_missing_from_positions() {
+        use petgraph::graph::DiGraph;
+        use sugiyama::dummy_nodes::DummyChain;
+        use crate::layout::flowchart::types::*;
+
+        let mut graph = DiGraph::new();
+        let a = graph.add_node(NodeData {
+            id: "A".to_string(),
+            label: "A".to_string(),
+            shape: NodeShape::Rectangle,
+            style: Default::default(),
+            width: 40.0,
+            height: 20.0,
+        });
+        let b = graph.add_node(NodeData {
+            id: "B".to_string(),
+            label: "B".to_string(),
+            shape: NodeShape::Rectangle,
+            style: Default::default(),
+            width: 40.0,
+            height: 20.0,
+        });
+
+        let chain = DummyChain {
+            original_source: a,
+            original_target: b,
+            edge_data: EdgeData {
+                label: None,
+                edge_type: EdgeType::SolidArrow,
+                label_width: 0.0,
+                label_height: 0.0,
+            },
+            dummy_nodes: vec![],
+            label_node: None,
+        };
+
+        let positioned_nodes = vec![
+            PositionedNode { id: "A".into(), label: "A".into(), shape: NodeShape::Rectangle, style: Default::default(), x: 50.0, y: 50.0, width: 40.0, height: 20.0 },
+            PositionedNode { id: "B".into(), label: "B".into(), shape: NodeShape::Rectangle, style: Default::default(), x: 110.0, y: 150.0, width: 40.0, height: 20.0 },
+        ];
+        let mut positions = std::collections::HashMap::new();
+        positions.insert(a, (50.0, 50.0));
+        // b is missing from positions - should continue (line 168)
+
+        sync_dummy_positions(&graph, &[chain], &positioned_nodes, &mut positions);
+        assert!(!positions.contains_key(&b));
+    }
+
+    #[test]
+    fn test_sync_dummy_positions_skip_when_neither_endpoint_moved() {
+        use petgraph::graph::DiGraph;
+        use sugiyama::dummy_nodes::DummyChain;
+        use crate::layout::flowchart::types::*;
+
+        let mut graph = DiGraph::new();
+        let a = graph.add_node(NodeData {
+            id: "A".to_string(),
+            label: "A".to_string(),
+            shape: NodeShape::Rectangle,
+            style: Default::default(),
+            width: 40.0,
+            height: 20.0,
+        });
+        let b = graph.add_node(NodeData {
+            id: "B".to_string(),
+            label: "B".to_string(),
+            shape: NodeShape::Rectangle,
+            style: Default::default(),
+            width: 40.0,
+            height: 20.0,
+        });
+        let dummy = graph.add_node(NodeData {
+            id: "__dummy_0_1".to_string(),
+            label: String::new(),
+            shape: NodeShape::Rectangle,
+            style: Default::default(),
+            width: 0.0,
+            height: 0.0,
+        });
+
+        let chain = DummyChain {
+            original_source: a,
+            original_target: b,
+            edge_data: EdgeData {
+                label: None,
+                edge_type: EdgeType::SolidArrow,
+                label_width: 0.0,
+                label_height: 0.0,
+            },
+            dummy_nodes: vec![dummy],
+            label_node: None,
+        };
+
+        let (ax, ay) = (50.0, 50.0);
+        let (bx, by) = (100.0, 150.0);
+        let positioned_nodes = vec![
+            PositionedNode { id: "A".into(), label: "A".into(), shape: NodeShape::Rectangle, style: Default::default(), x: ax, y: ay, width: 40.0, height: 20.0 },
+            PositionedNode { id: "B".into(), label: "B".into(), shape: NodeShape::Rectangle, style: Default::default(), x: bx, y: by, width: 40.0, height: 20.0 },
+        ];
+        let mut positions = std::collections::HashMap::new();
+        positions.insert(a, (ax, ay));
+        positions.insert(b, (bx, by));
+        positions.insert(dummy, (75.0, 100.0));
+
+        sync_dummy_positions(&graph, &[chain], &positioned_nodes, &mut positions);
+        // Neither moved - dummy position should be unchanged
+        assert!((positions.get(&dummy).unwrap().0 - 75.0).abs() < 0.01);
     }
 
     // -- edge_routing.rs: diamond node intersection --

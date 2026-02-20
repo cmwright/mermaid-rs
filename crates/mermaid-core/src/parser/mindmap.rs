@@ -608,4 +608,92 @@ mod tests {
             "D"
         );
     }
+
+    #[test]
+    fn test_apply_decorator_icon_and_class() {
+        let source = r#"mindmap
+  root
+    A
+    ::icon(fa-home)
+    :::urgent"#;
+        let ast = parse_mindmap(source).unwrap();
+        assert_eq!(ast.root.children.len(), 1);
+        assert_eq!(ast.root.children[0].label, "A");
+        assert_eq!(ast.root.children[0].icon.as_deref(), Some("fa-home"));
+        assert_eq!(ast.root.children[0].css_class.as_deref(), Some("urgent"));
+    }
+
+    #[test]
+    fn test_normalize_label_br_and_trim() {
+        assert_eq!(normalize_label("  hello  "), "hello");
+        assert_eq!(normalize_label("  hello  "), "hello");
+        let with_br = "Line1<br/>Line2";
+        assert_eq!(normalize_label(with_br), "Line1\nLine2");
+    }
+
+    #[test]
+    fn test_preprocess_empty_lines() {
+        let source = "mindmap\n  root\n\n  \n    child";
+        let result = preprocess(source);
+        assert!(result.contains("root"));
+        assert!(result.contains("child"));
+        assert!(result.contains('\x01'));
+    }
+
+    #[test]
+    fn test_preprocess_dedented() {
+        let source = "mindmap\n  root\n    child1\n  sibling";
+        let result = preprocess(source);
+        assert!(result.contains('\x02'));
+        assert!(result.contains("sibling"));
+    }
+
+    #[test]
+    fn test_node_with_explicit_id() {
+        let source = r#"mindmap
+  root
+    myid[Explicit ID Node]"#;
+        let ast = parse_mindmap(source).unwrap();
+        assert_eq!(ast.root.children.len(), 1);
+        assert_eq!(ast.root.children[0].id, "myid");
+        assert_eq!(ast.root.children[0].label, "Explicit ID Node");
+    }
+
+    #[test]
+    fn test_parse_empty_mindmap_error() {
+        // mindmap with no content after header - triggers error (empty root or parse failure)
+        let source = "mindmap\n";
+        let result = parse_mindmap(source);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_preprocess_mindmap_only_no_content() {
+        // Only "mindmap" line, no root - preprocess returns empty (lines.is_empty()), parse fails
+        let source = "mindmap\n\n  \n";
+        let result = preprocess(source);
+        assert!(result.is_empty());
+        let parse_result = parse_mindmap(source);
+        assert!(parse_result.is_err());
+    }
+
+    #[test]
+    fn test_decorators_at_various_levels() {
+        let source = r#"mindmap
+  root
+    Level1
+      ::icon(fa-star)
+      Level2
+        :::nested
+        Level3"#;
+        let ast = parse_mindmap(source).unwrap();
+        assert_eq!(ast.root.children.len(), 1);
+        let l1 = &ast.root.children[0];
+        assert_eq!(l1.label, "Level1");
+        assert_eq!(l1.icon.as_deref(), Some("fa-star"));
+        assert_eq!(l1.children.len(), 1);
+        assert_eq!(l1.children[0].label, "Level2");
+        assert_eq!(l1.children[0].css_class.as_deref(), Some("nested"));
+        assert_eq!(l1.children[0].children[0].label, "Level3");
+    }
 }
