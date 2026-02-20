@@ -51,16 +51,39 @@ pub enum NodeShape {
     TrapezoidAlt,
 }
 
+/// The line style of an edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LineStyle {
+    #[default]
+    Solid,
+    Dotted,
+    Thick,
+    Invisible,
+}
+
+/// The arrow/terminal type at one end of an edge.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ArrowEnd {
+    #[default]
+    None,
+    Arrow,
+    Circle,
+    Cross,
+}
+
 /// An edge connecting two nodes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EdgeDef {
     pub from: String,
     pub to: String,
-    pub edge_type: EdgeType,
+    pub line_style: LineStyle,
+    pub arrow_start: ArrowEnd,
+    pub arrow_end: ArrowEnd,
     pub label: Option<String>,
 }
 
-/// The visual type of an edge.
+/// Legacy edge type enum — kept for backward compatibility with tests.
+/// Maps to the decomposed (LineStyle, ArrowEnd) pair.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum EdgeType {
     #[default]
@@ -70,6 +93,19 @@ pub enum EdgeType {
     DottedLine,
     ThickArrow,
     ThickLine,
+}
+
+impl EdgeType {
+    pub fn to_parts(self) -> (LineStyle, ArrowEnd) {
+        match self {
+            EdgeType::SolidArrow => (LineStyle::Solid, ArrowEnd::Arrow),
+            EdgeType::SolidLine => (LineStyle::Solid, ArrowEnd::None),
+            EdgeType::DottedArrow => (LineStyle::Dotted, ArrowEnd::Arrow),
+            EdgeType::DottedLine => (LineStyle::Dotted, ArrowEnd::None),
+            EdgeType::ThickArrow => (LineStyle::Thick, ArrowEnd::Arrow),
+            EdgeType::ThickLine => (LineStyle::Thick, ArrowEnd::None),
+        }
+    }
 }
 
 /// A subgraph (group of nodes).

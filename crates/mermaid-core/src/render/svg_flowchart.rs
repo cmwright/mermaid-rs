@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use crate::ast::flowchart::{EdgeType, NodeShape};
+use crate::ast::flowchart::{ArrowEnd, LineStyle, NodeShape};
 use crate::error::Result;
 use crate::layout::flowchart::{
     PositionedEdge, PositionedGraph, PositionedNode, PositionedSubgraph,
@@ -88,8 +88,20 @@ fn build_defs(svg: &mut String, theme: &Theme) {
   <marker id="arrowhead" viewBox="0 0 10 10" markerWidth="{mw}" markerHeight="{mw}" refX="8.5" refY="5" orient="auto" markerUnits="userSpaceOnUse">
     <path d="M 0 0 L 10 5 L 0 10 z" fill="{line_color}"/>
   </marker>
-  <marker id="arrowhead-thick" viewBox="0 0 10 10" markerWidth="{mw}" markerHeight="{mw}" refX="8.5" refY="5" orient="auto" markerUnits="userSpaceOnUse">
-    <path d="M 0 0 L 10 5 L 0 10 z" fill="{line_color}"/>
+  <marker id="arrowhead-start" viewBox="0 0 10 10" markerWidth="{mw}" markerHeight="{mw}" refX="1.5" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+    <path d="M 10 0 L 0 5 L 10 10 z" fill="{line_color}"/>
+  </marker>
+  <marker id="circle-end" viewBox="0 0 10 10" markerWidth="{mw}" markerHeight="{mw}" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+    <circle cx="5" cy="5" r="4" stroke="{line_color}" stroke-width="1" fill="none"/>
+  </marker>
+  <marker id="circle-start" viewBox="0 0 10 10" markerWidth="{mw}" markerHeight="{mw}" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+    <circle cx="5" cy="5" r="4" stroke="{line_color}" stroke-width="1" fill="none"/>
+  </marker>
+  <marker id="cross-end" viewBox="0 0 10 10" markerWidth="{mw}" markerHeight="{mw}" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+    <path d="M 1 1 L 9 9 M 9 1 L 1 9" stroke="{line_color}" stroke-width="1.5" fill="none"/>
+  </marker>
+  <marker id="cross-start" viewBox="0 0 10 10" markerWidth="{mw}" markerHeight="{mw}" refX="1" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+    <path d="M 1 1 L 9 9 M 9 1 L 1 9" stroke="{line_color}" stroke-width="1.5" fill="none"/>
   </marker>
 </defs>
 "#,
@@ -491,73 +503,59 @@ fn draw_shape(
     }
 }
 
+fn marker_end_attr(arrow: ArrowEnd) -> &'static str {
+    match arrow {
+        ArrowEnd::None => "",
+        ArrowEnd::Arrow => r#" marker-end="url(#arrowhead)""#,
+        ArrowEnd::Circle => r#" marker-end="url(#circle-end)""#,
+        ArrowEnd::Cross => r#" marker-end="url(#cross-end)""#,
+    }
+}
+
+fn marker_start_attr(arrow: ArrowEnd) -> &'static str {
+    match arrow {
+        ArrowEnd::None => "",
+        ArrowEnd::Arrow => r#" marker-start="url(#arrowhead-start)""#,
+        ArrowEnd::Circle => r#" marker-start="url(#circle-start)""#,
+        ArrowEnd::Cross => r#" marker-start="url(#cross-start)""#,
+    }
+}
+
 fn render_edge(svg: &mut String, edge: &PositionedEdge, theme: &Theme) {
     if edge.points.len() < 2 {
         return;
     }
 
-    let line_color = theme.line_color.to_css();
+    if edge.line_style == LineStyle::Invisible {
+        return;
+    }
 
-    // Build path using B-spline interpolation (same as d3.curveBasis)
+    let line_color = theme.line_color.to_css();
     let path_d = build_basis_curve_path(&edge.points);
 
-    // Edge type styling
-    match edge.edge_type {
-        EdgeType::SolidArrow => {
-            let _ = write!(
-                svg,
-                r#"<path d="{}" fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>"#,
-                path_d,
-                line_color,
-                theme.flowchart.edge_width.max(1.75),
-            );
-        }
-        EdgeType::DottedArrow => {
-            let _ = write!(
-                svg,
-                r#"<path d="{}" fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3,3" marker-end="url(#arrowhead)"/>"#,
-                path_d,
-                line_color,
-                theme.flowchart.edge_width.max(1.75),
-            );
-        }
-        EdgeType::ThickArrow => {
-            let _ = write!(
-                svg,
-                r#"<path d="{}" fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#arrowhead)"/>"#,
-                path_d,
-                line_color,
-                theme.flowchart.edge_width * 2.0,
-            );
-        }
-        EdgeType::SolidLine => {
-            let _ = write!(
-                svg,
-                r#"<path d="{}" fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round"/>"#,
-                path_d,
-                line_color,
-                theme.flowchart.edge_width.max(1.75),
-            );
-        }
-        EdgeType::DottedLine => {
-            let _ = write!(
-                svg,
-                r#"<path d="{}" fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="3,3"/>"#,
-                path_d,
-                line_color,
-                theme.flowchart.edge_width.max(1.75),
-            );
-        }
-        EdgeType::ThickLine => {
-            let _ = write!(
-                svg,
-                r#"<path d="{}" fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round"/>"#,
-                path_d,
-                line_color,
-                theme.flowchart.edge_width * 2.0,
-            );
-        }
-    }
+    let stroke_width = match edge.line_style {
+        LineStyle::Thick => theme.flowchart.edge_width * 2.0,
+        _ => theme.flowchart.edge_width.max(1.75),
+    };
+
+    let dasharray = match edge.line_style {
+        LineStyle::Dotted => r#" stroke-dasharray="3,3""#,
+        _ => "",
+    };
+
+    let m_end = marker_end_attr(edge.arrow_end);
+    let m_start = marker_start_attr(edge.arrow_start);
+
+    let _ = write!(
+        svg,
+        r#"<path d="{}" fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round"{}{}{}/>"#,
+        path_d,
+        line_color,
+        stroke_width,
+        dasharray,
+        m_end,
+        m_start,
+    );
     svg.push('\n');
 
     // Edge label
@@ -696,7 +694,7 @@ fn render_subgraph(svg: &mut String, sg: &PositionedSubgraph, theme: &Theme) {
 mod tests {
     use super::*;
     use crate::ast::common::StyleProperties;
-    use crate::ast::flowchart::{Direction, EdgeType, NodeShape};
+    use crate::ast::flowchart::{ArrowEnd, Direction, EdgeType, LineStyle, NodeShape};
     use crate::layout::flowchart::{
         PositionedEdge, PositionedGraph, PositionedNode, PositionedSubgraph,
     };
@@ -740,10 +738,13 @@ mod tests {
         label: Option<&str>,
     ) -> PositionedEdge {
         let has_label = label.is_some();
+        let (line_style, arrow_end) = edge_type.to_parts();
         PositionedEdge {
             from_id: from.to_string(),
             to_id: to.to_string(),
-            edge_type,
+            line_style,
+            arrow_start: ArrowEnd::None,
+            arrow_end,
             label: label.map(|s| s.to_string()),
             label_x: if has_label { Some(150.0) } else { None },
             label_y: if has_label { Some(150.0) } else { None },
@@ -1187,10 +1188,11 @@ mod tests {
         let theme = Theme::default();
         let svg = render_svg(&graph, &theme).unwrap();
 
-        let circle_count = svg.matches("<circle").count();
+        let after_defs = svg.split("</defs>").nth(1).unwrap_or("");
+        let circle_count = after_defs.matches("<circle").count();
         assert_eq!(
             circle_count, 2,
-            "DoubleCircle should produce exactly 2 <circle> elements, found {}. SVG: {}",
+            "DoubleCircle should produce exactly 2 <circle> elements in content, found {}. SVG: {}",
             circle_count, svg
         );
 
@@ -1244,10 +1246,11 @@ mod tests {
         let theme = Theme::default();
         let svg = render_svg(&graph, &theme).unwrap();
 
-        let circle_count = svg.matches("<circle").count();
+        let after_defs = svg.split("</defs>").nth(1).unwrap_or("");
+        let circle_count = after_defs.matches("<circle").count();
         assert_eq!(
             circle_count, 1,
-            "Circle should produce exactly 1 <circle> element"
+            "Circle should produce exactly 1 <circle> element in content"
         );
     }
 
@@ -1494,7 +1497,9 @@ mod tests {
         let edge = PositionedEdge {
             from_id: "a".to_string(),
             to_id: "b".to_string(),
-            edge_type: EdgeType::SolidArrow,
+            line_style: LineStyle::Solid,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::Arrow,
             label: None,
             label_x: None,
             label_y: None,
@@ -1521,7 +1526,9 @@ mod tests {
         let edge = PositionedEdge {
             from_id: "a".to_string(),
             to_id: "b".to_string(),
-            edge_type: EdgeType::SolidArrow,
+            line_style: LineStyle::Solid,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::Arrow,
             label: Some("fallback".to_string()),
             label_x: Some(150.0),
             label_y: Some(150.0),
@@ -1599,5 +1606,115 @@ mod tests {
             "Raw HTML tags should not appear in output. SVG: {}",
             svg
         );
+    }
+
+    // ── New marker and edge style tests ─────────────────────────
+
+    #[test]
+    fn test_circle_end_marker() {
+        let mut edge = make_edge("a", "b", EdgeType::SolidArrow, None);
+        edge.arrow_end = ArrowEnd::Circle;
+        let nodes = vec![
+            make_node("a", "A", NodeShape::Rectangle),
+            make_node("b", "B", NodeShape::Rectangle),
+        ];
+        let graph = make_graph(nodes, vec![edge], vec![]);
+        let theme = Theme::default();
+        let svg = render_svg(&graph, &theme).unwrap();
+
+        assert!(
+            svg.contains(r#"marker-end="url(#circle-end)""#),
+            "Circle edge should have circle-end marker. SVG: {}",
+            svg
+        );
+    }
+
+    #[test]
+    fn test_cross_end_marker() {
+        let mut edge = make_edge("a", "b", EdgeType::SolidArrow, None);
+        edge.arrow_end = ArrowEnd::Cross;
+        let nodes = vec![
+            make_node("a", "A", NodeShape::Rectangle),
+            make_node("b", "B", NodeShape::Rectangle),
+        ];
+        let graph = make_graph(nodes, vec![edge], vec![]);
+        let theme = Theme::default();
+        let svg = render_svg(&graph, &theme).unwrap();
+
+        assert!(
+            svg.contains(r#"marker-end="url(#cross-end)""#),
+            "Cross edge should have cross-end marker. SVG: {}",
+            svg
+        );
+    }
+
+    #[test]
+    fn test_bidirectional_arrow_markers() {
+        let mut edge = make_edge("a", "b", EdgeType::SolidArrow, None);
+        edge.arrow_start = ArrowEnd::Arrow;
+        edge.arrow_end = ArrowEnd::Arrow;
+        let nodes = vec![
+            make_node("a", "A", NodeShape::Rectangle),
+            make_node("b", "B", NodeShape::Rectangle),
+        ];
+        let graph = make_graph(nodes, vec![edge], vec![]);
+        let theme = Theme::default();
+        let svg = render_svg(&graph, &theme).unwrap();
+
+        assert!(
+            svg.contains(r#"marker-end="url(#arrowhead)""#),
+            "Bidirectional edge should have arrowhead marker-end. SVG: {}",
+            svg
+        );
+        assert!(
+            svg.contains(r#"marker-start="url(#arrowhead-start)""#),
+            "Bidirectional edge should have arrowhead-start marker-start. SVG: {}",
+            svg
+        );
+    }
+
+    #[test]
+    fn test_invisible_edge_not_rendered() {
+        let edge = PositionedEdge {
+            from_id: "a".to_string(),
+            to_id: "b".to_string(),
+            line_style: LineStyle::Invisible,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::None,
+            label: None,
+            label_x: None,
+            label_y: None,
+            label_width: None,
+            label_height: None,
+            points: vec![(50.0, 50.0), (100.0, 100.0), (150.0, 150.0)],
+        };
+        let nodes = vec![
+            make_node("a", "A", NodeShape::Rectangle),
+            make_node("b", "B", NodeShape::Rectangle),
+        ];
+        let graph = make_graph(nodes, vec![edge], vec![]);
+        let theme = Theme::default();
+        let svg = render_svg(&graph, &theme).unwrap();
+
+        let after_defs = svg.split("</defs>").nth(1).unwrap_or("");
+        assert!(
+            !after_defs.contains("<path d=\"M"),
+            "Invisible edge should not render a path in content. SVG: {}",
+            svg
+        );
+    }
+
+    #[test]
+    fn test_defs_contain_all_markers() {
+        let graph = make_graph(vec![], vec![], vec![]);
+        let theme = Theme::default();
+        let svg = render_svg(&graph, &theme).unwrap();
+
+        assert!(svg.contains(r#"id="arrowhead""#), "should have arrowhead marker");
+        assert!(svg.contains(r#"id="arrowhead-start""#), "should have arrowhead-start marker");
+        assert!(svg.contains(r#"id="circle-end""#), "should have circle-end marker");
+        assert!(svg.contains(r#"id="circle-start""#), "should have circle-start marker");
+        assert!(svg.contains(r#"id="cross-end""#), "should have cross-end marker");
+        assert!(svg.contains(r#"id="cross-start""#), "should have cross-start marker");
     }
 }

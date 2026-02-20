@@ -1103,7 +1103,9 @@ mod tests {
             edges: vec![crate::ast::flowchart::EdgeDef {
                 from: "A".into(),
                 to: "B".into(),
-                edge_type: crate::ast::flowchart::EdgeType::SolidArrow,
+                line_style: crate::ast::flowchart::LineStyle::Solid,
+                arrow_start: crate::ast::flowchart::ArrowEnd::None,
+                arrow_end: crate::ast::flowchart::ArrowEnd::Arrow,
                 label: None,
             }],
             subgraphs: vec![],
@@ -1162,7 +1164,9 @@ mod tests {
                     edges: vec![crate::ast::flowchart::EdgeDef {
                         from: "A1".into(),
                         to: "A2".into(),
-                        edge_type: crate::ast::flowchart::EdgeType::SolidArrow,
+                        line_style: crate::ast::flowchart::LineStyle::Solid,
+                        arrow_start: crate::ast::flowchart::ArrowEnd::None,
+                        arrow_end: crate::ast::flowchart::ArrowEnd::Arrow,
                         label: None,
                     }],
                     subgraphs: vec![],
@@ -1188,7 +1192,9 @@ mod tests {
                     edges: vec![crate::ast::flowchart::EdgeDef {
                         from: "B1".into(),
                         to: "B2".into(),
-                        edge_type: crate::ast::flowchart::EdgeType::SolidArrow,
+                        line_style: crate::ast::flowchart::LineStyle::Solid,
+                        arrow_start: crate::ast::flowchart::ArrowEnd::None,
+                        arrow_end: crate::ast::flowchart::ArrowEnd::Arrow,
                         label: None,
                     }],
                     subgraphs: vec![],

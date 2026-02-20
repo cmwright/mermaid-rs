@@ -90,7 +90,9 @@ pub fn insert_dummy_nodes(
                 dummy,
                 EdgeData {
                     label: None,
-                    edge_type: edge_data.edge_type,
+                    line_style: edge_data.line_style,
+                    arrow_start: edge_data.arrow_start,
+                    arrow_end: edge_data.arrow_end,
                     label_width: 0.0,
                     label_height: 0.0,
                 },
@@ -104,7 +106,9 @@ pub fn insert_dummy_nodes(
             tgt,
             EdgeData {
                 label: None,
-                edge_type: edge_data.edge_type,
+                line_style: edge_data.line_style,
+                arrow_start: edge_data.arrow_start,
+                arrow_end: edge_data.arrow_end,
                 label_width: 0.0,
                 label_height: 0.0,
             },
@@ -149,7 +153,7 @@ pub fn extract_dummy_positions(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::flowchart::EdgeType;
+    use crate::ast::flowchart::{ArrowEnd, LineStyle};
 
     fn make_node(id: &str) -> NodeData {
         NodeData {
@@ -165,7 +169,9 @@ mod tests {
     fn make_edge_data(label: Option<&str>) -> EdgeData {
         let (lw, lh) = if label.is_some() { (50.0, 15.0) } else { (0.0, 0.0) };
         EdgeData {
-            edge_type: EdgeType::SolidArrow,
+            line_style: LineStyle::Solid,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::Arrow,
             label: label.map(String::from),
             label_width: lw,
             label_height: lh,

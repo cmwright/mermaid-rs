@@ -335,7 +335,7 @@ fn topological_sort(graph: &DiGraph<NodeData, EdgeData>) -> Vec<NodeIndex> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::flowchart::{EdgeDef, EdgeType, NodeDef, NodeShape, SubgraphDef};
+    use crate::ast::flowchart::{ArrowEnd, EdgeDef, LineStyle, NodeDef, NodeShape, SubgraphDef};
 
     fn make_node_data(id: &str) -> NodeData {
         NodeData {
@@ -350,7 +350,9 @@ mod tests {
 
     fn make_edge_data() -> EdgeData {
         EdgeData {
-            edge_type: EdgeType::SolidArrow,
+            line_style: LineStyle::Solid,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::Arrow,
             label: None,
             label_width: 0.0,
             label_height: 0.0,
@@ -473,7 +475,7 @@ mod tests {
                         NodeDef { id: "A".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
                         NodeDef { id: "B".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
                     ],
-                    edges: vec![EdgeDef { from: "A".into(), to: "B".into(), edge_type: EdgeType::SolidArrow, label: None }],
+                    edges: vec![EdgeDef { from: "A".into(), to: "B".into(), line_style: LineStyle::Solid, arrow_start: ArrowEnd::None, arrow_end: ArrowEnd::Arrow, label: None }],
                     subgraphs: vec![],
                 },
                 SubgraphDef {
@@ -656,7 +658,7 @@ mod tests {
                         NodeDef { id: "A".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
                         NodeDef { id: "B".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
                     ],
-                    edges: vec![EdgeDef { from: "A".into(), to: "B".into(), edge_type: EdgeType::SolidArrow, label: None }],
+                    edges: vec![EdgeDef { from: "A".into(), to: "B".into(), line_style: LineStyle::Solid, arrow_start: ArrowEnd::None, arrow_end: ArrowEnd::Arrow, label: None }],
                     subgraphs: vec![],
                 },
                 SubgraphDef {

@@ -181,7 +181,7 @@ fn build_edge_bend_points(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::flowchart::{EdgeDef, EdgeType, NodeDef, NodeShape};
+    use crate::ast::flowchart::{ArrowEnd, EdgeDef, LineStyle, NodeDef, NodeShape};
     use crate::font::FontProvider;
 
     fn make_measurer(provider: &FontProvider) -> TextMeasurer<'_> {
@@ -210,7 +210,9 @@ mod tests {
             edges: vec![EdgeDef {
                 from: "A".into(),
                 to: "B".into(),
-                edge_type: EdgeType::SolidArrow,
+                line_style: LineStyle::Solid,
+                arrow_start: ArrowEnd::None,
+                arrow_end: ArrowEnd::Arrow,
                 label: None,
             }],
             subgraphs: vec![],
@@ -253,7 +255,9 @@ mod tests {
             edges: vec![EdgeDef {
                 from: "A".into(),
                 to: "B".into(),
-                edge_type: EdgeType::SolidArrow,
+                line_style: LineStyle::Solid,
+                arrow_start: ArrowEnd::None,
+                arrow_end: ArrowEnd::Arrow,
                 label: None,
             }],
             subgraphs: vec![],
@@ -299,13 +303,17 @@ mod tests {
                 EdgeDef {
                     from: "A".into(),
                     to: "B".into(),
-                    edge_type: EdgeType::SolidArrow,
+                    line_style: LineStyle::Solid,
+                arrow_start: ArrowEnd::None,
+                arrow_end: ArrowEnd::Arrow,
                     label: None,
                 },
                 EdgeDef {
                     from: "A".into(),
                     to: "C".into(),
-                    edge_type: EdgeType::SolidArrow,
+                    line_style: LineStyle::Solid,
+                arrow_start: ArrowEnd::None,
+                arrow_end: ArrowEnd::Arrow,
                     label: None,
                 },
             ],

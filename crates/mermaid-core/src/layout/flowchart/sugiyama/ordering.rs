@@ -750,6 +750,7 @@ fn sort_sublayer_by_barycenter(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::flowchart::{ArrowEnd, LineStyle};
     use petgraph::graph::DiGraph;
 
     fn make_node(id: &str) -> NodeData {
@@ -765,7 +766,9 @@ mod tests {
 
     fn make_edge() -> EdgeData {
         EdgeData {
-            edge_type: Default::default(),
+            line_style: LineStyle::Solid,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::Arrow,
             label: None,
             label_width: 0.0,
             label_height: 0.0,

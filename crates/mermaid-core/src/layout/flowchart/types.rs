@@ -1,5 +1,5 @@
 use crate::ast::common::StyleProperties;
-use crate::ast::flowchart::{Direction, EdgeType, NodeShape};
+use crate::ast::flowchart::{ArrowEnd, Direction, LineStyle, NodeShape};
 
 // ── Layout constants ────────────────────────────────────────
 
@@ -33,7 +33,9 @@ pub struct PositionedNode {
 pub struct PositionedEdge {
     pub from_id: String,
     pub to_id: String,
-    pub edge_type: EdgeType,
+    pub line_style: LineStyle,
+    pub arrow_start: ArrowEnd,
+    pub arrow_end: ArrowEnd,
     pub label: Option<String>,
     pub label_x: Option<f64>,
     pub label_y: Option<f64>,
@@ -78,7 +80,9 @@ pub struct NodeData {
 #[derive(Debug, Clone)]
 pub struct EdgeData {
     pub label: Option<String>,
-    pub edge_type: EdgeType,
+    pub line_style: LineStyle,
+    pub arrow_start: ArrowEnd,
+    pub arrow_end: ArrowEnd,
     pub label_width: f64,
     pub label_height: f64,
 }

@@ -261,7 +261,7 @@ fn build_edge_bend_points(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::flowchart::{EdgeDef, EdgeType, NodeDef, NodeShape};
+    use crate::ast::flowchart::{ArrowEnd, EdgeDef, LineStyle, NodeDef, NodeShape};
     use crate::font::FontProvider;
 
     fn make_measurer(provider: &FontProvider) -> TextMeasurer<'_> {
@@ -290,7 +290,9 @@ mod tests {
             edges: vec![EdgeDef {
                 from: "A".into(),
                 to: "B".into(),
-                edge_type: EdgeType::SolidArrow,
+                line_style: LineStyle::Solid,
+                arrow_start: ArrowEnd::None,
+                arrow_end: ArrowEnd::Arrow,
                 label: None,
             }],
             subgraphs: vec![],
@@ -333,7 +335,9 @@ mod tests {
             edges: vec![EdgeDef {
                 from: "A".into(),
                 to: "B".into(),
-                edge_type: EdgeType::SolidArrow,
+                line_style: LineStyle::Solid,
+                arrow_start: ArrowEnd::None,
+                arrow_end: ArrowEnd::Arrow,
                 label: None,
             }],
             subgraphs: vec![],
@@ -379,13 +383,17 @@ mod tests {
                 EdgeDef {
                     from: "A".into(),
                     to: "B".into(),
-                    edge_type: EdgeType::SolidArrow,
+                    line_style: LineStyle::Solid,
+                arrow_start: ArrowEnd::None,
+                arrow_end: ArrowEnd::Arrow,
                     label: None,
                 },
                 EdgeDef {
                     from: "A".into(),
                     to: "C".into(),
-                    edge_type: EdgeType::SolidArrow,
+                    line_style: LineStyle::Solid,
+                arrow_start: ArrowEnd::None,
+                arrow_end: ArrowEnd::Arrow,
                     label: None,
                 },
             ],
@@ -618,7 +626,9 @@ mod tests {
             original_target: b,
             edge_data: EdgeData {
                 label: None,
-                edge_type: EdgeType::SolidArrow,
+                line_style: LineStyle::Solid,
+                arrow_start: ArrowEnd::None,
+                arrow_end: ArrowEnd::Arrow,
                 label_width: 0.0,
                 label_height: 0.0,
             },
@@ -674,7 +684,9 @@ mod tests {
             original_target: b,
             edge_data: EdgeData {
                 label: None,
-                edge_type: EdgeType::SolidArrow,
+                line_style: LineStyle::Solid,
+                arrow_start: ArrowEnd::None,
+                arrow_end: ArrowEnd::Arrow,
                 label_width: 0.0,
                 label_height: 0.0,
             },
@@ -730,7 +742,9 @@ mod tests {
             original_target: b,
             edge_data: EdgeData {
                 label: None,
-                edge_type: EdgeType::SolidArrow,
+                line_style: LineStyle::Solid,
+                arrow_start: ArrowEnd::None,
+                arrow_end: ArrowEnd::Arrow,
                 label_width: 0.0,
                 label_height: 0.0,
             },
@@ -779,7 +793,9 @@ mod tests {
             original_target: b,
             edge_data: EdgeData {
                 label: None,
-                edge_type: EdgeType::SolidArrow,
+                line_style: LineStyle::Solid,
+                arrow_start: ArrowEnd::None,
+                arrow_end: ArrowEnd::Arrow,
                 label_width: 0.0,
                 label_height: 0.0,
             },
@@ -836,7 +852,9 @@ mod tests {
             original_target: b,
             edge_data: EdgeData {
                 label: None,
-                edge_type: EdgeType::SolidArrow,
+                line_style: LineStyle::Solid,
+                arrow_start: ArrowEnd::None,
+                arrow_end: ArrowEnd::Arrow,
                 label_width: 0.0,
                 label_height: 0.0,
             },
@@ -1426,7 +1444,9 @@ mod tests {
         let mut edges = vec![PositionedEdge {
             from_id: "A".into(),
             to_id: "B".into(),
-            edge_type: EdgeType::SolidArrow,
+            line_style: LineStyle::Solid,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::Arrow,
             label: Some("test".into()),
             label_x: Some(150.0),
             label_y: Some(95.0),  // center above y=100, label_top=85 < 100, label_bottom=105 > 100
@@ -1464,7 +1484,9 @@ mod tests {
         let mut edges = vec![PositionedEdge {
             from_id: "A".into(),
             to_id: "B".into(),
-            edge_type: EdgeType::SolidArrow,
+            line_style: LineStyle::Solid,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::Arrow,
             label: Some("test".into()),
             label_x: Some(150.0),
             label_y: Some(295.0),  // center at 295 (above 300); label_bottom = 305 > 300
@@ -1502,7 +1524,9 @@ mod tests {
         let mut edges = vec![PositionedEdge {
             from_id: "A".into(),
             to_id: "B".into(),
-            edge_type: EdgeType::SolidArrow,
+            line_style: LineStyle::Solid,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::Arrow,
             label: Some("test".into()),
             label_x: Some(95.0),   // center at 95 (left of 100); label_right=115 > 100
             label_y: Some(150.0),  // vertically within subgraph
@@ -1540,7 +1564,9 @@ mod tests {
         let mut edges = vec![PositionedEdge {
             from_id: "A".into(),
             to_id: "B".into(),
-            edge_type: EdgeType::SolidArrow,
+            line_style: LineStyle::Solid,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::Arrow,
             label: Some("test".into()),
             label_x: Some(305.0),  // center at 305; label_left=285 < 300
             label_y: Some(150.0),

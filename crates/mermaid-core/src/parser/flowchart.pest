@@ -28,6 +28,7 @@ statement = _{
     | subgraph_block
     | class_def_stmt
     | class_assign_stmt
+    | link_style_stmt
     | style_stmt
     | link_chain
     | node_stmt
@@ -121,40 +122,60 @@ edge = {
     edge_operator ~ pipe_label?
 }
 
-// Silent rule so inner matches promote to edge's children
+// Silent rule so inner matches promote to edge's children.
+// Ordered from most-specific to least-specific for PEG ordered choice.
 edge_operator = _{
-    thick_arrow_labeled
-    | thick_arrow
-    | thick_line
+    invisible_link
+    // Labeled variants first (they contain inline text delimiters)
+    | thick_arrow_labeled
+    | thick_line_labeled
     | dotted_arrow_labeled
-    | dotted_arrow
-    | dotted_line
+    | dotted_line_labeled
     | solid_arrow_labeled
-    | solid_arrow
     | solid_line_labeled
-    | solid_line
+    // Unlabeled with start markers (bidirectional / circle / cross start)
+    | solid_edge_full
+    | dotted_edge_full
+    | thick_edge_full
 }
 
-// Solid edges
-solid_arrow         = @{ "-" ~ "-"+ ~ ">" }
-solid_line          = @{ "-" ~ "-" ~ "-"+ }
-solid_arrow_labeled = { "--" ~ " "* ~ edge_inline_text ~ " "* ~ "-->" }
+// ── Invisible link ~~~ ──────────────────────────────────────
+invisible_link = @{ "~" ~ "~" ~ "~"+ }
+
+// ── Solid edges ─────────────────────────────────────────────
+// Full unlabeled: optional start marker + dashes + end marker
+// Start markers: < x o   End markers: > x o or just dashes (open line)
+solid_edge_full = @{
+    ("<" | "x" | "o")? ~ "-" ~ "-"+ ~ (">" | "x" | "o")
+    | ("<" | "x" | "o") ~ "-" ~ "-"+ ~ "-"
+    | "-" ~ "-" ~ "-"+
+}
+
+solid_arrow_labeled = { ("x" | "o" | "<")? ~ "--" ~ " "* ~ edge_inline_text ~ " "* ~ "-->" }
 solid_line_labeled  = { "--" ~ " "* ~ edge_inline_text ~ " "* ~ "---" }
 
-// Dotted edges
-dotted_arrow        = @{ "-" ~ "."+ ~ "-"+ ~ ">" }
-dotted_line         = @{ "-" ~ "."+ ~ "-"+ }
-dotted_arrow_labeled = { "-." ~ " "* ~ edge_inline_text ~ " "* ~ ".->" }
+// ── Dotted edges ────────────────────────────────────────────
+dotted_edge_full = @{
+    ("<" | "x" | "o")? ~ "-" ~ "."+ ~ "-" ~ (">" | "x" | "o")
+    | ("<" | "x" | "o") ~ "-" ~ "."+ ~ "-"
+    | "-" ~ "."+ ~ "-"+
+}
 
-// Thick edges
-thick_arrow         = @{ "=" ~ "="+ ~ ">" }
-thick_line          = @{ "=" ~ "=" ~ "="+ }
-thick_arrow_labeled = { "==" ~ " "* ~ edge_inline_text ~ " "* ~ "==>" }
+dotted_arrow_labeled = { ("x" | "o" | "<")? ~ "-." ~ " "* ~ edge_inline_text ~ " "* ~ ".->" }
+dotted_line_labeled  = { "-." ~ " "* ~ edge_inline_text ~ " "* ~ ".-" }
+
+// ── Thick edges ─────────────────────────────────────────────
+thick_edge_full = @{
+    ("<" | "x" | "o")? ~ "=" ~ "="+ ~ (">" | "x" | "o")
+    | ("<" | "x" | "o") ~ "=" ~ "="+ ~ "="
+    | "=" ~ "=" ~ "="+
+}
+
+thick_arrow_labeled = { ("x" | "o" | "<")? ~ "==" ~ " "* ~ edge_inline_text ~ " "* ~ "==>" }
+thick_line_labeled  = { "==" ~ " "* ~ edge_inline_text ~ " "* ~ "===" }
 
 // Edge label text — inline between edge delimiters (e.g., --text-->)
-// Matches text that doesn't start with space, until the ending delimiter
-// Must not contain arrow patterns or newlines
-edge_inline_text = @{ (!(NEWLINE | "-" | ">" | "=" | ".") ~ ANY) ~ (!(NEWLINE | "-->" | "---" | ".->" | "==>") ~ ANY)* }
+edge_inline_text = @{ (!(NEWLINE | "-" | ">" | "=" | ".") ~ ANY) ~ (!(NEWLINE | "-->" | "---" | ".->" | ".-" | "==>" | "===") ~ ANY)* }
 
 // Pipe-style edge label: -->|text| (appears after the arrow)
 pipe_label = { "|" ~ pipe_text ~ "|" }
@@ -178,6 +199,14 @@ class_name = @{ identifier }
 
 node_id_list = {
     node_id ~ ("," ~ node_id)*
+}
+
+link_style_stmt = {
+    "linkStyle" ~ link_style_indices ~ style_props_text
+}
+
+link_style_indices = {
+    ("default" | ASCII_DIGIT+) ~ ("," ~ ASCII_DIGIT+)*
 }
 
 style_props_text = @{ (!(";" | NEWLINE) ~ ANY)+ }

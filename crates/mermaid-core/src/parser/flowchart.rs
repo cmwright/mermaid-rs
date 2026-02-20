@@ -72,6 +72,9 @@ fn process_top_level(ast: &mut FlowchartAst, pair: pest::iterators::Pair<'_, Rul
         Rule::directive => {
             // Directives are parsed but currently ignored
         }
+        Rule::link_style_stmt => {
+            // linkStyle is parsed but currently ignored
+        }
         _ => {}
     }
     Ok(())
@@ -207,8 +210,6 @@ fn parse_link_chain(
 ) -> Result<()> {
     let mut items: Vec<pest::iterators::Pair<'_, Rule>> = pair.into_inner().collect();
 
-    // link_chain = { node_def ~ (edge ~ node_def)+ }
-    // Items alternate: node_def, edge, node_def, edge, node_def, ...
     if items.is_empty() {
         return Ok(());
     }
@@ -223,7 +224,7 @@ fn parse_link_chain(
         let edge_pair = items.remove(0);
         let next_node_pair = items.remove(0);
 
-        let (edge_type, edge_label) = parse_edge(edge_pair)?;
+        let (line_style, arrow_start, arrow_end, edge_label) = parse_edge(edge_pair)?;
         let next_node = parse_node_def(next_node_pair)?;
         let next_id = next_node.id.clone();
         upsert_node(nodes, next_node);
@@ -231,7 +232,9 @@ fn parse_link_chain(
         edges.push(EdgeDef {
             from: prev_id.clone(),
             to: next_id.clone(),
-            edge_type,
+            line_style,
+            arrow_start,
+            arrow_end,
             label: edge_label,
         });
 
@@ -241,32 +244,120 @@ fn parse_link_chain(
     Ok(())
 }
 
-fn parse_edge(pair: pest::iterators::Pair<'_, Rule>) -> Result<(EdgeType, Option<String>)> {
-    let mut edge_type = EdgeType::SolidArrow;
+/// Decode the start marker character (first char of edge string).
+fn decode_start_marker(ch: char) -> ArrowEnd {
+    match ch {
+        '<' => ArrowEnd::Arrow,
+        'x' => ArrowEnd::Cross,
+        'o' => ArrowEnd::Circle,
+        _ => ArrowEnd::None,
+    }
+}
+
+/// Decode the end marker character (last char of edge string).
+fn decode_end_marker(ch: char) -> ArrowEnd {
+    match ch {
+        '>' => ArrowEnd::Arrow,
+        'x' => ArrowEnd::Cross,
+        'o' => ArrowEnd::Circle,
+        _ => ArrowEnd::None,
+    }
+}
+
+/// Parse a full (unlabeled) edge string like `-->`, `<-->`, `--o`, `x--x`, `===`, etc.
+/// Returns (LineStyle, ArrowEnd start, ArrowEnd end).
+fn parse_full_edge_str(s: &str, style: LineStyle) -> (LineStyle, ArrowEnd, ArrowEnd) {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.is_empty() {
+        return (style, ArrowEnd::None, ArrowEnd::None);
+    }
+
+    let first = chars[0];
+    let last = *chars.last().unwrap();
+
+    let start = if first == '<' || first == 'x' || first == 'o' {
+        decode_start_marker(first)
+    } else {
+        ArrowEnd::None
+    };
+
+    let end = if last == '>' || last == 'x' || last == 'o' {
+        decode_end_marker(last)
+    } else {
+        ArrowEnd::None
+    };
+
+    (style, start, end)
+}
+
+#[allow(clippy::type_complexity)]
+fn parse_edge(
+    pair: pest::iterators::Pair<'_, Rule>,
+) -> Result<(LineStyle, ArrowEnd, ArrowEnd, Option<String>)> {
+    let mut line_style = LineStyle::Solid;
+    let mut arrow_start = ArrowEnd::None;
+    let mut arrow_end = ArrowEnd::Arrow;
     let mut label = None;
 
     for inner in pair.into_inner() {
         match inner.as_rule() {
-            Rule::solid_arrow => edge_type = EdgeType::SolidArrow,
-            Rule::solid_line => edge_type = EdgeType::SolidLine,
-            Rule::dotted_arrow => edge_type = EdgeType::DottedArrow,
-            Rule::dotted_line => edge_type = EdgeType::DottedLine,
-            Rule::thick_arrow => edge_type = EdgeType::ThickArrow,
-            Rule::thick_line => edge_type = EdgeType::ThickLine,
+            Rule::invisible_link => {
+                line_style = LineStyle::Invisible;
+                arrow_start = ArrowEnd::None;
+                arrow_end = ArrowEnd::None;
+            }
+            Rule::solid_edge_full => {
+                let (ls, s, e) = parse_full_edge_str(inner.as_str().trim(), LineStyle::Solid);
+                line_style = ls;
+                arrow_start = s;
+                arrow_end = e;
+            }
+            Rule::dotted_edge_full => {
+                let (ls, s, e) = parse_full_edge_str(inner.as_str().trim(), LineStyle::Dotted);
+                line_style = ls;
+                arrow_start = s;
+                arrow_end = e;
+            }
+            Rule::thick_edge_full => {
+                let (ls, s, e) = parse_full_edge_str(inner.as_str().trim(), LineStyle::Thick);
+                line_style = ls;
+                arrow_start = s;
+                arrow_end = e;
+            }
             Rule::solid_arrow_labeled => {
-                edge_type = EdgeType::SolidArrow;
+                line_style = LineStyle::Solid;
+                arrow_end = ArrowEnd::Arrow;
+                arrow_start = extract_labeled_start_marker(inner.as_str());
                 label = Some(extract_edge_inline_label(inner));
             }
             Rule::solid_line_labeled => {
-                edge_type = EdgeType::SolidLine;
+                line_style = LineStyle::Solid;
+                arrow_end = ArrowEnd::None;
+                arrow_start = ArrowEnd::None;
                 label = Some(extract_edge_inline_label(inner));
             }
             Rule::dotted_arrow_labeled => {
-                edge_type = EdgeType::DottedArrow;
+                line_style = LineStyle::Dotted;
+                arrow_end = ArrowEnd::Arrow;
+                arrow_start = extract_labeled_start_marker(inner.as_str());
+                label = Some(extract_edge_inline_label(inner));
+            }
+            Rule::dotted_line_labeled => {
+                line_style = LineStyle::Dotted;
+                arrow_end = ArrowEnd::None;
+                arrow_start = ArrowEnd::None;
                 label = Some(extract_edge_inline_label(inner));
             }
             Rule::thick_arrow_labeled => {
-                edge_type = EdgeType::ThickArrow;
+                line_style = LineStyle::Thick;
+                arrow_end = ArrowEnd::Arrow;
+                arrow_start = extract_labeled_start_marker(inner.as_str());
+                label = Some(extract_edge_inline_label(inner));
+            }
+            Rule::thick_line_labeled => {
+                line_style = LineStyle::Thick;
+                arrow_end = ArrowEnd::None;
+                arrow_start = ArrowEnd::None;
                 label = Some(extract_edge_inline_label(inner));
             }
             Rule::pipe_label => {
@@ -280,7 +371,18 @@ fn parse_edge(pair: pest::iterators::Pair<'_, Rule>) -> Result<(EdgeType, Option
         }
     }
 
-    Ok((edge_type, label))
+    Ok((line_style, arrow_start, arrow_end, label))
+}
+
+/// For labeled edge variants like `x-- text -->`, check if the first char is a start marker.
+fn extract_labeled_start_marker(s: &str) -> ArrowEnd {
+    let trimmed = s.trim();
+    match trimmed.chars().next() {
+        Some('x') => ArrowEnd::Cross,
+        Some('o') => ArrowEnd::Circle,
+        Some('<') => ArrowEnd::Arrow,
+        _ => ArrowEnd::None,
+    }
 }
 
 fn extract_edge_inline_label(pair: pest::iterators::Pair<'_, Rule>) -> String {
@@ -453,7 +555,8 @@ mod tests {
         assert_eq!(ast.nodes[1].id, "B");
         assert_eq!(ast.edges[0].from, "A");
         assert_eq!(ast.edges[0].to, "B");
-        assert_eq!(ast.edges[0].edge_type, EdgeType::SolidArrow);
+        assert_eq!(ast.edges[0].line_style, LineStyle::Solid);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Arrow);
     }
 
     #[test]
@@ -461,7 +564,8 @@ mod tests {
         let source = "flowchart TD\n    A -. text .-> B";
         let ast = parse_flowchart(source).unwrap();
         assert_eq!(ast.edges.len(), 1);
-        assert_eq!(ast.edges[0].edge_type, EdgeType::DottedArrow);
+        assert_eq!(ast.edges[0].line_style, LineStyle::Dotted);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Arrow);
         assert_eq!(ast.edges[0].label.as_deref(), Some("text"));
     }
 
@@ -470,7 +574,8 @@ mod tests {
         let source = "flowchart TD\n    A -. \"blocked by\" .-> B";
         let ast = parse_flowchart(source).unwrap();
         assert_eq!(ast.edges.len(), 1);
-        assert_eq!(ast.edges[0].edge_type, EdgeType::DottedArrow);
+        assert_eq!(ast.edges[0].line_style, LineStyle::Dotted);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Arrow);
         assert_eq!(ast.edges[0].label.as_deref(), Some("\"blocked by\""));
     }
 
@@ -509,10 +614,14 @@ mod tests {
         let source = "flowchart TD\n    A --> B\n    B --- C\n    C -.-> D\n    D ==> E";
         let ast = parse_flowchart(source).unwrap();
         assert_eq!(ast.edges.len(), 4);
-        assert_eq!(ast.edges[0].edge_type, EdgeType::SolidArrow);
-        assert_eq!(ast.edges[1].edge_type, EdgeType::SolidLine);
-        assert_eq!(ast.edges[2].edge_type, EdgeType::DottedArrow);
-        assert_eq!(ast.edges[3].edge_type, EdgeType::ThickArrow);
+        assert_eq!(ast.edges[0].line_style, LineStyle::Solid);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Arrow);
+        assert_eq!(ast.edges[1].line_style, LineStyle::Solid);
+        assert_eq!(ast.edges[1].arrow_end, ArrowEnd::None);
+        assert_eq!(ast.edges[2].line_style, LineStyle::Dotted);
+        assert_eq!(ast.edges[2].arrow_end, ArrowEnd::Arrow);
+        assert_eq!(ast.edges[3].line_style, LineStyle::Thick);
+        assert_eq!(ast.edges[3].arrow_end, ArrowEnd::Arrow);
     }
 
     #[test]
@@ -570,7 +679,8 @@ mod tests {
         assert_eq!(ast.nodes.len(), 4);
         assert_eq!(ast.edges.len(), 4);
         assert_eq!(ast.edges[0].label.as_deref(), Some("Link text"));
-        assert_eq!(ast.edges[0].edge_type, EdgeType::SolidArrow);
+        assert_eq!(ast.edges[0].line_style, LineStyle::Solid);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Arrow);
     }
 
     #[test]
@@ -745,21 +855,24 @@ mod tests {
     fn test_parse_thick_line_edge() {
         let source = "flowchart TD\n    A === B";
         let ast = parse_flowchart(source).unwrap();
-        assert_eq!(ast.edges[0].edge_type, EdgeType::ThickLine);
+        assert_eq!(ast.edges[0].line_style, LineStyle::Thick);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::None);
     }
 
     #[test]
     fn test_parse_dotted_line_edge() {
         let source = "flowchart TD\n    A -.- B";
         let ast = parse_flowchart(source).unwrap();
-        assert_eq!(ast.edges[0].edge_type, EdgeType::DottedLine);
+        assert_eq!(ast.edges[0].line_style, LineStyle::Dotted);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::None);
     }
 
     #[test]
     fn test_parse_thick_arrow_labeled() {
         let source = "flowchart TD\n    A == thick label ==> B";
         let ast = parse_flowchart(source).unwrap();
-        assert_eq!(ast.edges[0].edge_type, EdgeType::ThickArrow);
+        assert_eq!(ast.edges[0].line_style, LineStyle::Thick);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Arrow);
         assert_eq!(ast.edges[0].label.as_deref(), Some("thick label"));
     }
 
@@ -767,7 +880,8 @@ mod tests {
     fn test_parse_solid_line_labeled() {
         let source = "flowchart TD\n    A -- line label --- B";
         let ast = parse_flowchart(source).unwrap();
-        assert_eq!(ast.edges[0].edge_type, EdgeType::SolidLine);
+        assert_eq!(ast.edges[0].line_style, LineStyle::Solid);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::None);
         assert_eq!(ast.edges[0].label.as_deref(), Some("line label"));
     }
 
@@ -883,6 +997,183 @@ mod tests {
         assert_eq!(ast.class_assignments[0].node_ids, vec!["A", "B"]);
         assert_eq!(ast.class_assignments[0].class_name, "highlight");
     }
+
+    // ── New edge variant tests ──────────────────────────────────
+
+    #[test]
+    fn test_parse_circle_edge() {
+        let source = "flowchart TD\n    A --o B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].line_style, LineStyle::Solid);
+        assert_eq!(ast.edges[0].arrow_start, ArrowEnd::None);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Circle);
+    }
+
+    #[test]
+    fn test_parse_cross_edge() {
+        let source = "flowchart TD\n    A --x B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].line_style, LineStyle::Solid);
+        assert_eq!(ast.edges[0].arrow_start, ArrowEnd::None);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Cross);
+    }
+
+    #[test]
+    fn test_parse_bidirectional_arrow() {
+        let source = "flowchart TD\n    A <--> B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].line_style, LineStyle::Solid);
+        assert_eq!(ast.edges[0].arrow_start, ArrowEnd::Arrow);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Arrow);
+    }
+
+    #[test]
+    fn test_parse_double_circle_edge() {
+        let source = "flowchart TD\n    A o--o B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].line_style, LineStyle::Solid);
+        assert_eq!(ast.edges[0].arrow_start, ArrowEnd::Circle);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Circle);
+    }
+
+    #[test]
+    fn test_parse_double_cross_edge() {
+        let source = "flowchart TD\n    A x--x B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].line_style, LineStyle::Solid);
+        assert_eq!(ast.edges[0].arrow_start, ArrowEnd::Cross);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Cross);
+    }
+
+    #[test]
+    fn test_parse_invisible_link() {
+        let source = "flowchart TD\n    A ~~~ B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].line_style, LineStyle::Invisible);
+        assert_eq!(ast.edges[0].arrow_start, ArrowEnd::None);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::None);
+    }
+
+    #[test]
+    fn test_parse_dotted_circle_edge() {
+        let source = "flowchart TD\n    A -.-> B\n    C -.-o D";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].line_style, LineStyle::Dotted);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Arrow);
+        assert_eq!(ast.edges[1].line_style, LineStyle::Dotted);
+        assert_eq!(ast.edges[1].arrow_end, ArrowEnd::Circle);
+    }
+
+    #[test]
+    fn test_parse_thick_circle_edge() {
+        let source = "flowchart TD\n    A ==> B\n    C ==o D";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].line_style, LineStyle::Thick);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Arrow);
+        assert_eq!(ast.edges[1].line_style, LineStyle::Thick);
+        assert_eq!(ast.edges[1].arrow_end, ArrowEnd::Circle);
+    }
+
+    #[test]
+    fn test_parse_thick_cross_edge() {
+        let source = "flowchart TD\n    A ==x B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].line_style, LineStyle::Thick);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Cross);
+    }
+
+    #[test]
+    fn test_parse_dotted_line_labeled() {
+        let source = "flowchart TD\n    A -. label .- B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].line_style, LineStyle::Dotted);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::None);
+        assert_eq!(ast.edges[0].label.as_deref(), Some("label"));
+    }
+
+    #[test]
+    fn test_parse_thick_line_labeled() {
+        let source = "flowchart TD\n    A == label === B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].line_style, LineStyle::Thick);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::None);
+        assert_eq!(ast.edges[0].label.as_deref(), Some("label"));
+    }
+
+    #[test]
+    fn test_parse_bidirectional_dotted() {
+        let source = "flowchart TD\n    A <-.-> B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].line_style, LineStyle::Dotted);
+        assert_eq!(ast.edges[0].arrow_start, ArrowEnd::Arrow);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Arrow);
+    }
+
+    #[test]
+    fn test_parse_bidirectional_thick() {
+        let source = "flowchart TD\n    A <==> B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].line_style, LineStyle::Thick);
+        assert_eq!(ast.edges[0].arrow_start, ArrowEnd::Arrow);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Arrow);
+    }
+
+    #[test]
+    fn test_parse_cross_start_arrow_end() {
+        let source = "flowchart TD\n    A x--> B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].line_style, LineStyle::Solid);
+        assert_eq!(ast.edges[0].arrow_start, ArrowEnd::Cross);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Arrow);
+    }
+
+    #[test]
+    fn test_parse_circle_start_arrow_end() {
+        let source = "flowchart TD\n    A o--> B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].line_style, LineStyle::Solid);
+        assert_eq!(ast.edges[0].arrow_start, ArrowEnd::Circle);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Arrow);
+    }
+
+    #[test]
+    fn test_parse_longer_invisible_link() {
+        let source = "flowchart TD\n    A ~~~~ B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].line_style, LineStyle::Invisible);
+    }
+
+    #[test]
+    fn test_parse_link_style_ignored() {
+        let source = "flowchart TD\n    A --> B\n    linkStyle 0 stroke:#ff3,stroke-width:4px";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges.len(), 1);
+        assert_eq!(ast.nodes.len(), 2);
+    }
+
+    #[test]
+    fn test_parse_link_style_default_ignored() {
+        let source = "flowchart TD\n    A --> B\n    linkStyle default stroke:#ff3";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges.len(), 1);
+    }
+
+    #[test]
+    fn test_parse_solid_arrow_with_pipe_label() {
+        let source = "flowchart TD\n    A --o|label| B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].line_style, LineStyle::Solid);
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Circle);
+        assert_eq!(ast.edges[0].label.as_deref(), Some("label"));
+    }
+
+    #[test]
+    fn test_parse_cross_edge_with_pipe_label() {
+        let source = "flowchart TD\n    A --x|label| B";
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Cross);
+        assert_eq!(ast.edges[0].label.as_deref(), Some("label"));
+    }
 }
 
 #[test]
@@ -946,8 +1237,8 @@ fn test_case5_parse_and_layout() {
     println!("\nAll edges: {}", ast.edges.len());
     for edge in &ast.edges {
         println!(
-            "  Edge: {} -> {} (type={:?} label={:?})",
-            edge.from, edge.to, edge.edge_type, edge.label
+            "  Edge: {} -> {} (line_style={:?} arrow_end={:?} label={:?})",
+            edge.from, edge.to, edge.line_style, edge.arrow_end, edge.label
         );
     }
 }

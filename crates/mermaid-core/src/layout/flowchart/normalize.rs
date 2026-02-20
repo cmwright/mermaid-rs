@@ -63,7 +63,7 @@ pub fn normalize_and_compute_bounds(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::flowchart::{EdgeType, NodeShape};
+    use crate::ast::flowchart::{ArrowEnd, LineStyle, NodeShape};
 
     fn make_node(id: &str, x: f64, y: f64) -> PositionedNode {
         PositionedNode {
@@ -145,7 +145,9 @@ mod tests {
         let mut edges = vec![PositionedEdge {
             from_id: "A".into(),
             to_id: "B".into(),
-            edge_type: EdgeType::SolidArrow,
+            line_style: LineStyle::Solid,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::Arrow,
             label: Some("test".into()),
             label_x: Some(0.0),
             label_y: Some(20.0),
@@ -206,7 +208,9 @@ mod tests {
         let mut edges = vec![PositionedEdge {
             from_id: "A".into(),
             to_id: "B".into(),
-            edge_type: EdgeType::SolidArrow,
+            line_style: LineStyle::Solid,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::Arrow,
             label: None,
             label_x: None,
             label_y: None,
@@ -231,7 +235,9 @@ mod tests {
         let mut edges = vec![PositionedEdge {
             from_id: "A".into(),
             to_id: "B".into(),
-            edge_type: EdgeType::SolidArrow,
+            line_style: LineStyle::Solid,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::Arrow,
             label: Some("x".into()),
             label_x: Some(-10.0),
             label_y: None,
@@ -258,7 +264,9 @@ mod tests {
         let mut edges = vec![PositionedEdge {
             from_id: "A".into(),
             to_id: "B".into(),
-            edge_type: EdgeType::SolidArrow,
+            line_style: LineStyle::Solid,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::Arrow,
             label: Some("both".into()),
             label_x: Some(-10.0),
             label_y: Some(-15.0),
@@ -284,7 +292,9 @@ mod tests {
         let mut edges = vec![PositionedEdge {
             from_id: "A".into(),
             to_id: "B".into(),
-            edge_type: EdgeType::SolidArrow,
+            line_style: LineStyle::Solid,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::Arrow,
             label: Some("y".into()),
             label_x: None,
             label_y: Some(-15.0),

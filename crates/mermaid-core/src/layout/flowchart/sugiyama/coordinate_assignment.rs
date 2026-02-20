@@ -495,7 +495,7 @@ fn align_to_smallest(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::flowchart::{Direction, EdgeType, NodeShape};
+    use crate::ast::flowchart::{ArrowEnd, Direction, LineStyle, NodeShape};
 
     fn make_node(id: &str) -> NodeData {
         NodeData {
@@ -510,7 +510,9 @@ mod tests {
 
     fn make_edge() -> EdgeData {
         EdgeData {
-            edge_type: EdgeType::SolidArrow,
+            line_style: LineStyle::Solid,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::Arrow,
             label: None,
             label_width: 0.0,
             label_height: 0.0,
