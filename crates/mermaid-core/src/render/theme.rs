@@ -98,8 +98,8 @@ impl Theme {
                 primary_color: Color::Hex("#1f2020".into()),
                 primary_border: Color::Hex("#81B1DB".into()),
                 primary_text: Color::Hex("#e0dfdf".into()),
-                subgraph_fill: Color::Hex("#384252".into()),
-                subgraph_border: Color::Hex("#81B1DB".into()),
+                subgraph_fill: Color::Hex("#ffffff0d".into()),
+                subgraph_border: Color::Hex("#a0c4e8".into()),
                 subgraph_text: Color::Hex("#e0dfdf".into()),
                 ..Self::default().flowchart
             },

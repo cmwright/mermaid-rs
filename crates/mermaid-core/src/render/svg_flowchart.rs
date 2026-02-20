@@ -635,7 +635,7 @@ fn render_subgraph(svg: &mut String, sg: &PositionedSubgraph, theme: &Theme) {
     // Background rectangle
     let _ = write!(
         svg,
-        r#"<rect x="{}" y="{}" width="{}" height="{}" rx="5" fill="{}" stroke="{}" stroke-width="1" stroke-dasharray="5,5"/>"#,
+        r#"<rect x="{}" y="{}" width="{}" height="{}" rx="5" fill="{}" stroke="{}" stroke-width="1.5" stroke-dasharray="5,5"/>"#,
         sg.x, sg.y, sg.width, sg.height, fill, stroke,
     );
     svg.push('\n');
