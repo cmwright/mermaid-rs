@@ -6,7 +6,7 @@ BINARY := cargo run --
 FIXTURES := $(wildcard $(FIXTURES_DIR)/*.mmd)
 FIXTURE_SVGS := $(patsubst $(FIXTURES_DIR)/%.mmd,$(OUTPUT_DIR)/%.svg,$(FIXTURES))
 
-.PHONY: test-svgs clean-svgs build test test-examples
+.PHONY: test-svgs clean-svgs build test test-examples build-wasm examples serve-examples
 
 build:
 	cargo build
@@ -31,6 +31,17 @@ $(OUTPUT_DIR):
 test-examples:
 	cargo test -p mermaid-rs --test examples_comparison -- --nocapture
 	@echo "Open target/examples-comparison.html in your browser"
+
+build-wasm:
+	@command -v wasm-pack >/dev/null 2>&1 || { echo "Install wasm-pack: cargo install wasm-pack"; exit 1; }
+	wasm-pack build crates/mermaid-wasm --target web --out-dir ../../target/wasm-pkg
+
+examples: build-wasm
+	cargo test -p mermaid-rs --test examples_comparison -- --nocapture
+	@echo "Open target/examples-comparison.html in your browser"
+
+serve-examples: examples
+	python3 -m http.server 8080 --directory target
 
 clean-svgs:
 	rm -rf $(OUTPUT_DIR)

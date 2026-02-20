@@ -10,6 +10,7 @@ members = [
     "crates/mermaid-core",
     "crates/mermaid-cli",
 ]
+exclude = ["crates/mermaid-wasm"]
 
 [workspace.package]
 version = "0.1.0"

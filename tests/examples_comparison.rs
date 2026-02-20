@@ -365,13 +365,18 @@ fn build_html(results: &[(&Example, Result<String, String>)]) -> String {
   .col { padding: 12px; border-right: 1px solid #e2e8f0; overflow: auto; }
   .col:last-child { border-right: none; }
   .col-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #718096; margin-bottom: 8px; font-weight: 600; }
-  pre.source { background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 10px; font-size: 12px; font-family: "SF Mono", "Fira Code", monospace; white-space: pre-wrap; word-break: break-word; overflow: auto; max-height: 500px; }
+  textarea.source-input { background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 4px; padding: 10px; font-size: 12px; font-family: "SF Mono", "Fira Code", monospace; white-space: pre; word-break: break-word; overflow: auto; max-height: 500px; width: 100%; min-height: 150px; resize: vertical; line-height: 1.4; tab-size: 4; }
   .error { background: #fff5f5; border: 1px solid #fc8181; border-radius: 4px; padding: 10px; color: #c53030; font-size: 13px; font-family: monospace; white-space: pre-wrap; }
   .svg-container svg { max-width: 100%; height: auto; }
+  .wasm-status { text-align: center; padding: 8px; margin-bottom: 16px; border-radius: 4px; font-size: 13px; }
+  .wasm-status.loading { background: #fffbeb; color: #92400e; }
+  .wasm-status.ready { background: #ecfdf5; color: #065f46; }
+  .wasm-status.error { background: #fff5f5; color: #c53030; }
 </style>
 </head>
 <body>
 <h1>mermaid-rs Examples Comparison</h1>
+<div id="wasm-status" class="wasm-status loading">Loading WASM module...</div>
 "#,
     );
 
@@ -390,23 +395,28 @@ fn build_html(results: &[(&Example, Result<String, String>)]) -> String {
 <div class="columns">
 <div class="col">
   <div class="col-label">Input</div>
-  <pre class="source">{}</pre>
+  <textarea class="source-input" data-example-id="ex-{}">{}</textarea>
 </div>
 <div class="col">
   <div class="col-label">mermaid-rs</div>
+  <div class="error" id="mermaid-rs-error-{}" style="display:none;"></div>
+  <div class="svg-container" id="mermaid-rs-{}">
 "#,
             i + 1,
             html_escape(example.name),
+            i,
             html_escape(example.source),
+            i,
+            i,
         ));
 
         match result {
             Ok(svg) => {
-                html.push_str(&format!("  <div class=\"svg-container\">{}</div>\n", svg));
+                html.push_str(svg);
             }
             Err(err) => {
                 html.push_str(&format!(
-                    "  <div class=\"error\">{}</div>\n",
+                    "<div class=\"error\">{}</div>",
                     html_escape(err)
                 ));
             }
@@ -414,24 +424,159 @@ fn build_html(results: &[(&Example, Result<String, String>)]) -> String {
 
         html.push_str(&format!(
             r#"</div>
+</div>
 <div class="col">
   <div class="col-label">mermaid.js</div>
-  <pre class="mermaid">{}</pre>
+  <div class="error" id="mermaid-js-error-{}" style="display:none;"></div>
+  <div id="mermaid-js-{}" class="svg-container"></div>
 </div>
 </div>
 </div>
 "#,
-            html_escape(example.source),
+            i, i,
         ));
     }
 
-    html.push_str(
+    let example_count = results.len();
+
+    html.push_str(&format!(
         r#"<script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
-<script>mermaid.initialize({ startOnLoad: true });</script>
+<script>mermaid.initialize({{ startOnLoad: false }});</script>
+<script type="module">
+const EXAMPLE_COUNT = {};
+
+// Render initial mermaid.js diagrams
+async function renderInitialMermaidJs() {{
+  for (let i = 0; i < EXAMPLE_COUNT; i++) {{
+    const textarea = document.querySelector(`[data-example-id="ex-${{i}}"]`);
+    const container = document.getElementById(`mermaid-js-${{i}}`);
+    const errorDiv = document.getElementById(`mermaid-js-error-${{i}}`);
+    if (!textarea || !container) continue;
+    try {{
+      const {{ svg }} = await mermaid.render(`mermaid-js-graph-${{i}}`, textarea.value);
+      container.innerHTML = svg;
+      errorDiv.style.display = 'none';
+    }} catch (e) {{
+      container.innerHTML = '';
+      errorDiv.textContent = e.message || String(e);
+      errorDiv.style.display = 'block';
+    }}
+  }}
+}}
+
+renderInitialMermaidJs();
+
+// Load WASM module
+let wasmModule = null;
+let wasmError = null;
+const statusEl = document.getElementById('wasm-status');
+
+async function loadWasm() {{
+  // Try normal ES module import (works when served over HTTP)
+  try {{
+    const wasm = await import('./wasm-pkg/mermaid_wasm.js');
+    await wasm.default();
+    return wasm;
+  }} catch (e) {{
+    console.warn('WASM import() failed, trying XHR fallback:', e);
+  }}
+
+  // Fallback: load .wasm bytes via XHR (works on file:// protocol)
+  try {{
+    const jsUrl = new URL('./wasm-pkg/mermaid_wasm.js', location.href).href;
+    const wasm = await import(jsUrl);
+    const wasmUrl = new URL('./wasm-pkg/mermaid_wasm_bg.wasm', location.href).href;
+    const response = await new Promise((resolve, reject) => {{
+      const xhr = new XMLHttpRequest();
+      xhr.open('GET', wasmUrl);
+      xhr.responseType = 'arraybuffer';
+      xhr.onload = () => xhr.status === 200 || xhr.status === 0
+        ? resolve(xhr.response)
+        : reject(new Error(`HTTP ${{xhr.status}}`));
+      xhr.onerror = () => reject(new Error('XHR failed'));
+      xhr.send();
+    }});
+    wasm.initSync({{ module: new WebAssembly.Module(new Uint8Array(response)) }});
+    return wasm;
+  }} catch (e) {{
+    console.warn('WASM XHR fallback also failed:', e);
+    throw e;
+  }}
+}}
+
+try {{
+  wasmModule = await loadWasm();
+  statusEl.textContent = 'WASM loaded — edits will live-update both renderers';
+  statusEl.className = 'wasm-status ready';
+}} catch (e) {{
+  wasmError = 'WASM not available. Run: make serve-examples (file:// does not support WASM fetch)';
+  statusEl.textContent = wasmError;
+  statusEl.className = 'wasm-status error';
+  console.warn('WASM load failed:', e);
+}}
+
+// Debounce helper
+function debounce(fn, ms) {{
+  let timer;
+  return (...args) => {{
+    clearTimeout(timer);
+    timer = setTimeout(() => fn(...args), ms);
+  }};
+}}
+
+// Live re-render on textarea edit
+let mermaidJsCounter = EXAMPLE_COUNT;
+
+document.querySelectorAll('textarea.source-input').forEach(textarea => {{
+  const id = textarea.dataset.exampleId;
+  const idx = id.replace('ex-', '');
+
+  textarea.addEventListener('input', debounce(async () => {{
+    const source = textarea.value;
+
+    // Re-render mermaid-rs via WASM
+    const rsContainer = document.getElementById(`mermaid-rs-${{idx}}`);
+    const rsError = document.getElementById(`mermaid-rs-error-${{idx}}`);
+    if (rsContainer) {{
+      if (wasmModule) {{
+        try {{
+          const svg = wasmModule.render_svg(source);
+          rsContainer.innerHTML = svg;
+          rsError.style.display = 'none';
+        }} catch (e) {{
+          rsContainer.innerHTML = '';
+          rsError.textContent = e.message || String(e);
+          rsError.style.display = 'block';
+        }}
+      }} else {{
+        rsError.textContent = wasmError || 'WASM not loaded';
+        rsError.style.display = 'block';
+      }}
+    }}
+
+    // Re-render mermaid.js
+    const jsContainer = document.getElementById(`mermaid-js-${{idx}}`);
+    const jsError = document.getElementById(`mermaid-js-error-${{idx}}`);
+    if (jsContainer) {{
+      try {{
+        const graphId = `mermaid-js-live-${{mermaidJsCounter++}}`;
+        const {{ svg }} = await mermaid.render(graphId, source);
+        jsContainer.innerHTML = svg;
+        jsError.style.display = 'none';
+      }} catch (e) {{
+        jsContainer.innerHTML = '';
+        jsError.textContent = e.message || String(e);
+        jsError.style.display = 'block';
+      }}
+    }}
+  }}, 300));
+}});
+</script>
 </body>
 </html>
 "#,
-    );
+        example_count,
+    ));
 
     html
 }

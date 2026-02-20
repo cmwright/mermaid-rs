@@ -3,6 +3,10 @@ name = "mermaid-core"
 version.workspace = true
 edition.workspace = true
 
+[features]
+default = []
+wasm = ["chrono/wasmbind"]
+
 [dependencies]
 pest = "2.7"
 pest_derive = "2.7"

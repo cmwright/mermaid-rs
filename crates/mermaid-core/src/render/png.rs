@@ -26,7 +26,8 @@ pub fn render_png(svg: &str, config: &RenderConfig) -> Result<Vec<u8>> {
         )));
     }
 
-    // Also load system fonts as fallback
+    // Also load system fonts as fallback (not available on WASM)
+    #[cfg(not(target_arch = "wasm32"))]
     fontdb.load_system_fonts();
 
     opt.fontdb = std::sync::Arc::new(fontdb);
