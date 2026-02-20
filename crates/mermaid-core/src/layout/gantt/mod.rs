@@ -1085,6 +1085,199 @@ mod tests {
     }
 
     #[test]
+    fn test_axis_format_changes_grid_labels() {
+        // When axisFormat is set, grid line labels should use that format
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            axis_format: Some("%m/%d".to_string()),
+            sections: vec![GanttSection {
+                name: "Test".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Task".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date("2014-01-01".to_string()),
+                    end: TaskEnd::Duration("30d".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+
+        assert!(!layout.grid_lines.is_empty(), "should have grid lines");
+        // With axisFormat "%m/%d", labels should be like "01/01", "01/08", etc.
+        // and NOT like "2014-01-01" (the default %Y-%m-%d format)
+        for gl in &layout.grid_lines {
+            assert!(
+                !gl.label.contains("2014"),
+                "grid label '{}' should use axisFormat %m/%d, not include year",
+                gl.label
+            );
+            assert!(
+                gl.label.contains('/'),
+                "grid label '{}' should use slash separator from axisFormat %m/%d",
+                gl.label
+            );
+        }
+        assert_eq!(layout.axis_format, "%m/%d");
+    }
+
+    #[test]
+    fn test_default_axis_format_without_directive() {
+        // Without axisFormat set, should use default %Y-%m-%d
+        let ast = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Test".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Task".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date("2014-01-01".to_string()),
+                    end: TaskEnd::Duration("30d".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+
+        assert!(!layout.grid_lines.is_empty());
+        // Default format is %Y-%m-%d, so labels should contain the year
+        let first_label = &layout.grid_lines[0].label;
+        assert!(
+            first_label.contains("2014") || first_label.contains("2013"),
+            "default grid label '{}' should use %Y-%m-%d format with year",
+            first_label
+        );
+        assert_eq!(layout.axis_format, "%Y-%m-%d");
+    }
+
+    #[test]
+    fn test_custom_date_format_parses_dates() {
+        // Using DD/MM/YYYY dateFormat should correctly parse dates in that format
+        let ast = GanttAst {
+            date_format: "DD/MM/YYYY".to_string(),
+            sections: vec![GanttSection {
+                name: "Test".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Task".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date("15/03/2014".to_string()),
+                    end: TaskEnd::Duration("5d".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.tasks.len(), 1);
+        // The task should be positioned — if date parsing failed, it would use fallback
+        // Grid labels should contain March 2014 dates
+        let has_march = layout
+            .grid_lines
+            .iter()
+            .any(|gl| gl.label.contains("2014-03"));
+        assert!(
+            has_march,
+            "grid labels should show March 2014 dates, got: {:?}",
+            layout.grid_lines.iter().map(|gl| &gl.label).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_date_format_does_not_affect_axis_labels() {
+        // Changing dateFormat should NOT change the axis label format —
+        // only axisFormat controls that.
+        let ast_default_fmt = GanttAst {
+            date_format: "YYYY-MM-DD".to_string(),
+            sections: vec![GanttSection {
+                name: "Test".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Task".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date("2014-01-01".to_string()),
+                    end: TaskEnd::Duration("30d".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let ast_slash_fmt = GanttAst {
+            date_format: "DD/MM/YYYY".to_string(),
+            sections: vec![GanttSection {
+                name: "Test".to_string(),
+                tasks: vec![GanttTask {
+                    name: "Task".to_string(),
+                    tags: TaskTags::default(),
+                    id: Some("t1".to_string()),
+                    depends_on: Vec::new(),
+                    start: TaskStart::Date("01/01/2014".to_string()),
+                    end: TaskEnd::Duration("30d".to_string()),
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+
+        let layout1 = layout_gantt(&ast_default_fmt, &measurer, &theme).unwrap();
+        let layout2 = layout_gantt(&ast_slash_fmt, &measurer, &theme).unwrap();
+
+        // Both should use the same default axis format
+        assert_eq!(layout1.axis_format, layout2.axis_format);
+        // Both should have the same label format style (YYYY-MM-DD)
+        assert_eq!(layout1.axis_format, "%Y-%m-%d");
+    }
+
+    #[test]
+    fn test_axis_format_end_to_end_from_parser() {
+        // Full pipeline: parse mermaid source → layout → verify axis labels
+        let source = r#"gantt
+    dateFormat YYYY-MM-DD
+    axisFormat %b %d
+    section Test
+    Task :2014-01-01, 30d
+"#;
+        let ast = crate::parser::gantt::parse_gantt(source).unwrap();
+        assert_eq!(ast.axis_format.as_deref(), Some("%b %d"));
+
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_gantt(&ast, &measurer, &theme).unwrap();
+
+        assert!(!layout.grid_lines.is_empty());
+        assert_eq!(layout.axis_format, "%b %d");
+        // Labels should be like "Jan 01", "Jan 08", etc. (abbreviated month + day)
+        let first_visible = layout.grid_lines.iter().find(|gl| gl.show_label).unwrap();
+        assert!(
+            first_visible.label.starts_with("Dec") || first_visible.label.starts_with("Jan"),
+            "expected abbreviated month name, got '{}'",
+            first_visible.label
+        );
+    }
+
+    #[test]
     fn test_layout_expands_width_for_outside_labels() {
         let ast = GanttAst {
             title: Some("Label Width Test".to_string()),
