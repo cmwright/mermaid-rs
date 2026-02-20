@@ -155,6 +155,11 @@ const EXAMPLES: &[Example] = &[
         category: "Flowchart",
         source: include_str!("../tests/test_loop/input_mermaid.mmd"),
     },
+    Example {
+        name: "Multi Subgraph Flowchart",
+        category: "Flowchart",
+        source: include_str!("../tests/test_loop/test_graphs.mmd"),
+    },
     // ── Sequence Diagrams ───────────────────────────────────
     Example {
         name: "Basic sequence diagram",
