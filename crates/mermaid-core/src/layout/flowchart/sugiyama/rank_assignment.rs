@@ -36,34 +36,9 @@ pub fn assign_ranks(graph: &DiGraph<NodeData, EdgeData>) -> HashMap<NodeIndex, u
 }
 
 /// Convert rank map to layers: Vec<Vec<NodeIndex>> indexed by rank.
-/// Returns two candidate orderings — one from DFS (better for complex
-/// dependency graphs) and one from Kahn's topological sort (better for
-/// simpler graphs).  The crossing-minimisation pass picks whichever
-/// produces fewer crossings.
+/// Nodes are inserted in stable topological order to keep layout quality while
+/// remaining deterministic across runs.
 pub fn ranks_to_layers(
-    graph: &DiGraph<NodeData, EdgeData>,
-    ranks: &HashMap<NodeIndex, usize>,
-) -> Vec<Vec<NodeIndex>> {
-    if ranks.is_empty() {
-        return Vec::new();
-    }
-
-    let max_rank = *ranks.values().max().unwrap();
-    let mut layers = vec![Vec::new(); max_rank + 1];
-
-    let dfs_order = dfs_ordering(graph);
-    for node in dfs_order {
-        if let Some(&rank) = ranks.get(&node) {
-            layers[rank].push(node);
-        }
-    }
-
-    layers
-}
-
-/// Like `ranks_to_layers` but returns a second candidate using Kahn's
-/// topological sort instead of DFS.
-pub fn ranks_to_layers_alt(
     graph: &DiGraph<NodeData, EdgeData>,
     ranks: &HashMap<NodeIndex, usize>,
 ) -> Vec<Vec<NodeIndex>> {
@@ -82,66 +57,6 @@ pub fn ranks_to_layers_alt(
     }
 
     layers
-}
-
-/// DFS-based ordering that keeps connected nodes closer together in the
-/// initial layer assignment.  Starting from roots (no incoming edges), we
-/// recursively visit children before moving to the next root.  This tends
-/// to place siblings adjacent in their shared layer, giving the barycenter
-/// heuristic a better starting point.
-fn dfs_ordering(graph: &DiGraph<NodeData, EdgeData>) -> Vec<NodeIndex> {
-    let mut visited = HashSet::new();
-    let mut result = Vec::with_capacity(graph.node_count());
-
-    // Start from roots (nodes with no incoming edges), sorted for determinism
-    let mut roots: Vec<NodeIndex> = graph
-        .node_indices()
-        .filter(|&n| {
-            graph
-                .neighbors_directed(n, petgraph::Direction::Incoming)
-                .next()
-                .is_none()
-        })
-        .collect();
-    roots.sort_by_key(|n| n.index());
-
-    for root in roots {
-        dfs_visit(graph, root, &mut visited, &mut result);
-    }
-
-    // Handle any remaining nodes (disconnected or in cycles that escaped removal)
-    let mut remaining: Vec<NodeIndex> = graph
-        .node_indices()
-        .filter(|n| !visited.contains(n))
-        .collect();
-    remaining.sort_by_key(|n| n.index());
-    for node in remaining {
-        dfs_visit(graph, node, &mut visited, &mut result);
-    }
-
-    result
-}
-
-fn dfs_visit(
-    graph: &DiGraph<NodeData, EdgeData>,
-    node: NodeIndex,
-    visited: &mut HashSet<NodeIndex>,
-    result: &mut Vec<NodeIndex>,
-) {
-    if !visited.insert(node) {
-        return;
-    }
-    result.push(node);
-
-    // Visit children sorted by index for determinism
-    let mut children: Vec<NodeIndex> = graph
-        .neighbors_directed(node, petgraph::Direction::Outgoing)
-        .collect();
-    children.sort_by_key(|n| n.index());
-
-    for child in children {
-        dfs_visit(graph, child, visited, result);
-    }
 }
 
 /// Align ranks of nodes in sibling subgraphs so that subgraphs at the same

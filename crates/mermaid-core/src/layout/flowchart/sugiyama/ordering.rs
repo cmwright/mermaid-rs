@@ -88,37 +88,6 @@ fn count_bilayer_crossings(
     crossings
 }
 
-/// Sum of squared position-displacements for all edges between adjacent layers.
-/// Used as a tiebreaker when crossing counts are equal: lower displacement
-/// means edges are straighter and the layout looks better.
-fn edge_displacement_score(
-    graph: &DiGraph<NodeData, EdgeData>,
-    layers: &[Vec<NodeIndex>],
-) -> usize {
-    let mut score: usize = 0;
-    for i in 0..layers.len().saturating_sub(1) {
-        let south_pos: HashMap<NodeIndex, usize> = layers[i + 1]
-            .iter()
-            .enumerate()
-            .map(|(pos, &node)| (node, pos))
-            .collect();
-
-        for (north_pos, &north_node) in layers[i].iter().enumerate() {
-            for neighbor in graph.neighbors_directed(north_node, petgraph::Direction::Outgoing) {
-                if let Some(&sp) = south_pos.get(&neighbor) {
-                    let diff = if north_pos > sp {
-                        north_pos - sp
-                    } else {
-                        sp - north_pos
-                    };
-                    score += diff * diff;
-                }
-            }
-        }
-    }
-    score
-}
-
 /// Total crossings across all adjacent layer pairs.
 fn count_total_crossings(graph: &DiGraph<NodeData, EdgeData>, layers: &[Vec<NodeIndex>]) -> usize {
     (0..layers.len().saturating_sub(1))
@@ -133,34 +102,6 @@ fn count_total_crossings(graph: &DiGraph<NodeData, EdgeData>, layers: &[Vec<Node
 /// Maximum consecutive non-improving iterations before early stop.
 const MAX_NO_IMPROVEMENT: usize = 4;
 
-/// Run crossing minimisation from multiple initial orderings and return
-/// whichever converges to the fewest crossings.
-pub fn minimize_crossings_best_of(
-    graph: &DiGraph<NodeData, EdgeData>,
-    candidates: &[Vec<Vec<NodeIndex>>],
-    membership: &SubgraphMembership,
-    num_iterations: usize,
-) -> Vec<Vec<NodeIndex>> {
-    let mut best: Option<Vec<Vec<NodeIndex>>> = None;
-    let mut best_cc = usize::MAX;
-    let mut best_disp = usize::MAX;
-
-    for candidate in candidates {
-        let mut layers = candidate.clone();
-        minimize_crossings(graph, &mut layers, membership, num_iterations);
-        let cc = count_total_crossings(graph, &layers);
-        let disp = edge_displacement_score(graph, &layers);
-        // Prefer fewer crossings; break ties with better edge straightness.
-        if cc < best_cc || (cc == best_cc && disp < best_disp) {
-            best_cc = cc;
-            best_disp = disp;
-            best = Some(layers);
-        }
-    }
-
-    best.unwrap_or_default()
-}
-
 /// Barycenter heuristic with alternating up/down sweeps.
 /// Enforces subgraph contiguity: nodes belonging to the same subgraph
 /// remain contiguous within each rank.
@@ -168,7 +109,7 @@ pub fn minimize_crossings_best_of(
 /// Tracks the best crossing count seen and reverts to the best ordering
 /// if later iterations fail to improve.  Stops early after
 /// `MAX_NO_IMPROVEMENT` consecutive non-improving sweeps.
-fn minimize_crossings(
+pub fn minimize_crossings(
     graph: &DiGraph<NodeData, EdgeData>,
     layers: &mut [Vec<NodeIndex>],
     membership: &SubgraphMembership,

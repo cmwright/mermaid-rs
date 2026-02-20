@@ -71,7 +71,7 @@ fn route_with_bend_points(
     to: &PositionedNode,
     bend_points: &[(f64, f64)],
     _is_horizontal: bool,
-    nodes: &[PositionedNode],
+    _nodes: &[PositionedNode],
 ) -> Vec<(f64, f64)> {
     // First bend point direction determines exit angle from source
     let first_target = bend_points.first().copied().unwrap_or((to.x, to.y));
@@ -106,70 +106,6 @@ fn route_with_bend_points(
     // Push the final point
     if let Some(&last) = raw.last() {
         points.push(last);
-    }
-
-    // Compute bounding box of all points for early-rejection of distant nodes
-    let pad = 6.0;
-    let (mut bb_min_x, mut bb_min_y, mut bb_max_x, mut bb_max_y) = (
-        f64::INFINITY,
-        f64::INFINITY,
-        f64::NEG_INFINITY,
-        f64::NEG_INFINITY,
-    );
-    for &(px, py) in &points {
-        bb_min_x = bb_min_x.min(px);
-        bb_min_y = bb_min_y.min(py);
-        bb_max_x = bb_max_x.max(px);
-        bb_max_y = bb_max_y.max(py);
-    }
-    // Expand bounding box by padding to account for push distance
-    bb_min_x -= pad * 2.0;
-    bb_min_y -= pad * 2.0;
-    bb_max_x += pad * 2.0;
-    bb_max_y += pad * 2.0;
-
-    // Collect only nearby nodes that could actually overlap with the edge path
-    let nearby_nodes: Vec<&PositionedNode> = nodes
-        .iter()
-        .filter(|n| {
-            if n.id == from.id || n.id == to.id {
-                return false;
-            }
-            let n_min_x = n.x - n.width / 2.0 - pad;
-            let n_max_x = n.x + n.width / 2.0 + pad;
-            let n_min_y = n.y - n.height / 2.0 - pad;
-            let n_max_y = n.y + n.height / 2.0 + pad;
-            n_max_x > bb_min_x && n_min_x < bb_max_x && n_max_y > bb_min_y && n_min_y < bb_max_y
-        })
-        .collect();
-
-    // Enforce clearance: push any control points that are inside or too close
-    // to intermediate node boxes away to the nearest edge + padding.
-    for pt in points.iter_mut() {
-        for n in &nearby_nodes {
-            let min_x = n.x - n.width / 2.0 - pad;
-            let max_x = n.x + n.width / 2.0 + pad;
-            let min_y = n.y - n.height / 2.0 - pad;
-            let max_y = n.y + n.height / 2.0 + pad;
-
-            if pt.0 > min_x && pt.0 < max_x && pt.1 > min_y && pt.1 < max_y {
-                // Point is inside the padded box — push to nearest edge
-                let d_left = pt.0 - min_x;
-                let d_right = max_x - pt.0;
-                let d_top = pt.1 - min_y;
-                let d_bottom = max_y - pt.1;
-                let min_d = d_left.min(d_right).min(d_top).min(d_bottom);
-                if min_d == d_left {
-                    pt.0 = min_x;
-                } else if min_d == d_right {
-                    pt.0 = max_x;
-                } else if min_d == d_top {
-                    pt.1 = min_y;
-                } else {
-                    pt.1 = max_y;
-                }
-            }
-        }
     }
 
     points

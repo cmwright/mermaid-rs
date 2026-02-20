@@ -54,14 +54,9 @@ pub fn layout(
     // Phase 3: Insert dummy nodes for long edges
     let dummy_chains = dummy_nodes::insert_dummy_nodes(graph, &mut ranks);
 
-    // Phase 4: Convert ranks to layers and minimize crossings (with dummy nodes).
-    // Try two initial orderings (DFS and Kahn's topo-sort) and keep whichever
-    // converges to fewer crossings — DFS is better for complex dependency graphs,
-    // Kahn's can be better for simpler graphs with subgraphs.
-    let layers_dfs = rank_assignment::ranks_to_layers(graph, &ranks);
-    let layers_topo = rank_assignment::ranks_to_layers_alt(graph, &ranks);
-    let mut layers =
-        ordering::minimize_crossings_best_of(graph, &[layers_dfs, layers_topo], membership, 48);
+    // Phase 4: Convert ranks to layers and minimize crossings (with dummy nodes)
+    let mut layers = rank_assignment::ranks_to_layers(graph, &ranks);
+    ordering::minimize_crossings(graph, &mut layers, membership, 24);
 
     // Phase 4b: Subgraph-local ordering refinement
     ordering::refine_subgraph_ordering(graph, &mut layers, membership, ast, &dummy_chains);
