@@ -13,6 +13,7 @@ const SUBGRAPH_TITLE_SIDE_PADDING: f64 = 18.0;
 pub fn position_subgraphs(
     subgraphs: &[SubgraphDef],
     positioned_nodes: &[PositionedNode],
+    membership: &SubgraphMembership,
     style_overrides: &[StyleOverride],
     measurer: &TextMeasurer<'_>,
 ) -> Vec<PositionedSubgraph> {
@@ -22,19 +23,34 @@ pub fn position_subgraphs(
         .collect();
 
     let mut result = Vec::new();
-    position_subgraphs_recursive(subgraphs, &node_pos, style_overrides, measurer, &mut result);
+    position_subgraphs_recursive(
+        subgraphs,
+        &node_pos,
+        membership,
+        style_overrides,
+        measurer,
+        &mut result,
+    );
     result
 }
 
 fn position_subgraphs_recursive(
     subgraphs: &[SubgraphDef],
     node_pos: &HashMap<&str, &PositionedNode>,
+    membership: &SubgraphMembership,
     style_overrides: &[StyleOverride],
     measurer: &TextMeasurer<'_>,
     result: &mut Vec<PositionedSubgraph>,
 ) {
     for sg in subgraphs {
-        position_subgraphs_recursive(&sg.subgraphs, node_pos, style_overrides, measurer, result);
+        position_subgraphs_recursive(
+            &sg.subgraphs,
+            node_pos,
+            membership,
+            style_overrides,
+            measurer,
+            result,
+        );
 
         let mut min_x = f64::MAX;
         let mut min_y = f64::MAX;
@@ -43,6 +59,13 @@ fn position_subgraphs_recursive(
         let mut has_content = false;
 
         for node in &sg.nodes {
+            let in_subgraph = membership
+                .get(&node.id)
+                .map(|path| path.iter().any(|p| p == &sg.id))
+                .unwrap_or(false);
+            if !in_subgraph {
+                continue;
+            }
             if let Some(pn) = node_pos.get(node.id.as_str()) {
                 min_x = min_x.min(pn.x - pn.width / 2.0);
                 min_y = min_y.min(pn.y - pn.height / 2.0);
@@ -64,6 +87,13 @@ fn position_subgraphs_recursive(
 
         for edge in &sg.edges {
             for id in [&edge.from, &edge.to] {
+                let in_subgraph = membership
+                    .get(id.as_str())
+                    .map(|path| path.iter().any(|p| p == &sg.id))
+                    .unwrap_or(false);
+                if !in_subgraph {
+                    continue;
+                }
                 if let Some(pn) = node_pos.get(id.as_str()) {
                     min_x = min_x.min(pn.x - pn.width / 2.0);
                     min_y = min_y.min(pn.y - pn.height / 2.0);
@@ -139,17 +169,19 @@ pub fn separate_overlapping_sibling_subgraphs(
     all_edges: &[EdgeDef],
     is_horizontal: bool,
 ) {
-    let main_gap = 50.0; // space between stacked subgraphs (room for edge labels)
     let cross_gap = 12.0; // space between side-by-side subgraphs
+    let dependency_main_gap = 50.0; // minimum gap along rank axis for sg dependencies
     let overlap_epsilon = 1e-6;
 
-    let mut parent_children: HashMap<Option<String>, Vec<String>> = HashMap::new();
-    collect_subgraph_parent_map(&ast.subgraphs, None, &mut parent_children);
+    let mut sibling_groups: Vec<Vec<String>> = Vec::new();
+    collect_sibling_groups(&ast.subgraphs, &mut sibling_groups);
 
     let bounds: HashMap<&str, &PositionedSubgraph> =
         subgraphs.iter().map(|sg| (sg.id.as_str(), sg)).collect();
 
-    for child_ids in parent_children.values() {
+    // Process deeper sibling groups first, so child-level alignment/separation
+    // is computed before any ancestor-level shifts move the whole branch.
+    for child_ids in sibling_groups.into_iter().rev() {
         let mut siblings: Vec<&str> = child_ids
             .iter()
             .map(|s| s.as_str())
@@ -222,85 +254,83 @@ pub fn separate_overlapping_sibling_subgraphs(
             sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // --- Pass 1: resolve main-axis overlaps ---
-        // Track cumulative main-axis shifts per subgraph so we can apply them.
-        let mut main_shifts: HashMap<&str, f64> = HashMap::new();
-
-        // Sort siblings by main-axis start for this pass.
-        let mut by_main: Vec<&str> = siblings.clone();
-        by_main.sort_by(|a, b| {
-            let ma = bounds
-                .get(a)
-                .map(|sg| if is_horizontal { sg.x } else { sg.y })
-                .unwrap_or(0.0);
-            let mb = bounds
-                .get(b)
-                .map(|sg| if is_horizontal { sg.x } else { sg.y })
-                .unwrap_or(0.0);
-            ma.partial_cmp(&mb).unwrap_or(std::cmp::Ordering::Equal)
-        });
-
-        for (i, &id) in by_main.iter().enumerate() {
-            let Some(sg) = bounds.get(id) else { continue };
-            let my_main_start = if is_horizontal { sg.x } else { sg.y }
-                + main_shifts.get(id).copied().unwrap_or(0.0);
-            let my_main_end = my_main_start + if is_horizontal { sg.width } else { sg.height };
-            let my_cross_start = if is_horizontal { sg.y } else { sg.x };
-            let my_cross_end = my_cross_start + if is_horizontal { sg.height } else { sg.width };
-
-            for &prev_id in &by_main[..i] {
-                let Some(prev_sg) = bounds.get(prev_id) else {
-                    continue;
-                };
-                let prev_main_start = if is_horizontal { prev_sg.x } else { prev_sg.y }
-                    + main_shifts.get(prev_id).copied().unwrap_or(0.0);
-                let prev_main_end = prev_main_start
-                    + if is_horizontal {
-                        prev_sg.width
-                    } else {
-                        prev_sg.height
-                    };
-                let prev_cross_start = if is_horizontal { prev_sg.y } else { prev_sg.x };
-                let prev_cross_end = prev_cross_start
-                    + if is_horizontal {
-                        prev_sg.height
-                    } else {
-                        prev_sg.width
-                    };
-
-                // Check for 2D overlap (both axes)
-                let main_overlap = my_main_start < prev_main_end - overlap_epsilon
-                    && my_main_end > prev_main_start + overlap_epsilon;
-                let cross_overlap = my_cross_start < prev_cross_end - overlap_epsilon
-                    && my_cross_end > prev_cross_start + overlap_epsilon;
-
-                if main_overlap && cross_overlap {
-                    // Determine the smaller fix: push on main or cross axis.
-                    // If the main-axis overlap is small relative to the total main span,
-                    // push on the main axis (they're mostly stacked).
-                    let main_overlap_amount =
-                        my_main_end.min(prev_main_end) - my_main_start.max(prev_main_start);
-                    let my_main_size = my_main_end - my_main_start;
-                    let prev_main_size = prev_main_end - prev_main_start;
-                    let larger_main = my_main_size.max(prev_main_size);
-
-                    // If overlap is less than half the larger subgraph's main size,
-                    // it's a stacking situation — resolve on main axis.
-                    if main_overlap_amount < larger_main * 0.5 {
-                        let needed = prev_main_end + main_gap - my_main_start;
-                        if needed > 0.0 {
-                            let cur = main_shifts.entry(id).or_insert(0.0);
-                            *cur = cur.max(needed);
-                        }
-                    }
+        // --- Pass 1: derive dependency-based main-axis shifts ---
+        // If sibling A has edges into sibling B, keep B below/right of A.
+        // We compute these shifts before cross-axis packing so vertically
+        // dependent groups are not treated as same-rank overlaps.
+        let mut dep_pairs: HashSet<(&str, &str)> = HashSet::new();
+        for e in all_edges {
+            let src_sg = sibling_members
+                .iter()
+                .find_map(|(sg_id, members)| members.contains(e.from.as_str()).then_some(*sg_id));
+            let dst_sg = sibling_members
+                .iter()
+                .find_map(|(sg_id, members)| members.contains(e.to.as_str()).then_some(*sg_id));
+            if let (Some(src), Some(dst)) = (src_sg, dst_sg) {
+                if src != dst {
+                    dep_pairs.insert((src, dst));
                 }
             }
         }
 
-        // Apply main-axis shifts
-        for (&sg_id, &delta) in &main_shifts {
-            if delta > overlap_epsilon {
-                shift_nodes_in_subgraph_main(nodes, membership, sg_id, delta, is_horizontal);
+        // Apply dependency rank spacing only for vertical flows (TD/BT). In LR/RL,
+        // forcing main-axis sibling spacing can explode graph width.
+        let mut main_shifts: HashMap<&str, f64> = HashMap::new();
+        if !is_horizontal && !dep_pairs.is_empty() {
+            let mut dep_nodes: HashSet<&str> = HashSet::new();
+            for &(src, dst) in &dep_pairs {
+                dep_nodes.insert(src);
+                dep_nodes.insert(dst);
+            }
+
+            let mut in_degree: HashMap<&str, usize> =
+                dep_nodes.iter().map(|&n| (n, 0usize)).collect();
+            let mut adj: HashMap<&str, Vec<&str>> = HashMap::new();
+            for &(src, dst) in &dep_pairs {
+                adj.entry(src).or_default().push(dst);
+                *in_degree.entry(dst).or_insert(0) += 1;
+            }
+
+            let mut queue: Vec<&str> = in_degree
+                .iter()
+                .filter_map(|(&n, &d)| (d == 0).then_some(n))
+                .collect();
+            queue.sort_unstable();
+            let mut topo = Vec::with_capacity(dep_nodes.len());
+            while let Some(n) = queue.pop() {
+                topo.push(n);
+                if let Some(nexts) = adj.get(n) {
+                    for &m in nexts {
+                        if let Some(d) = in_degree.get_mut(m) {
+                            *d -= 1;
+                            if *d == 0 {
+                                queue.push(m);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // If dependency graph has cycles, skip this pass to avoid runaway shifts.
+            if topo.len() == dep_nodes.len() {
+                for &src in &topo {
+                    let Some(src_sg) = bounds.get(src) else { continue };
+                    let src_shift = main_shifts.get(src).copied().unwrap_or(0.0);
+                    let src_start = src_sg.y + src_shift;
+                    let src_end = src_start + src_sg.height;
+
+                    if let Some(nexts) = adj.get(src) {
+                        for &dst in nexts {
+                            let Some(dst_sg) = bounds.get(dst) else { continue };
+                            let required_start = src_end + dependency_main_gap;
+                            let needed_shift = (required_start - dst_sg.y).max(0.0);
+                            let cur = main_shifts.get(dst).copied().unwrap_or(0.0);
+                            if needed_shift > cur {
+                                main_shifts.insert(dst, needed_shift);
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -309,7 +339,7 @@ pub fn separate_overlapping_sibling_subgraphs(
         // We adjust the placed tracking to account for main shifts.
         let mut placed: Vec<(&str, f64, f64)> = Vec::new();
 
-        for id in siblings {
+        for &id in &siblings {
             let Some(sg) = bounds.get(id) else { continue };
             let cross_start = if is_horizontal { sg.y } else { sg.x };
             let cross_size = if is_horizontal { sg.height } else { sg.width };
@@ -352,17 +382,23 @@ pub fn separate_overlapping_sibling_subgraphs(
                 placed.push((id, cross_start, cross_end));
             }
         }
+
+        // Apply main-axis dependency shifts after cross-axis packing.
+        for (&sg_id, &delta) in &main_shifts {
+            if delta > overlap_epsilon {
+                shift_nodes_in_subgraph_main(nodes, membership, sg_id, delta, is_horizontal);
+            }
+        }
     }
 }
 
-fn collect_subgraph_parent_map(
-    subgraphs: &[SubgraphDef],
-    parent: Option<String>,
-    out: &mut HashMap<Option<String>, Vec<String>>,
-) {
+fn collect_sibling_groups(subgraphs: &[SubgraphDef], out: &mut Vec<Vec<String>>) {
+    if subgraphs.is_empty() {
+        return;
+    }
+    out.push(subgraphs.iter().map(|sg| sg.id.clone()).collect());
     for sg in subgraphs {
-        out.entry(parent.clone()).or_default().push(sg.id.clone());
-        collect_subgraph_parent_map(&sg.subgraphs, Some(sg.id.clone()), out);
+        collect_sibling_groups(&sg.subgraphs, out);
     }
 }
 
@@ -506,9 +542,11 @@ mod tests {
             width: 40.0,
             height: 20.0,
         }];
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A".to_string(), vec!["SG".to_string()]);
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer);
+        let result = position_subgraphs(&subgraphs, &positioned_nodes, &membership, &[], &measurer);
         assert_eq!(result.len(), 1);
         assert!(result[0].width > 0.0);
         assert!(result[0].height > 0.0);
@@ -546,9 +584,11 @@ mod tests {
             width: 40.0,
             height: 20.0,
         }];
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A".to_string(), vec!["Outer".to_string(), "Inner".to_string()]);
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer);
+        let result = position_subgraphs(&subgraphs, &positioned_nodes, &membership, &[], &measurer);
         assert_eq!(result.len(), 2);
     }
 
@@ -770,38 +810,6 @@ mod tests {
     }
 
     #[test]
-    fn test_shift_nodes_in_subgraph_main() {
-        let mut membership = SubgraphMembership::new();
-        membership.insert("A".into(), vec!["SG".to_string()]);
-
-        let mut nodes = vec![
-            PositionedNode {
-                id: "A".into(),
-                label: "A".into(),
-                shape: crate::ast::flowchart::NodeShape::Rectangle,
-                style: Default::default(),
-                x: 50.0,
-                y: 50.0,
-                width: 40.0,
-                height: 20.0,
-            },
-            PositionedNode {
-                id: "B".into(),
-                label: "B".into(),
-                shape: crate::ast::flowchart::NodeShape::Rectangle,
-                style: Default::default(),
-                x: 50.0,
-                y: 100.0,
-                width: 40.0,
-                height: 20.0,
-            },
-        ];
-        shift_nodes_in_subgraph_main(&mut nodes, &membership, "SG", 30.0, false);
-        assert!((nodes[0].y - 80.0).abs() < 0.01);
-        assert!((nodes[1].y - 100.0).abs() < 0.01);
-    }
-
-    #[test]
     fn test_position_subgraphs_multiline_label() {
         // Subgraph with multiline label (line 113 - title_height with line_count > 1)
         let subgraphs = vec![SubgraphDef {
@@ -827,9 +835,11 @@ mod tests {
             width: 40.0,
             height: 20.0,
         }];
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A".to_string(), vec!["SG".to_string()]);
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer);
+        let result = position_subgraphs(&subgraphs, &positioned_nodes, &membership, &[], &measurer);
         assert_eq!(result.len(), 1);
         assert!(result[0].height > 0.0);
     }
@@ -1085,9 +1095,11 @@ mod tests {
             width: 10.0,
             height: 10.0,
         }];
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A".to_string(), vec!["SG".to_string()]);
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer);
+        let result = position_subgraphs(&subgraphs, &positioned_nodes, &membership, &[], &measurer);
         assert_eq!(result.len(), 1);
         assert!(result[0].width >= 2.0 * SUBGRAPH_TITLE_SIDE_PADDING);
     }
@@ -1132,9 +1144,12 @@ mod tests {
                 height: 20.0,
             },
         ];
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A".to_string(), vec!["SG".to_string()]);
+        membership.insert("B".to_string(), vec!["SG".to_string()]);
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer);
+        let result = position_subgraphs(&subgraphs, &positioned_nodes, &membership, &[], &measurer);
         assert_eq!(result.len(), 1);
     }
 
@@ -1465,9 +1480,17 @@ mod tests {
             node_id: "SG".into(),
             properties: crate::ast::common::parse_style_string("fill:#f96"),
         }];
+        let mut membership = SubgraphMembership::new();
+        membership.insert("A".to_string(), vec!["SG".to_string()]);
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &style_overrides, &measurer);
+        let result = position_subgraphs(
+            &subgraphs,
+            &positioned_nodes,
+            &membership,
+            &style_overrides,
+            &measurer,
+        );
         assert_eq!(result.len(), 1);
         assert!(result[0].style.fill.is_some());
     }

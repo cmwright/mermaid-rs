@@ -43,8 +43,10 @@ pub fn layout(
 
     // Phase 2b: Align sibling subgraph ranks
     rank_assignment::align_sibling_subgraph_ranks(graph, &mut ranks, ast);
+    // Phase 2c: Align peer source nodes inside subgraphs.
+    rank_assignment::align_subgraph_source_ranks(graph, &mut ranks, ast);
 
-    // Phase 2c: Double all ranks to create interstitial label ranks.
+    // Phase 2d: Double all ranks to create interstitial label ranks.
     // This ensures every edge spans ≥2 ranks and gets at least 1 dummy node,
     // so labeled edges always have a midpoint dummy to host the label.
     for rank in ranks.values_mut() {

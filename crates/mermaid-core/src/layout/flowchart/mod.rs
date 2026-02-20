@@ -52,6 +52,7 @@ pub fn layout_flowchart(
     let mut positioned_subgraphs = compound::position_subgraphs(
         &ast.subgraphs,
         &positioned_nodes,
+        &membership,
         &ast.style_overrides,
         measurer,
     );
@@ -68,10 +69,10 @@ pub fn layout_flowchart(
     positioned_subgraphs = compound::position_subgraphs(
         &ast.subgraphs,
         &positioned_nodes,
+        &membership,
         &ast.style_overrides,
         measurer,
     );
-
     // 9.5. Sync dummy node positions with shifted real nodes
     sync_dummy_positions(&graph, &result.dummy_chains, &positioned_nodes, &mut result.positions);
 
@@ -1422,6 +1423,211 @@ mod tests {
                 sg.id
             );
         }
+    }
+
+    #[test]
+    fn test_example6_rbac_member_edges_stay_local_and_direct_grants_stays_top() {
+        use crate::parser::flowchart::parse_flowchart;
+
+        let source = include_str!("../../../../../tests/test_loop/test_graphs.mmd");
+        let ast = parse_flowchart(source).unwrap();
+        let provider = FontProvider::default_font();
+        let measurer = make_measurer(&provider);
+        let result = layout_flowchart(&ast, &measurer).unwrap();
+
+        let bob = result.nodes.iter().find(|n| n.id == "Bob").unwrap();
+        let carol = result.nodes.iter().find(|n| n.id == "Carol").unwrap();
+        let role_analyst = result.nodes.iter().find(|n| n.id == "Role_analyst").unwrap();
+        let role_editor = result.nodes.iter().find(|n| n.id == "Role_editor").unwrap();
+        let alice = result.nodes.iter().find(|n| n.id == "Alice").unwrap();
+
+        // RBAC member edges should be local (near-vertical), not long cross-graph curves.
+        let bob_edge = result
+            .edges
+            .iter()
+            .find(|e| e.from_id == "Bob" && e.to_id == "Role_analyst")
+            .unwrap();
+        let carol_edge = result
+            .edges
+            .iter()
+            .find(|e| e.from_id == "Carol" && e.to_id == "Role_editor")
+            .unwrap();
+
+        let bob_min_x = bob_edge
+            .points
+            .iter()
+            .map(|p| p.0)
+            .fold(f64::INFINITY, f64::min);
+        let bob_max_x = bob_edge
+            .points
+            .iter()
+            .map(|p| p.0)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let carol_min_x = carol_edge
+            .points
+            .iter()
+            .map(|p| p.0)
+            .fold(f64::INFINITY, f64::min);
+        let carol_max_x = carol_edge
+            .points
+            .iter()
+            .map(|p| p.0)
+            .fold(f64::NEG_INFINITY, f64::max);
+
+        assert!(
+            bob_min_x >= bob.x.min(role_analyst.x) - 30.0 && bob_max_x <= bob.x.max(role_analyst.x) + 30.0,
+            "Bob->Role_analyst should stay local/near vertical"
+        );
+        assert!(
+            carol_min_x >= carol.x.min(role_editor.x) - 30.0
+                && carol_max_x <= carol.x.max(role_editor.x) + 30.0,
+            "Carol->Role_editor should stay local/near vertical"
+        );
+
+        // Direct grants should remain in the top tier like Mermaid.js (not pushed down).
+        assert!(
+            (alice.y - bob.y).abs() < 120.0,
+            "Alice should be near RBAC top tier (Alice.y={}, Bob.y={})",
+            alice.y,
+            bob.y
+        );
+    }
+
+    #[test]
+    fn test_example6_subgraphs_do_not_overlap() {
+        use crate::parser::flowchart::parse_flowchart;
+
+        let source = include_str!("../../../../../tests/test_loop/test_graphs.mmd");
+        let ast = parse_flowchart(source).unwrap();
+        let provider = FontProvider::default_font();
+        let measurer = make_measurer(&provider);
+        let result = layout_flowchart(&ast, &measurer).unwrap();
+
+        for i in 0..result.subgraphs.len() {
+            for j in (i + 1)..result.subgraphs.len() {
+                let a = &result.subgraphs[i];
+                let b = &result.subgraphs[j];
+                let a_right = a.x + a.width;
+                let a_bottom = a.y + a.height;
+                let b_right = b.x + b.width;
+                let b_bottom = b.y + b.height;
+
+                let x_overlap = a.x < b_right && b.x < a_right;
+                let y_overlap = a.y < b_bottom && b.y < a_bottom;
+
+                if x_overlap && y_overlap {
+                    panic!(
+                        "Subgraphs overlap: {} and {} (A=({}, {}, {}, {}), B=({}, {}, {}, {}))",
+                        a.id, b.id, a.x, a.y, a_right, a_bottom, b.x, b.y, b_right, b_bottom
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_example6_files_subgraph_above_folder_hierarchy() {
+        use crate::parser::flowchart::parse_flowchart;
+
+        let source = include_str!("../../../../../tests/test_loop/test_graphs.mmd");
+        let ast = parse_flowchart(source).unwrap();
+        let provider = FontProvider::default_font();
+        let measurer = make_measurer(&provider);
+        let result = layout_flowchart(&ast, &measurer).unwrap();
+
+        let files = result
+            .subgraphs
+            .iter()
+            .find(|s| s.id == "Files")
+            .expect("Files subgraph missing");
+        let folders = result
+            .subgraphs
+            .iter()
+            .find(|s| s.id == "Folders")
+            .expect("Folders subgraph missing");
+
+        let files_bottom = files.y + files.height;
+        assert!(
+            files_bottom <= folders.y - 1.0,
+            "Files bottom ({}) must be above Folders top ({})",
+            files_bottom,
+            folders.y
+        );
+    }
+
+    #[test]
+    fn test_example6_files_nodes_are_horizontally_aligned() {
+        use crate::parser::flowchart::parse_flowchart;
+
+        let source = include_str!("../../../../../tests/test_loop/test_graphs.mmd");
+        let ast = parse_flowchart(source).unwrap();
+        let provider = FontProvider::default_font();
+        let measurer = make_measurer(&provider);
+        let result = layout_flowchart(&ast, &measurer).unwrap();
+
+        let f1 = result.nodes.iter().find(|n| n.id == "F1").unwrap();
+        let f2 = result.nodes.iter().find(|n| n.id == "F2").unwrap();
+        let f3 = result.nodes.iter().find(|n| n.id == "F3").unwrap();
+
+        let eps = 1.0;
+        assert!(
+            (f1.y - f2.y).abs() <= eps && (f2.y - f3.y).abs() <= eps,
+            "Files nodes should share one row (F1.y={}, F2.y={}, F3.y={})",
+            f1.y,
+            f2.y,
+            f3.y
+        );
+    }
+
+    #[test]
+    fn test_example5_smallou_aligns_with_orgccc_in_identity_platform() {
+        use crate::parser::flowchart::parse_flowchart;
+
+        let source = include_str!("../../../../../tests/test_loop/input_mermaid.mmd");
+        let ast = parse_flowchart(source).unwrap();
+        let provider = FontProvider::default_font();
+        let measurer = make_measurer(&provider);
+        let result = layout_flowchart(&ast, &measurer).unwrap();
+
+        let small_ou = result
+            .nodes
+            .iter()
+            .find(|n| n.id == "SmallOU")
+            .expect("SmallOU node missing");
+        let org_ccc = result
+            .nodes
+            .iter()
+            .find(|n| n.id == "OO3")
+            .expect("OO3 node missing");
+
+        let x_diff = (small_ou.x - org_ccc.x).abs();
+        assert!(
+            x_diff <= 1.0,
+            "SmallOU (Root OU: Ipsum Inc) should align vertically with OO3 (id=org-ccc): SmallOU.x={}, OO3.x={}, diff={}",
+            small_ou.x,
+            org_ccc.x,
+            x_diff
+        );
+
+        let platform = result
+            .subgraphs
+            .iter()
+            .find(|s| s.id == "Platform")
+            .expect("Platform subgraph missing");
+        let id_platform = result
+            .subgraphs
+            .iter()
+            .find(|s| s.id == "OryNetwork")
+            .expect("OryNetwork subgraph missing");
+        let platform_bottom = platform.y + platform.height;
+        let vertical_gap = id_platform.y - platform_bottom;
+        assert!(
+            vertical_gap >= 50.0 - 1.0,
+            "Expected at least 50px vertical gap between Platform and OryNetwork, got {} (Platform bottom={}, OryNetwork top={})",
+            vertical_gap,
+            platform_bottom,
+            id_platform.y
+        );
     }
 
     // -- Test label top straddles top border, center above --

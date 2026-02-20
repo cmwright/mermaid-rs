@@ -128,23 +128,33 @@ pub fn route_edges(
             let to = node_pos.get(edge.to.as_str())?;
 
             let key = (edge.from.clone(), edge.to.clone());
-            let points = if let Some(bps) = bend_points.get(&key) {
-                // Long edge: use dummy-node positions as waypoints
+            // Ranks are doubled to create label ranks, so many "short" edges end up
+            // with exactly one dummy waypoint. Treat those as short edges to avoid
+            // unnecessary doglegs from ordering noise.
+            let use_dummy_geometry = bend_points.get(&key).is_some_and(|bps| bps.len() > 1);
+            let points = if use_dummy_geometry {
+                let bps = bend_points.get(&key).unwrap();
                 route_with_bend_points(from, to, bps, is_horizontal, positioned_nodes)
             } else {
-                // Short edge: intersect_rect endpoints + S-curve if needed
                 route_short_edge(from, to, positioned_nodes, is_horizontal)
             };
 
             // Use pre-computed label position from label dummy if available,
             // otherwise fall back to edge_label_anchor
             let (label_x, label_y, label_width, label_height) = if edge.label.is_some() {
-                if let Some(&(lx, ly)) = label_positions.get(&key) {
-                    let (lw, lh) = label_dimensions.get(&key).copied().unwrap_or((0.0, 0.0));
-                    (Some(lx), Some(ly), Some(lw), Some(lh))
+                if use_dummy_geometry {
+                    if let Some(&(lx, ly)) = label_positions.get(&key) {
+                        let (lw, lh) = label_dimensions.get(&key).copied().unwrap_or((0.0, 0.0));
+                        (Some(lx), Some(ly), Some(lw), Some(lh))
+                    } else {
+                        let anchor = edge_label_anchor(&points);
+                        (Some(anchor.0), Some(anchor.1), None, None)
+                    }
                 } else {
+                    let (lw, lh) = label_dimensions.get(&key).copied().unwrap_or((0.0, 0.0));
                     let anchor = edge_label_anchor(&points);
-                    (Some(anchor.0), Some(anchor.1), None, None)
+                    // Keep measured dimensions when available; position from anchor.
+                    (Some(anchor.0), Some(anchor.1), Some(lw), Some(lh))
                 }
             } else {
                 (None, None, None, None)

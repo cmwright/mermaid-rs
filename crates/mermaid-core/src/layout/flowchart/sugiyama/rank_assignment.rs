@@ -88,6 +88,66 @@ pub fn align_sibling_subgraph_ranks(
     }
 }
 
+/// Align source peers inside each subgraph to the same rank.
+/// This helps sibling entry nodes render on a shared row.
+pub fn align_subgraph_source_ranks(
+    graph: &DiGraph<NodeData, EdgeData>,
+    ranks: &mut HashMap<NodeIndex, usize>,
+    ast: &FlowchartAst,
+) {
+    let id_to_idx: HashMap<String, NodeIndex> = graph
+        .node_indices()
+        .map(|idx| (graph[idx].id.clone(), idx))
+        .collect();
+    align_subgraph_source_ranks_recursive(&ast.subgraphs, graph, ranks, &id_to_idx);
+    propagate_ranks_forward(graph, ranks);
+}
+
+fn align_subgraph_source_ranks_recursive(
+    subgraphs: &[SubgraphDef],
+    graph: &DiGraph<NodeData, EdgeData>,
+    ranks: &mut HashMap<NodeIndex, usize>,
+    id_to_idx: &HashMap<String, NodeIndex>,
+) {
+    for sg in subgraphs {
+        let sg_nodes: HashSet<NodeIndex> = sg
+            .nodes
+            .iter()
+            .filter_map(|n| id_to_idx.get(&n.id).copied())
+            .collect();
+
+        if sg_nodes.len() > 1 {
+            let sources: Vec<NodeIndex> = sg_nodes
+                .iter()
+                .copied()
+                .filter(|&n| {
+                    !graph
+                        .neighbors_directed(n, petgraph::Direction::Incoming)
+                        .any(|pred| sg_nodes.contains(&pred))
+                })
+                .collect();
+
+            if sources.len() > 1 {
+                let target_rank = sources
+                    .iter()
+                    .filter_map(|n| ranks.get(n))
+                    .max()
+                    .copied()
+                    .unwrap_or(0);
+                for n in sources {
+                    if let Some(r) = ranks.get_mut(&n) {
+                        if *r < target_rank {
+                            *r = target_rank;
+                        }
+                    }
+                }
+            }
+        }
+
+        align_subgraph_source_ranks_recursive(&sg.subgraphs, graph, ranks, id_to_idx);
+    }
+}
+
 /// Collect sibling subgraph groups organized by depth level.
 fn collect_sibling_groups_by_depth(ast: &FlowchartAst) -> Vec<Vec<&[SubgraphDef]>> {
     let mut result: Vec<Vec<&[SubgraphDef]>> = Vec::new();
@@ -184,13 +244,11 @@ fn collect_descendant_node_indices(
             result.insert(idx);
         }
     }
-    for edge in &sg.edges {
-        for id in [&edge.from, &edge.to] {
-            if let Some(&idx) = id_to_idx.get(id) {
-                result.insert(idx);
-            }
-        }
-    }
+    // Intentionally do not pull nodes from edge endpoints here.
+    // Cross-subgraph edges often reference foreign nodes by ID; including
+    // those IDs contaminates sibling membership and collapses dependency tiers.
+    // Parser already upserts locally declared endpoints into sg.nodes for
+    // in-subgraph links, so explicit node collection is sufficient.
     for child_sg in &sg.subgraphs {
         collect_descendant_node_indices(child_sg, id_to_idx, result);
     }
@@ -684,5 +742,87 @@ mod tests {
         let changed = align_one_sibling_group(siblings, &g, &mut ranks, &id_to_idx);
         assert!(changed);
         assert_eq!(ranks[&c], 1, "C should be promoted to match Left's max rank");
+    }
+
+    #[test]
+    fn test_collect_descendant_node_indices_excludes_foreign_edge_endpoints() {
+        let mut g: DiGraph<NodeData, EdgeData> = DiGraph::new();
+        let x = g.add_node(make_node_data("X"));
+        let y = g.add_node(make_node_data("Y"));
+        let mut id_to_idx = HashMap::new();
+        id_to_idx.insert("X".to_string(), x);
+        id_to_idx.insert("Y".to_string(), y);
+
+        let sg_left = SubgraphDef {
+            id: "Left".to_string(),
+            label: None,
+            direction: None,
+            nodes: vec![NodeDef {
+                id: "X".into(),
+                label: None,
+                shape: NodeShape::Rectangle,
+                class_shorthand: None,
+            }],
+            // Cross-subgraph edge references Y, which belongs elsewhere.
+            edges: vec![EdgeDef {
+                from: "X".into(),
+                to: "Y".into(),
+                line_style: LineStyle::Solid,
+                arrow_start: ArrowEnd::None,
+                arrow_end: ArrowEnd::Arrow,
+                label: None,
+            }],
+            subgraphs: vec![],
+        };
+
+        let mut nodes = HashSet::new();
+        collect_descendant_node_indices(&sg_left, &id_to_idx, &mut nodes);
+        assert!(nodes.contains(&x), "local node X should be included");
+        assert!(
+            !nodes.contains(&y),
+            "foreign edge endpoint Y must not be included in Left node set"
+        );
+    }
+
+    #[test]
+    fn test_align_subgraph_source_ranks_promotes_source_peers() {
+        let mut g: DiGraph<NodeData, EdgeData> = DiGraph::new();
+        let f1 = g.add_node(make_node_data("F1"));
+        let f2 = g.add_node(make_node_data("F2"));
+        let f3 = g.add_node(make_node_data("F3"));
+        let backend = g.add_node(make_node_data("Backend"));
+        g.add_edge(f1, backend, make_edge_data());
+        g.add_edge(f2, backend, make_edge_data());
+        g.add_edge(f3, backend, make_edge_data());
+
+        let mut ranks = HashMap::new();
+        ranks.insert(f1, 0);
+        ranks.insert(f2, 0);
+        ranks.insert(f3, 1);
+        ranks.insert(backend, 1);
+
+        let ast = FlowchartAst {
+            subgraphs: vec![SubgraphDef {
+                id: "Files".to_string(),
+                label: None,
+                direction: None,
+                nodes: vec![
+                    NodeDef { id: "F1".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
+                    NodeDef { id: "F2".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
+                    NodeDef { id: "F3".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
+                ],
+                edges: vec![],
+                subgraphs: vec![],
+            }],
+            ..Default::default()
+        };
+
+        align_subgraph_source_ranks(&g, &mut ranks, &ast);
+        assert_eq!(ranks[&f1], ranks[&f2], "peer file sources should align");
+        assert_eq!(ranks[&f2], ranks[&f3], "peer file sources should align");
+        assert!(
+            ranks[&backend] > ranks[&f1],
+            "downstream nodes should remain below aligned sources"
+        );
     }
 }

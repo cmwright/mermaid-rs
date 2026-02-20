@@ -1,0 +1,34 @@
+graph TD
+    subgraph RBAC["RBAC Layer"]
+        Role_analyst["Role: analyst"]
+        Role_editor["Role: editor"]
+        Bob["User: bob"] -->|member of| Role_analyst
+        Carol["User: carol"] -->|member of| Role_editor
+    end
+
+    subgraph Folders["Folder Hierarchy"]
+        Root["Folder: root"]
+        Eng["Folder: engineering"]
+        Backend["Folder: backend"]
+
+        Backend -->|parents| Eng
+        Eng -->|parents| Root
+    end
+
+    subgraph Files["Files"]
+        F1["design-doc.pdf"]
+        F2["api-spec.yaml"]
+        F3["secret-report.pdf"]
+
+        F1 -->|parents| Backend
+        F2 -->|parents| Backend
+        F3 -->|parents| Eng
+    end
+
+    subgraph DirectGrants["Direct Entity Grants"]
+        Alice["User: alice"]
+        Alice -->|"viewers (direct)"| F3
+    end
+
+    Role_analyst -->|"viewers (RBAC)"| Root
+    Role_editor -->|"editors (RBAC)"| Eng

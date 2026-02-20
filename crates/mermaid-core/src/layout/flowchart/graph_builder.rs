@@ -35,7 +35,7 @@ pub fn collect_all_nodes(
             &ast.class_assignments,
             &ast.style_overrides,
         );
-        all_nodes.insert(node.id.clone(), (node.clone(), style));
+        insert_or_merge_node(&mut all_nodes, node.clone(), style);
     }
 
     collect_subgraph_nodes(
@@ -74,7 +74,7 @@ fn collect_subgraph_nodes(
     for sg in subgraphs {
         for node in &sg.nodes {
             let style = resolve_node_style(node, class_defs, class_assignments, style_overrides);
-            all_nodes.insert(node.id.clone(), (node.clone(), style));
+            insert_or_merge_node(all_nodes, node.clone(), style);
         }
         for edge in &sg.edges {
             for id in [&edge.from, &edge.to] {
@@ -96,6 +96,37 @@ fn collect_subgraph_nodes(
             style_overrides,
             all_nodes,
         );
+    }
+}
+
+/// Merge node entries by preferring explicit/labeled definitions over bare references.
+/// This prevents cross-subgraph references from clobbering previously defined labels.
+fn insert_or_merge_node(
+    all_nodes: &mut HashMap<String, (NodeDef, StyleProperties)>,
+    new_node: NodeDef,
+    new_style: StyleProperties,
+) {
+    use std::collections::hash_map::Entry;
+    match all_nodes.entry(new_node.id.clone()) {
+        Entry::Vacant(v) => {
+            v.insert((new_node, new_style));
+        }
+        Entry::Occupied(mut o) => {
+            let (existing_node, existing_style) = o.get_mut();
+            let existing_has_label = existing_node.label.is_some();
+            let new_has_label = new_node.label.is_some();
+
+            if !existing_has_label && new_has_label {
+                *existing_node = new_node;
+                *existing_style = new_style;
+            } else if existing_has_label && new_has_label {
+                // Keep the first explicit declaration's label/shape, but merge style.
+                *existing_style = existing_style.merge(&new_style);
+            } else {
+                // Keep existing explicit node if present; otherwise keep first bare node.
+                *existing_style = existing_style.merge(&new_style);
+            }
+        }
     }
 }
 
@@ -155,10 +186,16 @@ pub type SubgraphMembership = HashMap<String, Vec<String>>;
 
 pub fn build_subgraph_membership(ast: &FlowchartAst) -> SubgraphMembership {
     let mut membership = SubgraphMembership::new();
+    let mut explicit_in_subgraph = std::collections::HashSet::new();
     for node in &ast.nodes {
         membership.entry(node.id.clone()).or_default();
     }
-    collect_membership(&ast.subgraphs, &[], &mut membership);
+    collect_membership(
+        &ast.subgraphs,
+        &[],
+        &mut membership,
+        &mut explicit_in_subgraph,
+    );
     membership
 }
 
@@ -166,19 +203,27 @@ fn collect_membership(
     subgraphs: &[SubgraphDef],
     parent_path: &[String],
     membership: &mut SubgraphMembership,
+    explicit_in_subgraph: &mut std::collections::HashSet<String>,
 ) {
     for sg in subgraphs {
         let mut path = parent_path.to_vec();
         path.push(sg.id.clone());
         for node in &sg.nodes {
-            membership.insert(node.id.clone(), path.clone());
+            if node.label.is_some() {
+                if !explicit_in_subgraph.contains(&node.id) {
+                    membership.insert(node.id.clone(), path.clone());
+                    explicit_in_subgraph.insert(node.id.clone());
+                }
+            } else {
+                membership.entry(node.id.clone()).or_insert_with(|| path.clone());
+            }
         }
         for edge in &sg.edges {
             for id in [&edge.from, &edge.to] {
                 membership.entry(id.clone()).or_insert_with(|| path.clone());
             }
         }
-        collect_membership(&sg.subgraphs, &path, membership);
+        collect_membership(&sg.subgraphs, &path, membership, explicit_in_subgraph);
     }
 }
 
@@ -310,6 +355,7 @@ mod tests {
     use super::*;
     use crate::ast::common::{parse_style_string, StyleProperties};
     use crate::font::FontProvider;
+    use crate::parser::flowchart::parse_flowchart;
 
     fn make_measurer(provider: &FontProvider) -> TextMeasurer<'_> {
         let font = provider.font_ref().unwrap();
@@ -612,5 +658,32 @@ mod tests {
             assert!(graph[node].width > 0.0);
             assert!(graph[node].height > 0.0);
         }
+    }
+
+    #[test]
+    fn test_cross_subgraph_refs_do_not_clobber_labeled_nodes_or_membership() {
+        let source = include_str!("../../../../../tests/test_loop/test_graphs.mmd");
+        let ast = parse_flowchart(source).unwrap();
+
+        let class_defs = build_class_map(&ast.class_defs);
+        let all_nodes = collect_all_nodes(&ast, &class_defs);
+
+        assert_eq!(
+            all_nodes.get("Eng").unwrap().0.label.as_deref(),
+            Some("Folder: engineering")
+        );
+        assert_eq!(
+            all_nodes.get("Backend").unwrap().0.label.as_deref(),
+            Some("Folder: backend")
+        );
+        assert_eq!(
+            all_nodes.get("F3").unwrap().0.label.as_deref(),
+            Some("secret-report.pdf")
+        );
+
+        let membership = build_subgraph_membership(&ast);
+        assert_eq!(membership.get("Eng").unwrap(), &vec!["Folders".to_string()]);
+        assert_eq!(membership.get("Backend").unwrap(), &vec!["Folders".to_string()]);
+        assert_eq!(membership.get("F3").unwrap(), &vec!["Files".to_string()]);
     }
 }

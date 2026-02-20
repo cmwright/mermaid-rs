@@ -1174,6 +1174,28 @@ mod tests {
         assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Cross);
         assert_eq!(ast.edges[0].label.as_deref(), Some("label"));
     }
+
+    #[test]
+    fn test_parse_example6_rbac_edges_preserved() {
+        let source = include_str!("../../../../tests/test_loop/test_graphs.mmd");
+        let ast = parse_flowchart(source).unwrap();
+        let rbac = ast
+            .subgraphs
+            .iter()
+            .find(|sg| sg.id == "RBAC")
+            .expect("RBAC subgraph should exist");
+
+        assert!(
+            rbac.edges
+                .iter()
+                .any(|e| e.from == "Bob" && e.to == "Role_analyst" && e.label.as_deref() == Some("member of"))
+        );
+        assert!(
+            rbac.edges
+                .iter()
+                .any(|e| e.from == "Carol" && e.to == "Role_editor" && e.label.as_deref() == Some("member of"))
+        );
+    }
 }
 
 #[test]
