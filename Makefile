@@ -48,7 +48,7 @@ coverage:
 	@echo "Coverage report: target/coverage/html/index.html"
 
 coverage-summary:
-	cargo llvm-cov --workspace --ignore-filename-regex '(mermaid-cli|mermaid-wasm|benches)' --summary-only
+	cargo llvm-cov --workspace --ignore-filename-regex '(mermaid-cli|mermaid-wasm|benches|debug)' --summary-only
 
 clean-svgs:
 	rm -rf $(OUTPUT_DIR)

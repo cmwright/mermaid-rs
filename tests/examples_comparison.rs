@@ -347,6 +347,69 @@ const EXAMPLES: &[Example] = &[
       Pen and paper
       Mermaid"#,
     },
+    // ── Architecture ──────────────────────────────────────────
+    Example {
+        name: "Architecture diagram",
+        category: "Architecture",
+        source: r#"architecture-beta
+  group internet(internet)[Internet]
+  group app(server)[Application]
+  group data(database)[Data Layer]
+  group api(server)[API Layer] in app
+  group jobs(server)[Worker Layer] in app
+  service user(internet)[User] in internet
+  service lb(server)[Load Balancer] in api
+  service apiSvc(server)[API Service] in api
+  service worker(server)[Background Worker] in jobs
+  service db(database)[Postgres] in data
+  service cache(disk)[Cache] in data
+  user:R --> L:lb
+  lb:R --> L:apiSvc
+  apiSvc:R --> L:db
+  apiSvc:B --> T:cache
+  apiSvc:B --> T:worker
+  worker:R --> L:db
+"#,
+    },
+    Example {
+        name: "Architecture diagram - Microservices platform",
+        category: "Architecture",
+        source: r#"architecture-beta
+  group clients(internet)[Client Tier]
+  group aws(cloud)[AWS]
+  group platform(server)[Platform] in aws
+  group edge(shield)[Edge Layer] in platform
+  group services(layers)[Services] in platform
+  group persistence(database)[Persistence] in aws
+
+  service enduser(user)[End User] in clients
+  service mobile(mobile)[Mobile App] in clients
+
+  service cdn(network)[CDN] in edge
+  service gw(api)[API Gateway] in edge
+  service auth(lock)[Auth Service] in edge
+
+  service userSvc(user)[User Service] in services
+  service orderSvc(cpu)[Order Service] in services
+  service notifSvc(zap)[Notifier] in services
+
+  service pg(database)[PostgreSQL] in persistence
+  service kv(disk)[Redis] in persistence
+  service mq(layers)[Message Bus] in persistence
+
+  enduser:R --> L:cdn
+  mobile:R --> L:cdn
+  cdn:R --> L:gw
+  gw:B --> T:auth
+  auth:B --> T:userSvc
+  gw:R --> L:orderSvc
+  userSvc:R --> L:pg
+  orderSvc:R --> L:pg
+  orderSvc:B --> T:kv
+  orderSvc:R --> L:mq
+  mq:B --> T:notifSvc
+"#,
+    },
 ];
 
 fn html_escape(s: &str) -> String {

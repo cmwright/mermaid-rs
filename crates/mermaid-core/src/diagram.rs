@@ -11,6 +11,7 @@ use crate::layout::text_measure::TextMeasurer;
 use crate::parser::{self, DiagramKind};
 #[cfg(feature = "png")]
 use crate::render::png;
+use crate::render::svg_architecture;
 use crate::render::svg_flowchart;
 use crate::render::svg_gantt;
 use crate::render::svg_gitgraph;
@@ -112,6 +113,7 @@ impl Default for RenderConfig {
 pub fn render(source: &str, config: &RenderConfig) -> Result<RenderOutput> {
     let kind = parser::detect_diagram_kind(source)?;
     let svg = match kind {
+        DiagramKind::Architecture => render_architecture_svg(source, config)?,
         DiagramKind::Flowchart => render_flowchart_svg(source, config)?,
         DiagramKind::Gantt => render_gantt_svg(source, config)?,
         DiagramKind::GitGraph => render_gitgraph_svg(source, config)?,
@@ -128,6 +130,15 @@ pub fn render(source: &str, config: &RenderConfig) -> Result<RenderOutput> {
             Ok(RenderOutput::Png(png))
         }
     }
+}
+
+fn render_architecture_svg(source: &str, config: &RenderConfig) -> Result<String> {
+    let arch_ast = crate::parser::architecture::parse_architecture(source)?;
+    let fc_ast = arch_ast.to_flowchart_ast();
+    let font_ref = config.font_provider.font_ref()?;
+    let measurer = TextMeasurer::new(font_ref, config.theme.font_size as f32);
+    let positioned = flowchart::layout_flowchart(&fc_ast, &measurer)?;
+    svg_architecture::render_svg(&positioned, &config.theme)
 }
 
 fn render_gitgraph_svg(source: &str, config: &RenderConfig) -> Result<String> {
@@ -334,5 +345,18 @@ mod tests {
         let out = render("mindmap\n  root\n    a\n    b", &config).unwrap();
         let svg = out.as_svg().unwrap();
         assert!(svg.contains("<svg"));
+    }
+
+    #[test]
+    fn render_architecture() {
+        let config = RenderConfig::default();
+        let out = render(
+            "architecture-beta\n  service s(server)[My Service]\n",
+            &config,
+        )
+        .unwrap();
+        let svg = out.as_svg().unwrap();
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("My Service"));
     }
 }

@@ -1,3 +1,4 @@
+pub mod architecture;
 pub mod flowchart;
 pub mod gantt;
 pub mod gitgraph;
@@ -10,6 +11,7 @@ use crate::error::{MermaidError, Result};
 /// Detected diagram type from source text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagramKind {
+    Architecture,
     Flowchart,
     Gantt,
     GitGraph,
@@ -25,6 +27,10 @@ pub fn detect_diagram_kind(source: &str) -> Result<DiagramKind> {
         // Skip empty lines, comments (%%...), directives (%%{...}%%), and frontmatter (---)
         if trimmed.is_empty() || trimmed.starts_with("%%") || trimmed == "---" {
             continue;
+        }
+
+        if trimmed.starts_with("architecture-beta") {
+            return Ok(DiagramKind::Architecture);
         }
 
         if trimmed.starts_with("gantt") {
@@ -164,6 +170,14 @@ mod tests {
         assert_eq!(
             detect_diagram_kind("mindmap\n    root").unwrap(),
             DiagramKind::Mindmap
+        );
+    }
+
+    #[test]
+    fn test_detect_architecture() {
+        assert_eq!(
+            detect_diagram_kind("architecture-beta\n  service s(server)[S]").unwrap(),
+            DiagramKind::Architecture
         );
     }
 

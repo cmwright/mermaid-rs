@@ -1,0 +1,34 @@
+// Architecture-beta diagram grammar
+
+architecture = { SOI ~ ws* ~ "architecture-beta" ~ stmt_sep ~ (ws* ~ statement)* ~ ws* ~ EOI }
+
+statement = _{ (group_stmt | service_stmt | junction_stmt | edge_stmt | comment) ~ stmt_sep }
+
+comment = _{ "%%" ~ (!NEWLINE ~ ANY)* }
+
+group_stmt = { "group" ~ ws+ ~ id ~ "(" ~ icon_name ~ ")" ~ "[" ~ label ~ "]" ~ (ws+ ~ "in" ~ ws+ ~ id)? }
+
+service_stmt = { "service" ~ ws+ ~ id ~ "(" ~ icon_name ~ ")" ~ "[" ~ label ~ "]" ~ (ws+ ~ "in" ~ ws+ ~ id)? }
+
+junction_stmt = { "junction" ~ ws+ ~ id ~ (ws+ ~ "in" ~ ws+ ~ id)? }
+
+edge_stmt = { endpoint ~ ws+ ~ arrow ~ ws+ ~ endpoint }
+
+// Endpoint can be either id:port or port:id
+endpoint = { id ~ group_mod? ~ ":" ~ port_side | port_side ~ ":" ~ id ~ group_mod? }
+
+group_mod = { "{group}" }
+
+port_side = { "T" | "B" | "L" | "R" }
+
+arrow = { "<"? ~ "--" ~ ">"? }
+
+id = @{ (ASCII_ALPHANUMERIC | "_")+ }
+
+icon_name = @{ (ASCII_ALPHANUMERIC | "_" | "-")+ }
+
+label = @{ (!"]" ~ ANY)+ }
+
+ws = _{ " " | "\t" }
+
+stmt_sep = _{ (ws* ~ NEWLINE)+ | (ws* ~ EOI) }
