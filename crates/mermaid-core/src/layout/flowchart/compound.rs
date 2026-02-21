@@ -15,6 +15,7 @@ pub fn position_subgraphs(
     positioned_nodes: &[PositionedNode],
     style_overrides: &[StyleOverride],
     measurer: &TextMeasurer<'_>,
+    membership: &SubgraphMembership,
 ) -> Vec<PositionedSubgraph> {
     let node_pos: HashMap<&str, &PositionedNode> = positioned_nodes
         .iter()
@@ -22,7 +23,7 @@ pub fn position_subgraphs(
         .collect();
 
     let mut result = Vec::new();
-    position_subgraphs_recursive(subgraphs, &node_pos, style_overrides, measurer, &mut result);
+    position_subgraphs_recursive(subgraphs, &node_pos, style_overrides, measurer, &mut result, membership);
     result
 }
 
@@ -32,9 +33,10 @@ fn position_subgraphs_recursive(
     style_overrides: &[StyleOverride],
     measurer: &TextMeasurer<'_>,
     result: &mut Vec<PositionedSubgraph>,
+    membership: &SubgraphMembership,
 ) {
     for sg in subgraphs {
-        position_subgraphs_recursive(&sg.subgraphs, node_pos, style_overrides, measurer, result);
+        position_subgraphs_recursive(&sg.subgraphs, node_pos, style_overrides, measurer, result, membership);
 
         let mut min_x = f64::MAX;
         let mut min_y = f64::MAX;
@@ -43,6 +45,13 @@ fn position_subgraphs_recursive(
         let mut has_content = false;
 
         for node in &sg.nodes {
+            // Skip nodes that don't actually belong to this subgraph
+            // (they were added by cross-subgraph edge link chains)
+            if let Some(path) = membership.get(&node.id) {
+                if !path.contains(&sg.id) {
+                    continue;
+                }
+            }
             if let Some(pn) = node_pos.get(node.id.as_str()) {
                 min_x = min_x.min(pn.x - pn.width / 2.0);
                 min_y = min_y.min(pn.y - pn.height / 2.0);
@@ -64,6 +73,12 @@ fn position_subgraphs_recursive(
 
         for edge in &sg.edges {
             for id in [&edge.from, &edge.to] {
+                // Skip edge endpoints that belong to other subgraphs
+                if let Some(path) = membership.get(id.as_str()) {
+                    if !path.contains(&sg.id) {
+                        continue;
+                    }
+                }
                 if let Some(pn) = node_pos.get(id.as_str()) {
                     min_x = min_x.min(pn.x - pn.width / 2.0);
                     min_y = min_y.min(pn.y - pn.height / 2.0);
@@ -508,7 +523,7 @@ mod tests {
         }];
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer);
+        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer, &SubgraphMembership::new());
         assert_eq!(result.len(), 1);
         assert!(result[0].width > 0.0);
         assert!(result[0].height > 0.0);
@@ -548,7 +563,7 @@ mod tests {
         }];
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer);
+        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer, &SubgraphMembership::new());
         assert_eq!(result.len(), 2);
     }
 
@@ -829,7 +844,7 @@ mod tests {
         }];
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer);
+        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer, &SubgraphMembership::new());
         assert_eq!(result.len(), 1);
         assert!(result[0].height > 0.0);
     }
@@ -1087,7 +1102,7 @@ mod tests {
         }];
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer);
+        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer, &SubgraphMembership::new());
         assert_eq!(result.len(), 1);
         assert!(result[0].width >= 2.0 * SUBGRAPH_TITLE_SIDE_PADDING);
     }
@@ -1134,7 +1149,7 @@ mod tests {
         ];
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer);
+        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer, &SubgraphMembership::new());
         assert_eq!(result.len(), 1);
     }
 
@@ -1467,7 +1482,7 @@ mod tests {
         }];
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &style_overrides, &measurer);
+        let result = position_subgraphs(&subgraphs, &positioned_nodes, &style_overrides, &measurer, &SubgraphMembership::new());
         assert_eq!(result.len(), 1);
         assert!(result[0].style.fill.is_some());
     }

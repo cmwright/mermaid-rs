@@ -54,6 +54,7 @@ pub fn layout_flowchart(
         &positioned_nodes,
         &ast.style_overrides,
         measurer,
+        &membership,
     );
 
     // 9. Ensure sibling subgraphs do not overlap
@@ -70,6 +71,7 @@ pub fn layout_flowchart(
         &positioned_nodes,
         &ast.style_overrides,
         measurer,
+        &membership,
     );
 
     // 9.5. Sync dummy node positions with shifted real nodes
@@ -1581,6 +1583,113 @@ mod tests {
         assert!(
             new_x > 300.0 + 15.0,
             "label center right of right border should be pushed further right, got x={new_x}"
+        );
+    }
+
+    // -- Regression: multi-subgraph flowchart with cross-subgraph edges --
+
+    #[test]
+    fn test_multi_subgraph_flowchart_layout() {
+        let source = r#"graph TD
+    subgraph RBAC["RBAC Layer"]
+        Role_analyst["Role: analyst"]
+        Role_editor["Role: editor"]
+        Bob["User: bob"] -->|member of| Role_analyst
+        Carol["User: carol"] -->|member of| Role_editor
+    end
+
+    subgraph Folders["Folder Hierarchy"]
+        Root["Folder: root"]
+        Eng["Folder: engineering"]
+        Backend["Folder: backend"]
+
+        Backend -->|parents| Eng
+        Eng -->|parents| Root
+    end
+
+    subgraph Files["Files"]
+        F1["design-doc.pdf"]
+        F2["api-spec.yaml"]
+        F3["secret-report.pdf"]
+
+        F1 -->|parents| Backend
+        F2 -->|parents| Backend
+        F3 -->|parents| Eng
+    end
+
+    subgraph DirectGrants["Direct Entity Grants"]
+        Alice["User: alice"]
+        Alice -->|"viewers (direct)"| F3
+    end
+
+    Role_analyst -->|"viewers (RBAC)"| Root
+    Role_editor -->|"editors (RBAC)"| Eng"#;
+
+        let result = layout_from_source(source);
+
+        // --- 4 subgraphs exist ---
+        assert_eq!(result.subgraphs.len(), 4, "expected 4 subgraphs");
+
+        let sg = |id: &str| -> &PositionedSubgraph {
+            result.subgraphs.iter().find(|s| s.id == id)
+                .unwrap_or_else(|| panic!("subgraph '{id}' not found"))
+        };
+        let direct = sg("DirectGrants");
+        let files = sg("Files");
+        let rbac = sg("RBAC");
+        let folders = sg("Folders");
+
+        // --- No pair of subgraphs overlaps on both axes simultaneously ---
+        for (i, a) in result.subgraphs.iter().enumerate() {
+            for b in result.subgraphs.iter().skip(i + 1) {
+                let x_overlap = a.x < b.x + b.width && b.x < a.x + a.width;
+                let y_overlap = a.y < b.y + b.height && b.y < a.y + a.height;
+                assert!(
+                    !(x_overlap && y_overlap),
+                    "Subgraphs '{}' and '{}' overlap!\n  {} = ({:.0}, {:.0}, {:.0}x{:.0})\n  {} = ({:.0}, {:.0}, {:.0}x{:.0})",
+                    a.id, b.id,
+                    a.id, a.x, a.y, a.width, a.height,
+                    b.id, b.x, b.y, b.width, b.height,
+                );
+            }
+        }
+
+        // --- Vertical ordering: 3 tiers ---
+        // Top tier: DirectGrants + RBAC (both are sources with no incoming subgraph edges)
+        // Middle tier: Files (depends on DirectGrants)
+        // Bottom tier: Folder Hierarchy (depends on Files + RBAC)
+        assert!(
+            direct.y + direct.height <= files.y + 1.0,
+            "DirectGrants (bottom={:.0}) should be above Files (top={:.0})",
+            direct.y + direct.height, files.y,
+        );
+        assert!(
+            rbac.y + rbac.height <= folders.y + 1.0,
+            "RBAC (bottom={:.0}) should be above Folders (top={:.0})",
+            rbac.y + rbac.height, folders.y,
+        );
+        assert!(
+            files.y + files.height <= folders.y + 1.0,
+            "Files (bottom={:.0}) should be above Folders (top={:.0})",
+            files.y + files.height, folders.y,
+        );
+
+        // --- All three files should be horizontally aligned (same y) ---
+        let f1 = result.nodes.iter().find(|n| n.id == "F1").unwrap();
+        let f2 = result.nodes.iter().find(|n| n.id == "F2").unwrap();
+        let f3 = result.nodes.iter().find(|n| n.id == "F3").unwrap();
+
+        let y_diff_12 = (f1.y - f2.y).abs();
+        let y_diff_13 = (f1.y - f3.y).abs();
+        assert!(
+            y_diff_12 < 1.0,
+            "F1 (y={:.1}) and F2 (y={:.1}) should be horizontally aligned",
+            f1.y, f2.y,
+        );
+        assert!(
+            y_diff_13 < 1.0,
+            "F1 (y={:.1}) and F3 (y={:.1}) should be horizontally aligned",
+            f1.y, f3.y,
         );
     }
 }

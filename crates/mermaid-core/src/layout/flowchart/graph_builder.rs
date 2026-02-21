@@ -74,7 +74,14 @@ fn collect_subgraph_nodes(
     for sg in subgraphs {
         for node in &sg.nodes {
             let style = resolve_node_style(node, class_defs, class_assignments, style_overrides);
-            all_nodes.insert(node.id.clone(), (node.clone(), style));
+            if node.label.is_some() {
+                // Labeled definition always wins — overwrite any prior bare reference.
+                all_nodes.insert(node.id.clone(), (node.clone(), style));
+            } else {
+                // Bare reference (from cross-subgraph link chain) — don't overwrite
+                // a labeled definition that was already inserted.
+                all_nodes.entry(node.id.clone()).or_insert((node.clone(), style));
+            }
         }
         for edge in &sg.edges {
             for id in [&edge.from, &edge.to] {
@@ -155,10 +162,13 @@ pub type SubgraphMembership = HashMap<String, Vec<String>>;
 
 pub fn build_subgraph_membership(ast: &FlowchartAst) -> SubgraphMembership {
     let mut membership = SubgraphMembership::new();
+    // Let subgraphs claim nodes first (innermost wins for bare nodes,
+    // labeled definitions always win over bare references).
+    collect_membership(&ast.subgraphs, &[], &mut membership);
+    // Then register top-level nodes that weren't claimed by any subgraph.
     for node in &ast.nodes {
         membership.entry(node.id.clone()).or_default();
     }
-    collect_membership(&ast.subgraphs, &[], &mut membership);
     membership
 }
 
@@ -170,15 +180,25 @@ fn collect_membership(
     for sg in subgraphs {
         let mut path = parent_path.to_vec();
         path.push(sg.id.clone());
+        // Process children first so innermost subgraphs claim bare nodes
+        // before their parents can.
+        collect_membership(&sg.subgraphs, &path, membership);
         for node in &sg.nodes {
-            membership.insert(node.id.clone(), path.clone());
+            if node.label.is_some() {
+                // Explicit definition (has a label) — always takes priority.
+                // This is the subgraph where the node was actually declared.
+                membership.insert(node.id.clone(), path.clone());
+            } else {
+                // Implicit reference (bare node from a link-chain target) —
+                // only claim it if no other subgraph has claimed it yet.
+                membership.entry(node.id.clone()).or_insert_with(|| path.clone());
+            }
         }
         for edge in &sg.edges {
             for id in [&edge.from, &edge.to] {
                 membership.entry(id.clone()).or_insert_with(|| path.clone());
             }
         }
-        collect_membership(&sg.subgraphs, &path, membership);
     }
 }
 

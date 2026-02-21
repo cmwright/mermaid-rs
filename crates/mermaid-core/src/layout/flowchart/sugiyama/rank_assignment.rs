@@ -2,6 +2,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::{HashMap, HashSet};
 
 use crate::ast::flowchart::{FlowchartAst, SubgraphDef};
+use crate::layout::flowchart::graph_builder::SubgraphMembership;
 use crate::layout::flowchart::types::*;
 
 /// Longest-path rank assignment.
@@ -131,6 +132,8 @@ fn align_one_sibling_group(
     let tiers = compute_dependency_tiers(&sg_nodes, graph);
 
     let mut changed = false;
+
+    // Pass 1: Within each tier, align sibling subgraphs to the same max rank.
     for tier in &tiers {
         if tier.len() <= 1 {
             continue;
@@ -167,6 +170,51 @@ fn align_one_sibling_group(
                 }
                 changed = true;
             }
+        }
+    }
+
+    // Pass 2: Ensure separation between tiers — each tier's min rank must be
+    // strictly greater than the previous tier's max rank.  This prevents
+    // upstream subgraphs from sharing ranks with downstream subgraphs.
+    if tiers.len() > 1 {
+        let mut prev_tier_max: usize = 0;
+        for (tier_idx, tier) in tiers.iter().enumerate() {
+            // Collect all node indices in this tier
+            let tier_nodes: Vec<NodeIndex> = tier
+                .iter()
+                .flat_map(|&sg_idx| sg_nodes[sg_idx].iter().copied())
+                .collect();
+
+            let _tier_max = tier_nodes
+                .iter()
+                .filter_map(|n| ranks.get(n).copied())
+                .max()
+                .unwrap_or(0);
+
+            if tier_idx > 0 {
+                let tier_min = tier_nodes
+                    .iter()
+                    .filter_map(|n| ranks.get(n).copied())
+                    .min()
+                    .unwrap_or(0);
+
+                if tier_min <= prev_tier_max {
+                    let delta = prev_tier_max + 1 - tier_min;
+                    for &node_idx in &tier_nodes {
+                        if let Some(r) = ranks.get_mut(&node_idx) {
+                            *r += delta;
+                        }
+                    }
+                    changed = true;
+                }
+            }
+
+            // Update prev_tier_max (re-read in case we shifted this tier)
+            prev_tier_max = tier_nodes
+                .iter()
+                .filter_map(|n| ranks.get(n).copied())
+                .max()
+                .unwrap_or(prev_tier_max);
         }
     }
 
@@ -265,6 +313,112 @@ fn compute_dependency_tiers(
     }
 
     tiers
+}
+
+/// Align nodes within each subgraph that are at the same internal topological
+/// depth.  Cross-subgraph edges can push some nodes to higher ranks even
+/// though they are "peers" inside their subgraph.  This pass groups nodes by
+/// their depth in the subgraph's *internal* edge graph and aligns each group
+/// to the max rank, then re-propagates.
+pub fn align_within_subgraph_peers(
+    graph: &DiGraph<NodeData, EdgeData>,
+    ranks: &mut HashMap<NodeIndex, usize>,
+    membership: &SubgraphMembership,
+    ast: &FlowchartAst,
+) {
+    let id_to_idx: HashMap<String, NodeIndex> = graph
+        .node_indices()
+        .map(|idx| (graph[idx].id.clone(), idx))
+        .collect();
+
+    align_subgraph_peers_recursive(&ast.subgraphs, graph, ranks, membership, &id_to_idx);
+    propagate_ranks_forward(graph, ranks);
+}
+
+fn align_subgraph_peers_recursive(
+    subgraphs: &[SubgraphDef],
+    graph: &DiGraph<NodeData, EdgeData>,
+    ranks: &mut HashMap<NodeIndex, usize>,
+    membership: &SubgraphMembership,
+    id_to_idx: &HashMap<String, NodeIndex>,
+) {
+    for sg in subgraphs {
+        // Recurse into nested subgraphs first
+        align_subgraph_peers_recursive(&sg.subgraphs, graph, ranks, membership, id_to_idx);
+
+        // Collect node indices that truly belong to this subgraph (not bare refs)
+        let member_indices: HashSet<NodeIndex> = membership
+            .iter()
+            .filter(|(_, path)| path.last().map(|s| s.as_str()) == Some(&sg.id))
+            .filter_map(|(id, _)| id_to_idx.get(id).copied())
+            .collect();
+
+        if member_indices.len() <= 1 {
+            continue;
+        }
+
+        // Build internal edge set: edges where BOTH endpoints belong to this subgraph
+        let mut internal_preds: HashMap<NodeIndex, Vec<NodeIndex>> = HashMap::new();
+        for &n in &member_indices {
+            internal_preds.insert(n, Vec::new());
+        }
+        for edge_idx in graph.edge_indices() {
+            if let Some((src, tgt)) = graph.edge_endpoints(edge_idx) {
+                if member_indices.contains(&src) && member_indices.contains(&tgt) {
+                    internal_preds.get_mut(&tgt).unwrap().push(src);
+                }
+            }
+        }
+
+        // Compute internal depth via longest-path within the subgraph
+        let mut internal_depth: HashMap<NodeIndex, usize> = HashMap::new();
+        // Simple iterative: keep processing until stable
+        let mut changed = true;
+        for &n in &member_indices {
+            internal_depth.insert(n, 0);
+        }
+        while changed {
+            changed = false;
+            for &n in &member_indices {
+                let max_pred_depth = internal_preds[&n]
+                    .iter()
+                    .filter_map(|p| internal_depth.get(p))
+                    .max()
+                    .copied();
+                if let Some(d) = max_pred_depth {
+                    let new_depth = d + 1;
+                    if new_depth > internal_depth[&n] {
+                        internal_depth.insert(n, new_depth);
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        // Group by internal depth, then align each group to max rank
+        let mut depth_groups: HashMap<usize, Vec<NodeIndex>> = HashMap::new();
+        for (&n, &depth) in &internal_depth {
+            depth_groups.entry(depth).or_default().push(n);
+        }
+
+        for group in depth_groups.values() {
+            if group.len() <= 1 {
+                continue;
+            }
+            let max_rank = group
+                .iter()
+                .filter_map(|n| ranks.get(n).copied())
+                .max()
+                .unwrap_or(0);
+            for &n in group {
+                if let Some(r) = ranks.get_mut(&n) {
+                    if *r < max_rank {
+                        *r = max_rank;
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Re-propagate ranks forward to ensure all edges go from lower to higher rank.
