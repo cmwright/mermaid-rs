@@ -7,14 +7,34 @@ use crate::layout::flowchart::types::*;
 /// DFS-based greedy feedback arc set. Finds back-edges in the graph and
 /// reverses them to make the graph acyclic. Returns the set of reversed
 /// edge indices so they can be restored later.
+///
+/// Like dagre, we start DFS from source nodes (in-degree 0) first. This
+/// ensures that the "natural" forward edges from sources are traversed
+/// first, so back-edges in cycles are correctly identified as the
+/// reverse-direction edges rather than the forward ones.
 pub fn remove_cycles(graph: &mut DiGraph<NodeData, EdgeData>) -> Vec<EdgeIndex> {
     let mut visited = HashSet::new();
     let mut on_stack = HashSet::new();
     let mut back_edges = Vec::new();
 
-    for node in graph.node_indices().collect::<Vec<_>>() {
-        if !visited.contains(&node) {
-            dfs_find_back_edges(graph, node, &mut visited, &mut on_stack, &mut back_edges);
+    // Start from source nodes (in-degree 0) first, then remaining nodes.
+    // This matches dagre's dfsFAS behavior and produces better cycle breaks.
+    let mut sources: Vec<NodeIndex> = Vec::new();
+    let mut non_sources: Vec<NodeIndex> = Vec::new();
+    for node in graph.node_indices() {
+        let in_degree = graph
+            .neighbors_directed(node, petgraph::Direction::Incoming)
+            .count();
+        if in_degree == 0 {
+            sources.push(node);
+        } else {
+            non_sources.push(node);
+        }
+    }
+
+    for node in sources.iter().chain(non_sources.iter()) {
+        if !visited.contains(node) {
+            dfs_find_back_edges(graph, *node, &mut visited, &mut on_stack, &mut back_edges);
         }
     }
 

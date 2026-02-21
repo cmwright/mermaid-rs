@@ -9,5 +9,6 @@ pub mod svg_gitgraph;
 pub mod svg_mindmap;
 pub mod svg_pie;
 pub mod svg_sequence;
+pub mod svg_statediagram;
 pub mod svg_util;
 pub mod theme;

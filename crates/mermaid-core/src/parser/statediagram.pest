@@ -1,0 +1,167 @@
+// Mermaid State Diagram PEG Grammar
+// Handles: stateDiagram / stateDiagram-v2, states, transitions, composites,
+// notes, direction, classDef, class, style, fork/join/choice, dividers
+
+statediagram = {
+    SOI ~ NEWLINE* ~ directive* ~ diagram_header ~ NEWLINE* ~
+    (statement ~ stmt_sep)* ~ statement? ~
+    NEWLINE* ~ EOI
+}
+
+stmt_sep = _{ (NEWLINE | ";")+ }
+
+diagram_header = {
+    "stateDiagram-v2" | "stateDiagram"
+}
+
+// ── Statements ──────────────────────────────────────────────
+
+statement = _{
+    comment
+    | directive
+    | direction_stmt
+    | note_multiline
+    | note_floating
+    | note_inline
+    | class_def_stmt
+    | class_assign_stmt
+    | style_stmt
+    | composite_state
+    | state_declaration
+    | transition
+    | bare_state
+}
+
+comment = _{ "%%" ~ (!NEWLINE ~ ANY)* }
+
+directive = {
+    "%%{" ~ directive_body ~ "}%%"
+}
+directive_body = @{ (!"}" ~ ANY)* }
+
+// ── Direction ───────────────────────────────────────────────
+
+direction_stmt = { "direction" ~ direction_value }
+direction_value = @{ "TB" | "TD" | "BT" | "LR" | "RL" }
+
+// ── State declarations ──────────────────────────────────────
+
+// state "Long Name" as stateId
+// state forkName <<fork>>
+// state joinName <<join>>
+// state choiceName <<choice>>
+state_declaration = {
+    "state" ~ "\"" ~ quoted_text ~ "\"" ~ "as" ~ state_id ~ class_shorthand?
+    | "state" ~ state_id ~ state_stereotype
+}
+
+state_stereotype = {
+    "<<" ~ stereotype_kind ~ ">>" | "[[" ~ stereotype_kind ~ "]]"
+}
+stereotype_kind = @{ "fork" | "join" | "choice" }
+
+// ── Composite state ─────────────────────────────────────────
+
+composite_state = {
+    "state" ~ ("\"" ~ quoted_text ~ "\"" ~ "as")? ~ state_id ~ class_shorthand? ~ "{" ~ NEWLINE* ~
+    (composite_body_stmt ~ stmt_sep)* ~ composite_body_stmt? ~
+    NEWLINE* ~ "}"
+}
+
+composite_body_stmt = _{
+    comment
+    | direction_stmt
+    | divider
+    | note_multiline
+    | note_floating
+    | note_inline
+    | composite_state
+    | state_declaration
+    | transition
+    | bare_state
+}
+
+// Concurrent region divider
+divider = { "--" ~ !(">" | "-") }
+
+// ── Transitions ─────────────────────────────────────────────
+
+transition = {
+    state_ref ~ class_shorthand? ~ transition_arrow ~ state_ref ~ class_shorthand? ~ (":" ~ transition_label)?
+}
+
+transition_arrow = @{ "-->" }
+
+transition_label = @{ (!NEWLINE ~ ANY)+ }
+
+// ── State references ────────────────────────────────────────
+
+// [*] for start/end, or a regular state id
+state_ref = @{ "[*]" | state_id_chars }
+
+// Bare state: ID with optional description, or just an ID
+bare_state = {
+    state_id ~ class_shorthand? ~ ":" ~ state_description
+    | state_id ~ class_shorthand
+    | state_id
+}
+
+state_description = @{ (!NEWLINE ~ ANY)+ }
+
+// ── Notes ───────────────────────────────────────────────────
+
+// Multi-line note: note left of StateID\n ... \nend note
+note_multiline = {
+    "note" ~ note_position ~ "of" ~ state_ref ~ NEWLINE ~
+    note_multiline_text ~
+    "end" ~ "note"
+}
+
+// Single-line note: note left of StateID : text
+note_inline = {
+    "note" ~ note_position ~ "of" ~ state_ref ~ ":" ~ note_inline_text
+}
+
+// Floating note: note "text" as noteId
+note_floating = {
+    "note" ~ "\"" ~ quoted_text ~ "\"" ~ "as" ~ state_id
+}
+
+note_position = @{ "left" | "right" }
+note_inline_text = @{ (!NEWLINE ~ ANY)+ }
+note_multiline_text = @{ (!"end note" ~ ANY)* }
+
+// ── Styling ─────────────────────────────────────────────────
+
+class_def_stmt = {
+    "classDef" ~ class_name ~ style_props_text
+}
+
+class_assign_stmt = {
+    "class" ~ state_id_list ~ class_name
+}
+
+style_stmt = {
+    "style" ~ state_id ~ style_props_text
+}
+
+class_name = @{ identifier }
+class_shorthand = { ":::" ~ identifier }
+
+state_id_list = {
+    state_id ~ ("," ~ state_id)*
+}
+
+style_props_text = @{ (!(";" | NEWLINE) ~ ANY)+ }
+
+// ── Primitives ──────────────────────────────────────────────
+
+state_id = @{ !reserved_word ~ identifier }
+reserved_word = _{ ("end" | "note" | "state") ~ !(ASCII_ALPHANUMERIC | "_" | "-") }
+
+state_id_chars = @{ (ASCII_ALPHANUMERIC | "_" | "-")+ }
+identifier = @{ (ASCII_ALPHANUMERIC | "_" | "-")+ }
+quoted_text = @{ (!"\"" ~ ANY)+ }
+
+WHITESPACE = _{ " " | "\t" }
+NEWLINE    = _{ "\r\n" | "\n" | "\r" }

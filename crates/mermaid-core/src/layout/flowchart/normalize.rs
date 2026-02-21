@@ -14,6 +14,12 @@ pub fn normalize_and_compute_bounds(
         min_x = min_x.min(node.x - node.width / 2.0);
         min_y = min_y.min(node.y - node.height / 2.0);
     }
+    for edge in edges.iter() {
+        for &(px, py) in &edge.points {
+            min_x = min_x.min(px);
+            min_y = min_y.min(py);
+        }
+    }
     for sg in subgraphs.iter() {
         min_x = min_x.min(sg.x);
         min_y = min_y.min(sg.y);
@@ -51,6 +57,12 @@ pub fn normalize_and_compute_bounds(
     for node in nodes.iter() {
         max_x = max_x.max(node.x + node.width / 2.0);
         max_y = max_y.max(node.y + node.height / 2.0);
+    }
+    for edge in edges.iter() {
+        for &(px, py) in &edge.points {
+            max_x = max_x.max(px);
+            max_y = max_y.max(py);
+        }
     }
     for sg in subgraphs.iter() {
         max_x = max_x.max(sg.x + sg.width);

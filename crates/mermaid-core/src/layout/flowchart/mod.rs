@@ -113,7 +113,7 @@ pub fn layout_flowchart(
 }
 
 /// Build PositionedNode list from the graph and computed positions.
-fn build_positioned_nodes(
+pub(crate) fn build_positioned_nodes(
     graph: &petgraph::graph::DiGraph<NodeData, EdgeData>,
     positions: &std::collections::HashMap<petgraph::graph::NodeIndex, (f64, f64)>,
 ) -> Vec<PositionedNode> {
@@ -143,7 +143,7 @@ fn build_positioned_nodes(
 /// After subgraph separation shifts real nodes, update dummy node positions
 /// so that edge bend points and labels stay aligned with their endpoints.
 /// For each dummy chain, interpolates the shift between source and target.
-fn sync_dummy_positions(
+pub(crate) fn sync_dummy_positions(
     graph: &petgraph::graph::DiGraph<NodeData, EdgeData>,
     dummy_chains: &[DummyChain],
     positioned_nodes: &[PositionedNode],
@@ -346,10 +346,10 @@ fn sync_dummy_positions(
 }
 
 /// Result of extracting bend points and label positions from dummy chains.
-struct DummyExtractionResult {
-    bend_points: HashMap<(String, String), Vec<(f64, f64)>>,
-    label_positions: HashMap<(String, String), (f64, f64)>,
-    label_dimensions: HashMap<(String, String), (f64, f64)>,
+pub(crate) struct DummyExtractionResult {
+    pub(crate) bend_points: HashMap<(String, String), Vec<(f64, f64)>>,
+    pub(crate) label_positions: HashMap<(String, String), (f64, f64)>,
+    pub(crate) label_dimensions: HashMap<(String, String), (f64, f64)>,
 }
 
 /// Build a map from (source_id, target_id) → bend points for long edges,
@@ -357,7 +357,7 @@ struct DummyExtractionResult {
 ///
 /// Dummy nodes now participate in coordinate assignment (like dagre),
 /// so we simply extract their positions as edge waypoints.
-fn build_edge_bend_points(
+pub(crate) fn build_edge_bend_points(
     graph: &petgraph::graph::DiGraph<NodeData, EdgeData>,
     dummy_chains: &[DummyChain],
     positions: &HashMap<petgraph::graph::NodeIndex, (f64, f64)>,
