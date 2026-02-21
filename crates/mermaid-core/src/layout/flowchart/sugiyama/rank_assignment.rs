@@ -67,6 +67,7 @@ pub fn align_sibling_subgraph_ranks(
     graph: &DiGraph<NodeData, EdgeData>,
     ranks: &mut HashMap<NodeIndex, usize>,
     ast: &FlowchartAst,
+    membership: &SubgraphMembership,
 ) {
     let id_to_idx: HashMap<String, NodeIndex> = graph
         .node_indices()
@@ -81,7 +82,8 @@ pub fn align_sibling_subgraph_ranks(
             if siblings.len() <= 1 {
                 continue;
             }
-            changed |= align_one_sibling_group(siblings, graph, ranks, &id_to_idx);
+            changed |=
+                align_one_sibling_group(siblings, graph, ranks, &id_to_idx, membership);
         }
         if changed {
             propagate_ranks_forward(graph, ranks);
@@ -119,13 +121,20 @@ fn align_one_sibling_group(
     graph: &DiGraph<NodeData, EdgeData>,
     ranks: &mut HashMap<NodeIndex, usize>,
     id_to_idx: &HashMap<String, NodeIndex>,
+    membership: &SubgraphMembership,
 ) -> bool {
+    // Build sg_nodes from membership so that each node is attributed to its
+    // true owning subgraph, not to a subgraph that merely references it via a
+    // cross-subgraph edge.  A node belongs to sibling S if S.id appears
+    // anywhere in its membership path (catching nested child subgraphs).
     let sg_nodes: Vec<HashSet<NodeIndex>> = siblings
         .iter()
         .map(|sg| {
-            let mut nodes = HashSet::new();
-            collect_descendant_node_indices(sg, id_to_idx, &mut nodes);
-            nodes
+            membership
+                .iter()
+                .filter(|(_, path)| path.iter().any(|p| p == &sg.id))
+                .filter_map(|(id, _)| id_to_idx.get(id).copied())
+                .collect()
         })
         .collect();
 
@@ -221,29 +230,6 @@ fn align_one_sibling_group(
     changed
 }
 
-/// Recursively collect all node indices that are descendants of a subgraph.
-fn collect_descendant_node_indices(
-    sg: &SubgraphDef,
-    id_to_idx: &HashMap<String, NodeIndex>,
-    result: &mut HashSet<NodeIndex>,
-) {
-    for node in &sg.nodes {
-        if let Some(&idx) = id_to_idx.get(&node.id) {
-            result.insert(idx);
-        }
-    }
-    for edge in &sg.edges {
-        for id in [&edge.from, &edge.to] {
-            if let Some(&idx) = id_to_idx.get(id) {
-                result.insert(idx);
-            }
-        }
-    }
-    for child_sg in &sg.subgraphs {
-        collect_descendant_node_indices(child_sg, id_to_idx, result);
-    }
-}
-
 /// Compute dependency tiers among sibling subgraphs using topological ordering.
 /// Siblings in the same tier have no dependency edges between them.
 fn compute_dependency_tiers(
@@ -310,6 +296,48 @@ fn compute_dependency_tiers(
         if !remaining.is_empty() {
             tiers.push(remaining);
         }
+    }
+
+    // Late scheduling: sink each subgraph to the latest tier that still keeps
+    // it above all its direct successors.  This minimises cross-subgraph edge
+    // lengths (e.g. RBAC sinks from tier 0 to tier 1 when its only targets
+    // are in tier 2).
+    if tiers.len() > 1 {
+        let mut sg_tier: Vec<usize> = vec![0; n];
+        for (t, tier) in tiers.iter().enumerate() {
+            for &sg in tier {
+                sg_tier[sg] = t;
+            }
+        }
+
+        // Process from highest tier to lowest so that when we sink a
+        // subgraph, its successors have already been (potentially) sunk.
+        for t in (0..tiers.len()).rev() {
+            for &sg in &tiers[t] {
+                if adj[sg].is_empty() {
+                    continue;
+                }
+                let latest = adj[sg]
+                    .iter()
+                    .map(|&succ| sg_tier[succ])
+                    .min()
+                    .unwrap()
+                    .saturating_sub(1);
+                if latest > sg_tier[sg] {
+                    sg_tier[sg] = latest;
+                }
+            }
+        }
+
+        // Rebuild tiers from the updated assignment, compacting away any
+        // empty tiers.
+        let max_tier = sg_tier.iter().max().copied().unwrap_or(0);
+        let mut new_tiers: Vec<Vec<usize>> = vec![Vec::new(); max_tier + 1];
+        for (sg, &t) in sg_tier.iter().enumerate() {
+            new_tiers[t].push(sg);
+        }
+        new_tiers.retain(|t| !t.is_empty());
+        tiers = new_tiers;
     }
 
     tiers
@@ -646,7 +674,12 @@ mod tests {
             ..Default::default()
         };
 
-        align_sibling_subgraph_ranks(&g, &mut ranks, &ast);
+        let mut membership: SubgraphMembership = HashMap::new();
+        membership.insert("A".to_string(), vec!["Left".to_string()]);
+        membership.insert("B".to_string(), vec!["Left".to_string()]);
+        membership.insert("C".to_string(), vec!["Right".to_string()]);
+
+        align_sibling_subgraph_ranks(&g, &mut ranks, &ast, &membership);
 
         // After alignment, the max rank among Left and Right siblings should be equal
         let left_max = [ranks[&a], ranks[&b]].iter().max().copied().unwrap();
@@ -684,8 +717,12 @@ mod tests {
             ..Default::default()
         };
 
+        let mut membership: SubgraphMembership = HashMap::new();
+        membership.insert("A".to_string(), vec!["SG".to_string()]);
+        membership.insert("B".to_string(), vec!["SG".to_string()]);
+
         let orig_ranks = ranks.clone();
-        align_sibling_subgraph_ranks(&g, &mut ranks, &ast);
+        align_sibling_subgraph_ranks(&g, &mut ranks, &ast, &membership);
 
         // Ranks should be unchanged since there's only one subgraph
         assert_eq!(ranks[&a], orig_ranks[&a]);
@@ -834,8 +871,13 @@ mod tests {
         id_to_idx.insert("B".to_string(), b);
         id_to_idx.insert("C".to_string(), c);
 
+        let mut membership: SubgraphMembership = HashMap::new();
+        membership.insert("A".to_string(), vec!["Left".to_string()]);
+        membership.insert("B".to_string(), vec!["Left".to_string()]);
+        membership.insert("C".to_string(), vec!["Right".to_string()]);
+
         let siblings = &ast.subgraphs;
-        let changed = align_one_sibling_group(siblings, &g, &mut ranks, &id_to_idx);
+        let changed = align_one_sibling_group(siblings, &g, &mut ranks, &id_to_idx, &membership);
         assert!(changed);
         assert_eq!(ranks[&c], 1, "C should be promoted to match Left's max rank");
     }

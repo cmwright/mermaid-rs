@@ -42,7 +42,7 @@ pub fn layout(
     let mut ranks = rank_assignment::assign_ranks(graph);
 
     // Phase 2b: Align sibling subgraph ranks
-    rank_assignment::align_sibling_subgraph_ranks(graph, &mut ranks, ast);
+    rank_assignment::align_sibling_subgraph_ranks(graph, &mut ranks, ast, membership);
 
     // Phase 2b-ii: Align peer nodes within each subgraph.
     // Cross-subgraph edges can push some nodes to higher ranks even though
