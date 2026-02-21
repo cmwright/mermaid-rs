@@ -66,6 +66,12 @@ pub fn layout(
     // Phase 4b: Subgraph-local ordering refinement
     ordering::refine_subgraph_ordering(graph, &mut layers, membership, ast, &dummy_chains);
 
+    // Phase 4c: Remove empty layers.
+    // Alignment passes can leave gaps where no node (real or dummy) exists.
+    // Empty layers waste vertical space since coordinate assignment allocates
+    // rank_sep for each layer regardless.
+    layers.retain(|layer| !layer.is_empty());
+
     // Phase 5: Coordinate assignment — dummy nodes participate fully (like dagre).
     // Dummies get real positions via Brandes-Köpf with EDGE_SEP separation,
     // and their coordinates become edge waypoints.

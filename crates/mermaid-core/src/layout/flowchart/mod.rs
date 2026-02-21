@@ -238,9 +238,8 @@ fn sync_dummy_positions(
         }
     }
 
-    // Post-processing: route dummy chains around obstacle subgraphs.
-    // After shift/interpolation, some chains may pass through subgraphs that
-    // don't contain either endpoint. Push affected dummies outside.
+    // Post-processing: route dummy chains around obstacles (subgraphs and nodes).
+    // Push affected dummies to the nearest side of any obstacle they overlap.
     let margin = 10.0;
     for chain in dummy_chains {
         let src_id = &graph[chain.original_source].id;
@@ -249,40 +248,71 @@ fn sync_dummy_positions(
         let Some(new_src) = node_pos.get(src_id.as_str()) else { continue };
         let Some(new_tgt) = node_pos.get(tgt_id.as_str()) else { continue };
 
-        // Find subgraphs that are obstacles: contain neither endpoint
-        let obstacles: Vec<&PositionedSubgraph> = positioned_subgraphs
-            .iter()
-            .filter(|sg| {
-                let src_inside = new_src.x >= sg.x && new_src.x <= sg.x + sg.width
-                    && new_src.y >= sg.y && new_src.y <= sg.y + sg.height;
-                let tgt_inside = new_tgt.x >= sg.x && new_tgt.x <= sg.x + sg.width
-                    && new_tgt.y >= sg.y && new_tgt.y <= sg.y + sg.height;
-                !src_inside && !tgt_inside
-            })
-            .collect();
+        // Build unified obstacle list as (left, top, right, bottom) rects.
+        // Subgraphs: exclude those containing either endpoint.
+        // Nodes: exclude the edge's own source and target.
+        let mut obstacles: Vec<(f64, f64, f64, f64)> = Vec::new();
 
-        if obstacles.is_empty() {
-            continue;
+        for sg in positioned_subgraphs {
+            let src_inside = new_src.x >= sg.x && new_src.x <= sg.x + sg.width
+                && new_src.y >= sg.y && new_src.y <= sg.y + sg.height;
+            let tgt_inside = new_tgt.x >= sg.x && new_tgt.x <= sg.x + sg.width
+                && new_tgt.y >= sg.y && new_tgt.y <= sg.y + sg.height;
+            if !src_inside && !tgt_inside {
+                obstacles.push((sg.x, sg.y, sg.x + sg.width, sg.y + sg.height));
+            }
         }
 
-        for obs in &obstacles {
-            // Collect dummies inside this obstacle
-            let inside_indices: Vec<usize> = chain
+        for n in positioned_nodes {
+            if n.id == *src_id || n.id == *tgt_id {
+                continue;
+            }
+            obstacles.push((
+                n.x - n.width / 2.0,
+                n.y - n.height / 2.0,
+                n.x + n.width / 2.0,
+                n.y + n.height / 2.0,
+            ));
+        }
+
+        for &(obs_left, obs_top, obs_right, obs_bottom) in &obstacles {
+            // Collect dummies inside this obstacle OR whose segment to the
+            // next dummy crosses through the obstacle.
+            let mut inside_indices: Vec<usize> = Vec::new();
+            let dummy_positions: Vec<Option<(f64, f64)>> = chain
                 .dummy_nodes
                 .iter()
-                .enumerate()
-                .filter(|(_, &d)| {
-                    positions.get(&d).map_or(false, |p| {
-                        p.0 >= obs.x && p.0 <= obs.x + obs.width
-                            && p.1 >= obs.y && p.1 <= obs.y + obs.height
-                    })
-                })
-                .map(|(i, _)| i)
+                .map(|&d| positions.get(&d).copied())
                 .collect();
+
+            for (i, pos) in dummy_positions.iter().enumerate() {
+                let Some(p) = pos else { continue };
+                // Check if this dummy is inside the obstacle
+                if p.0 >= obs_left && p.0 <= obs_right
+                    && p.1 >= obs_top && p.1 <= obs_bottom
+                {
+                    inside_indices.push(i);
+                    continue;
+                }
+                // Check if the segment from this dummy to the next crosses
+                // through the obstacle (both x-overlapping, y spans across)
+                if let Some(Some(next)) = dummy_positions.get(i + 1) {
+                    if p.0 >= obs_left && p.0 <= obs_right
+                        && next.0 >= obs_left && next.0 <= obs_right
+                    {
+                        let seg_min_y = p.1.min(next.1);
+                        let seg_max_y = p.1.max(next.1);
+                        if seg_min_y < obs_bottom && seg_max_y > obs_top {
+                            inside_indices.push(i);
+                        }
+                    }
+                }
+            }
 
             if inside_indices.is_empty() {
                 continue;
             }
+            inside_indices.dedup();
 
             // Extend pushed zone by one dummy above and below so that
             // line segments at the transition don't clip the obstacle corner.
@@ -292,19 +322,18 @@ fn sync_dummy_positions(
             let extended_indices: Vec<usize> = (first..=last).collect();
 
             // Determine which side to route: push to nearest edge of obstacle.
-            // Use the average dummy x of the INSIDE dummies to decide direction.
             let avg_x: f64 = inside_indices
                 .iter()
                 .filter_map(|&i| positions.get(&chain.dummy_nodes[i]).map(|p| p.0))
                 .sum::<f64>()
                 / inside_indices.len() as f64;
-            let to_left = avg_x - obs.x;
-            let to_right = (obs.x + obs.width) - avg_x;
+            let to_left = avg_x - obs_left;
+            let to_right = obs_right - avg_x;
 
             let target_x = if to_left < to_right {
-                obs.x - margin
+                obs_left - margin
             } else {
-                obs.x + obs.width + margin
+                obs_right + margin
             };
 
             for &i in &extended_indices {
@@ -2045,5 +2074,98 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The "read replica" edge (PAPI → PReplica) should not pass through
+    /// any other node's bounding box.
+    #[test]
+    fn test_papi_to_preplica_avoids_nodes() {
+        let source = include_str!("../../../../../tests/test_loop/complex_subgraphs.mmd");
+        let result = layout_from_source(source);
+
+        let edge = result.edges.iter()
+            .find(|e| e.from_id == "PAPI" && e.to_id == "PReplica")
+            .expect("edge PAPI->PReplica not found");
+
+        let margin = 5.0;
+
+        // For each line segment of the edge, sample points and check
+        // they don't fall inside any unrelated node's bounding box.
+        for win in edge.points.windows(2) {
+            let (x1, y1) = win[0];
+            let (x2, y2) = win[1];
+            for s in 0..=10 {
+                let t = s as f64 / 10.0;
+                let px = x1 + (x2 - x1) * t;
+                let py = y1 + (y2 - y1) * t;
+
+                for node in &result.nodes {
+                    if node.id == "PAPI" || node.id == "PReplica" {
+                        continue;
+                    }
+                    let left = node.x - node.width / 2.0 + margin;
+                    let right = node.x + node.width / 2.0 - margin;
+                    let top = node.y - node.height / 2.0 + margin;
+                    let bottom = node.y + node.height / 2.0 - margin;
+
+                    assert!(
+                        !(px >= left && px <= right && py >= top && py <= bottom),
+                        "PAPI->PReplica edge passes through node '{}' at ({:.1},{:.1}).\n\
+                        Node bounds: ({:.1},{:.1})-({:.1},{:.1})\n\
+                        Edge points: {:?}",
+                        node.id, px, py,
+                        left, top, right, bottom,
+                        edge.points,
+                    );
+                }
+            }
+        }
+    }
+
+    /// The gap between Frontend and Backend subgraphs should be compact —
+    /// not much larger than the normal rank separation (~50px).
+    #[test]
+    fn test_frontend_backend_gap_is_compact() {
+        let source = include_str!("../../../../../tests/test_loop/complex_subgraphs.mmd");
+        let result = layout_from_source(source);
+
+        let sg = |id: &str| -> &PositionedSubgraph {
+            result.subgraphs.iter().find(|s| s.id == id)
+                .unwrap_or_else(|| panic!("subgraph '{id}' not found"))
+        };
+
+        // Staging side
+        let stage_fe = sg("StageFE");
+        let stage_be = sg("StageBE");
+        let stage_fe_bottom = stage_fe.y + stage_fe.height;
+        let stage_gap = stage_be.y - stage_fe_bottom;
+
+        // Production side
+        let prod_fe = sg("ProdFE");
+        let prod_be = sg("ProdBE");
+        let prod_fe_bottom = prod_fe.y + prod_fe.height;
+        let prod_gap = prod_be.y - prod_fe_bottom;
+
+        // Normal rank_sep is 50, so with one interstitial label rank
+        // the gap should be roughly 2-3x rank_sep (~100-150px).
+        // Allow generous margin but catch the ~300px+ gaps we see now.
+        // Normal rank_sep is 50, so with one interstitial label rank
+        // the gap should be roughly 2-3x rank_sep (~100-150px).
+        // Production has a label dummy ("deploy prod") that correctly
+        // keeps full spacing, so allow up to 155px.
+        let max_gap = 155.0;
+
+        assert!(
+            stage_gap <= max_gap,
+            "Staging Frontend->Backend gap is {stage_gap:.0}px (max {max_gap:.0}). \
+            StageFE bottom={stage_fe_bottom:.0}, StageBE top={:.0}",
+            stage_be.y,
+        );
+        assert!(
+            prod_gap <= max_gap,
+            "Production Frontend->Backend gap is {prod_gap:.0}px (max {max_gap:.0}). \
+            ProdFE bottom={prod_fe_bottom:.0}, ProdBE top={:.0}",
+            prod_be.y,
+        );
     }
 }

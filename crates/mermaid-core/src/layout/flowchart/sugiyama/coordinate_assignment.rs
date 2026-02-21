@@ -38,7 +38,14 @@ pub fn assign_coordinates(
         for &idx in layer {
             main_pos.insert(idx, rank_offset + max_thick / 2.0);
         }
-        rank_offset += max_thick + rank_sep;
+        // Pure pass-through layers (all zero-size dummies, no real nodes or
+        // label dummies) are created by long edges spanning many ranks.
+        // Compress their separation to avoid large visual gaps.
+        // Label dummies have non-zero dimensions and keep full spacing.
+        let is_pass_through = max_thick < 0.1
+            && layer.iter().all(|&i| graph[i].id.starts_with("__dummy_"));
+        let sep = if is_pass_through { rank_sep / 5.0 } else { rank_sep };
+        rank_offset += max_thick + sep;
     }
 
     // ── Cross-axis: Brandes-Köpf 4-pass ──
