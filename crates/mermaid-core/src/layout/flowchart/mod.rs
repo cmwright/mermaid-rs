@@ -75,10 +75,11 @@ pub fn layout_flowchart(
     );
 
     // 9.5. Sync dummy node positions with shifted real nodes
-    sync_dummy_positions(&graph, &result.dummy_chains, &positioned_nodes, &mut result.positions);
+    sync_dummy_positions(&graph, &result.dummy_chains, &positioned_nodes, &mut result.positions, &positioned_subgraphs);
 
     // 10. Extract bend points and label positions from dummy node positions, then route edges
     let extraction = build_edge_bend_points(&graph, &result.dummy_chains, &result.positions);
+
     let mut positioned_edges = edge_routing::route_edges(
         &positioned_nodes,
         &all_edges,
@@ -147,11 +148,17 @@ fn sync_dummy_positions(
     dummy_chains: &[DummyChain],
     positioned_nodes: &[PositionedNode],
     positions: &mut HashMap<petgraph::graph::NodeIndex, (f64, f64)>,
+    positioned_subgraphs: &[PositionedSubgraph],
 ) {
     let node_pos: HashMap<&str, &PositionedNode> = positioned_nodes
         .iter()
         .map(|n| (n.id.as_str(), n))
         .collect();
+
+    // Snapshot all original positions BEFORE processing any chains.
+    // This prevents one chain's position update from corrupting the delta
+    // calculation for another chain sharing the same endpoint.
+    let original_positions: HashMap<petgraph::graph::NodeIndex, (f64, f64)> = positions.clone();
 
     for chain in dummy_chains {
         let src_id = &graph[chain.original_source].id;
@@ -163,10 +170,10 @@ fn sync_dummy_positions(
         let Some(new_tgt) = node_pos.get(tgt_id.as_str()) else {
             continue;
         };
-        let Some(&old_src) = positions.get(&chain.original_source) else {
+        let Some(&old_src) = original_positions.get(&chain.original_source) else {
             continue;
         };
-        let Some(&old_tgt) = positions.get(&chain.original_target) else {
+        let Some(&old_tgt) = original_positions.get(&chain.original_target) else {
             continue;
         };
 
@@ -175,25 +182,135 @@ fn sync_dummy_positions(
         let tgt_dx = new_tgt.x - old_tgt.0;
         let tgt_dy = new_tgt.y - old_tgt.1;
 
-        // Skip if neither endpoint moved
-        if src_dx.abs() < 0.1 && src_dy.abs() < 0.1 && tgt_dx.abs() < 0.1 && tgt_dy.abs() < 0.1 {
-            continue;
+        let endpoints_moved = src_dx.abs() >= 0.1 || src_dy.abs() >= 0.1
+            || tgt_dx.abs() >= 0.1 || tgt_dy.abs() >= 0.1;
+
+        if endpoints_moved {
+            // Update the real node positions in the map too
+            positions.insert(chain.original_source, (new_src.x, new_src.y));
+            positions.insert(chain.original_target, (new_tgt.x, new_tgt.y));
         }
 
-        // Update the real node positions in the map too
-        positions.insert(chain.original_source, (new_src.x, new_src.y));
-        positions.insert(chain.original_target, (new_tgt.x, new_tgt.y));
-
-        // Interpolate shifts for each dummy node in the chain
+        // Check if any dummy falls outside the endpoint corridor.
+        // This catches both cases:
+        // 1. Cross-subgraph edges where Brandes-Köpf placed dummies at wrong x
+        //    (medians pulled by unrelated nodes in the same rank)
+        // 2. Edges where endpoints didn't shift but dummies are still wrong
         let n = chain.dummy_nodes.len();
+        let corridor_min_x = new_src.x.min(new_tgt.x) - 50.0;
+        let corridor_max_x = new_src.x.max(new_tgt.x) + 50.0;
+        let mut any_outside = false;
+
         for (i, &dummy) in chain.dummy_nodes.iter().enumerate() {
             let t = (i + 1) as f64 / (n + 1) as f64;
             let dx = src_dx + (tgt_dx - src_dx) * t;
-            let dy = src_dy + (tgt_dy - src_dy) * t;
+            if let Some(pos) = positions.get(&dummy) {
+                let shifted_x = pos.0 + dx;
+                if shifted_x < corridor_min_x || shifted_x > corridor_max_x {
+                    any_outside = true;
+                    break;
+                }
+            }
+        }
+
+        // Skip entirely if endpoints didn't move AND dummies are fine
+        if !endpoints_moved && !any_outside {
+            continue;
+        }
+
+        // Apply positions
+        for (i, &dummy) in chain.dummy_nodes.iter().enumerate() {
+            let t = (i + 1) as f64 / (n + 1) as f64;
 
             if let Some(pos) = positions.get_mut(&dummy) {
-                pos.0 += dx;
-                pos.1 += dy;
+                if any_outside {
+                    // Dummies are in wrong positions — replace with linear interpolation
+                    pos.0 = new_src.x + (new_tgt.x - new_src.x) * t;
+                    pos.1 = new_src.y + (new_tgt.y - new_src.y) * t;
+                } else {
+                    // Normal case: apply interpolated shift
+                    let dx = src_dx + (tgt_dx - src_dx) * t;
+                    let dy = src_dy + (tgt_dy - src_dy) * t;
+                    pos.0 += dx;
+                    pos.1 += dy;
+                }
+            }
+        }
+    }
+
+    // Post-processing: route dummy chains around obstacle subgraphs.
+    // After shift/interpolation, some chains may pass through subgraphs that
+    // don't contain either endpoint. Push affected dummies outside.
+    let margin = 10.0;
+    for chain in dummy_chains {
+        let src_id = &graph[chain.original_source].id;
+        let tgt_id = &graph[chain.original_target].id;
+
+        let Some(new_src) = node_pos.get(src_id.as_str()) else { continue };
+        let Some(new_tgt) = node_pos.get(tgt_id.as_str()) else { continue };
+
+        // Find subgraphs that are obstacles: contain neither endpoint
+        let obstacles: Vec<&PositionedSubgraph> = positioned_subgraphs
+            .iter()
+            .filter(|sg| {
+                let src_inside = new_src.x >= sg.x && new_src.x <= sg.x + sg.width
+                    && new_src.y >= sg.y && new_src.y <= sg.y + sg.height;
+                let tgt_inside = new_tgt.x >= sg.x && new_tgt.x <= sg.x + sg.width
+                    && new_tgt.y >= sg.y && new_tgt.y <= sg.y + sg.height;
+                !src_inside && !tgt_inside
+            })
+            .collect();
+
+        if obstacles.is_empty() {
+            continue;
+        }
+
+        for obs in &obstacles {
+            // Collect dummies inside this obstacle
+            let inside_indices: Vec<usize> = chain
+                .dummy_nodes
+                .iter()
+                .enumerate()
+                .filter(|(_, &d)| {
+                    positions.get(&d).map_or(false, |p| {
+                        p.0 >= obs.x && p.0 <= obs.x + obs.width
+                            && p.1 >= obs.y && p.1 <= obs.y + obs.height
+                    })
+                })
+                .map(|(i, _)| i)
+                .collect();
+
+            if inside_indices.is_empty() {
+                continue;
+            }
+
+            // Extend pushed zone by one dummy above and below so that
+            // line segments at the transition don't clip the obstacle corner.
+            let first = inside_indices[0].saturating_sub(1);
+            let last = (*inside_indices.last().unwrap() + 1)
+                .min(chain.dummy_nodes.len() - 1);
+            let extended_indices: Vec<usize> = (first..=last).collect();
+
+            // Determine which side to route: push to nearest edge of obstacle.
+            // Use the average dummy x of the INSIDE dummies to decide direction.
+            let avg_x: f64 = inside_indices
+                .iter()
+                .filter_map(|&i| positions.get(&chain.dummy_nodes[i]).map(|p| p.0))
+                .sum::<f64>()
+                / inside_indices.len() as f64;
+            let to_left = avg_x - obs.x;
+            let to_right = (obs.x + obs.width) - avg_x;
+
+            let target_x = if to_left < to_right {
+                obs.x - margin
+            } else {
+                obs.x + obs.width + margin
+            };
+
+            for &i in &extended_indices {
+                if let Some(pos) = positions.get_mut(&chain.dummy_nodes[i]) {
+                    pos.0 = target_x;
+                }
             }
         }
     }
@@ -653,7 +770,7 @@ mod tests {
         positions.insert(a, (50.0, 50.0));
         positions.insert(b, (100.0, 150.0));
 
-        sync_dummy_positions(&graph, &[chain], &positioned_nodes, &mut positions);
+        sync_dummy_positions(&graph, &[chain], &positioned_nodes, &mut positions, &[]);
         assert_eq!(positions.get(&a).unwrap().0, 50.0);
     }
 
@@ -711,7 +828,7 @@ mod tests {
         positions.insert(a, (50.0, 50.0));
         positions.insert(b, (100.0, 150.0));
 
-        sync_dummy_positions(&graph, &[chain], &positioned_nodes, &mut positions);
+        sync_dummy_positions(&graph, &[chain], &positioned_nodes, &mut positions, &[]);
         assert_eq!(positions.get(&b).unwrap().0, 100.0);
     }
 
@@ -762,7 +879,7 @@ mod tests {
         positions.insert(b, (100.0, 150.0));
         // a is missing from positions - should continue (line 164)
 
-        sync_dummy_positions(&graph, &[chain], &positioned_nodes, &mut positions);
+        sync_dummy_positions(&graph, &[chain], &positioned_nodes, &mut positions, &[]);
         assert!(!positions.contains_key(&a));
     }
 
@@ -813,7 +930,7 @@ mod tests {
         positions.insert(a, (50.0, 50.0));
         // b is missing from positions - should continue (line 168)
 
-        sync_dummy_positions(&graph, &[chain], &positioned_nodes, &mut positions);
+        sync_dummy_positions(&graph, &[chain], &positioned_nodes, &mut positions, &[]);
         assert!(!positions.contains_key(&b));
     }
 
@@ -875,7 +992,7 @@ mod tests {
         positions.insert(b, (bx, by));
         positions.insert(dummy, (75.0, 100.0));
 
-        sync_dummy_positions(&graph, &[chain], &positioned_nodes, &mut positions);
+        sync_dummy_positions(&graph, &[chain], &positioned_nodes, &mut positions, &[]);
         // Neither moved - dummy position should be unchanged
         assert!((positions.get(&dummy).unwrap().0 - 75.0).abs() < 0.01);
     }
@@ -1691,5 +1808,242 @@ mod tests {
             "F1 (y={:.1}) and F3 (y={:.1}) should be horizontally aligned",
             f1.y, f3.y,
         );
+    }
+
+    #[test]
+    fn test_complex_subgraph_edge_endpoints() {
+        let source = include_str!("../../../../../tests/test_loop/complex_subgraphs.mmd");
+        let result = layout_from_source(source);
+
+        // Helper to find a node
+        let node = |id: &str| -> &PositionedNode {
+            result.nodes.iter().find(|n| n.id == id)
+                .unwrap_or_else(|| panic!("node '{id}' not found"))
+        };
+        // Helper to find an edge
+        let edge = |from: &str, to: &str| -> &PositionedEdge {
+            result.edges.iter().find(|e| e.from_id == from && e.to_id == to)
+                .unwrap_or_else(|| panic!("edge '{from}'->{to}' not found"))
+        };
+
+        // The "deploy staging" edge: Gate --> SAPI
+        let gate = node("Gate");
+        let sapi = node("SAPI");
+        let deploy_staging = edge("Gate", "SAPI");
+
+        // Edge should start near Gate and end near SAPI
+        let start = deploy_staging.points.first().unwrap();
+        let end = deploy_staging.points.last().unwrap();
+
+        // Start should be within gate's bounding box vicinity
+        let start_dist_to_gate = ((start.0 - gate.x).powi(2) + (start.1 - gate.y).powi(2)).sqrt();
+        assert!(
+            start_dist_to_gate < gate.width + 50.0,
+            "deploy_staging edge start ({:.1},{:.1}) too far from Gate ({:.1},{:.1}), dist={:.1}",
+            start.0, start.1, gate.x, gate.y, start_dist_to_gate,
+        );
+
+        // End should be within SAPI's bounding box vicinity
+        let end_dist_to_sapi = ((end.0 - sapi.x).powi(2) + (end.1 - sapi.y).powi(2)).sqrt();
+        assert!(
+            end_dist_to_sapi < sapi.width + 50.0,
+            "deploy_staging edge end ({:.1},{:.1}) too far from SAPI ({:.1},{:.1}), dist={:.1}",
+            end.0, end.1, sapi.x, sapi.y, end_dist_to_sapi,
+        );
+
+        // The edge should go generally downward (gate.y < sapi.y)
+        assert!(
+            gate.y < sapi.y,
+            "Gate (y={:.1}) should be above SAPI (y={:.1})",
+            gate.y, sapi.y,
+        );
+
+        // CRITICAL: No waypoint should deviate more than a reasonable amount
+        // from the corridor between Gate and SAPI. If waypoints go far left
+        // or far right, the edge is taking a wild detour.
+        let corridor_min_x = gate.x.min(sapi.x) - 100.0;
+        let corridor_max_x = gate.x.max(sapi.x) + 100.0;
+        for (i, p) in deploy_staging.points.iter().enumerate() {
+            assert!(
+                p.0 >= corridor_min_x && p.0 <= corridor_max_x,
+                "deploy_staging waypoint [{i}] x={:.1} outside corridor [{:.1}, {:.1}] \
+                (Gate.x={:.1}, SAPI.x={:.1})",
+                p.0, corridor_min_x, corridor_max_x, gate.x, sapi.x,
+            );
+        }
+
+        // ---- Gate → PAPI ("deploy prod") should also stay in its corridor ----
+        let papi = node("PAPI");
+        let deploy_prod = edge("Gate", "PAPI");
+
+        // Waypoints should stay within the corridor between Gate and PAPI.
+        // Before the fix, dummies overshoot to x ≈ -300 (right of PAPI at -415).
+        let prod_corridor_min_x = gate.x.min(papi.x) - 100.0;
+        let prod_corridor_max_x = gate.x.max(papi.x) + 100.0;
+        for (i, p) in deploy_prod.points.iter().enumerate() {
+            assert!(
+                p.0 >= prod_corridor_min_x && p.0 <= prod_corridor_max_x,
+                "deploy_prod waypoint [{i}] x={:.1} outside corridor [{:.1}, {:.1}] \
+                (Gate.x={:.1}, PAPI.x={:.1})",
+                p.0, prod_corridor_min_x, prod_corridor_max_x, gate.x, papi.x,
+            );
+        }
+
+        // ---- PWA → PAPI should stay in corridor too ----
+        let pwa = node("PWA");
+        let pwa_papi = edge("PWA", "PAPI");
+
+        let pwa_corridor_min_x = pwa.x.min(papi.x) - 100.0;
+        let pwa_corridor_max_x = pwa.x.max(papi.x) + 100.0;
+        for (i, p) in pwa_papi.points.iter().enumerate() {
+            assert!(
+                p.0 >= pwa_corridor_min_x && p.0 <= pwa_corridor_max_x,
+                "pwa_papi waypoint [{i}] x={:.1} outside corridor [{:.1}, {:.1}] \
+                (PWA.x={:.1}, PAPI.x={:.1})",
+                p.0, pwa_corridor_min_x, pwa_corridor_max_x, pwa.x, papi.x,
+            );
+        }
+    }
+
+    #[test]
+    fn test_org_flowchart_edge_corridors() {
+        let source = include_str!("../../../../../tests/test_loop/input_mermaid.mmd");
+        let result = layout_from_source(source);
+
+        let node = |id: &str| -> &PositionedNode {
+            result.nodes.iter().find(|n| n.id == id)
+                .unwrap_or_else(|| panic!("node '{id}' not found"))
+        };
+        let edge = |from: &str, to: &str| -> &PositionedEdge {
+            result.edges.iter().find(|e| e.from_id == from && e.to_id == to)
+                .unwrap_or_else(|| panic!("edge '{from}'->'{to}' not found"))
+        };
+
+        // The three org_id edges: RootOU→OO1, EUOU→OO2, SmallOU→OO3
+        for (src_id, tgt_id) in &[("RootOU", "OO1"), ("EUOU", "OO2"), ("SmallOU", "OO3")] {
+            let src = node(src_id);
+            let tgt = node(tgt_id);
+            let e = edge(src_id, tgt_id);
+
+            let corridor_min_x = src.x.min(tgt.x) - 100.0;
+            let corridor_max_x = src.x.max(tgt.x) + 100.0;
+
+            for (i, p) in e.points.iter().enumerate() {
+                assert!(
+                    p.0 >= corridor_min_x && p.0 <= corridor_max_x,
+                    "org_id edge {}->{} waypoint [{i}] x={:.1} outside corridor \
+                    [{:.1}, {:.1}] (src.x={:.1}, tgt.x={:.1})",
+                    src_id, tgt_id, p.0, corridor_min_x, corridor_max_x, src.x, tgt.x,
+                );
+            }
+        }
+    }
+
+    /// Edges should not pass through subgraphs that don't contain their
+    /// source or target node.
+    #[test]
+    fn test_edges_dont_cross_unrelated_subgraphs() {
+        let source = include_str!("../../../../../tests/test_loop/input_mermaid.mmd");
+        let result = layout_from_source(source);
+
+        // Helper: check if a point is inside a subgraph bbox
+        let point_in_subgraph = |px: f64, py: f64, sg: &PositionedSubgraph| -> bool {
+            px >= sg.x && px <= sg.x + sg.width
+                && py >= sg.y && py <= sg.y + sg.height
+        };
+
+        // Helper: check if a node center is inside a subgraph bbox
+        let node_in_subgraph = |n: &PositionedNode, sg: &PositionedSubgraph| -> bool {
+            point_in_subgraph(n.x, n.y, sg)
+        };
+
+        // Find nodes by id
+        let node = |id: &str| -> &PositionedNode {
+            result.nodes.iter().find(|n| n.id == id)
+                .unwrap_or_else(|| panic!("node '{id}' not found"))
+        };
+
+        // For each edge, check that no waypoint passes through a subgraph
+        // that doesn't contain either the source or target node.
+        // We check edge segments by sampling points along them.
+        let edges_to_check = [("RootOU", "OO1"), ("EUOU", "OO2"), ("SmallOU", "OO3")];
+
+        for (src_id, tgt_id) in &edges_to_check {
+            let src_node = node(src_id);
+            let tgt_node = node(tgt_id);
+            let e = result.edges.iter()
+                .find(|e| e.from_id == *src_id && e.to_id == *tgt_id)
+                .unwrap();
+
+            for sg in &result.subgraphs {
+                // Skip subgraphs that contain either endpoint
+                if node_in_subgraph(src_node, sg) || node_in_subgraph(tgt_node, sg) {
+                    continue;
+                }
+
+                // Check each segment of the edge path
+                for win in e.points.windows(2) {
+                    let (x1, y1) = win[0];
+                    let (x2, y2) = win[1];
+                    // Sample 10 points along the segment
+                    for s in 0..=10 {
+                        let t = s as f64 / 10.0;
+                        let px = x1 + (x2 - x1) * t;
+                        let py = y1 + (y2 - y1) * t;
+                        assert!(
+                            !point_in_subgraph(px, py, sg),
+                            "Edge {}->{} passes through subgraph '{}' at ({:.1},{:.1}).\n\
+                            Subgraph bounds: ({:.1},{:.1}) {}x{}\n\
+                            Source {} at ({:.1},{:.1}), Target {} at ({:.1},{:.1})",
+                            src_id, tgt_id, sg.id, px, py,
+                            sg.x, sg.y, sg.width, sg.height,
+                            src_id, src_node.x, src_node.y,
+                            tgt_id, tgt_node.x, tgt_node.y,
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// In a top-down flowchart, edges from Job Queue (PQueue) should always
+    /// go downward — waypoints should have monotonically non-decreasing y.
+    #[test]
+    fn test_job_queue_edges_go_downward() {
+        let source = include_str!("../../../../../tests/test_loop/complex_subgraphs.mmd");
+        let result = layout_from_source(source);
+
+        let node = |id: &str| -> &PositionedNode {
+            result.nodes.iter().find(|n| n.id == id)
+                .unwrap_or_else(|| panic!("node '{id}' not found"))
+        };
+
+        let pqueue = node("PQueue");
+
+        // PQueue has edges to: PNotify, PRedis, PS3
+        for tgt_id in &["PNotify", "PRedis", "PS3"] {
+            let tgt = node(tgt_id);
+            let e = result.edges.iter()
+                .find(|e| e.from_id == "PQueue" && e.to_id == *tgt_id)
+                .unwrap_or_else(|| panic!("edge PQueue->{tgt_id} not found"));
+
+            // In TD layout, target should be below source
+            assert!(
+                tgt.y > pqueue.y,
+                "PQueue (y={:.1}) should be above {} (y={:.1}) in TD layout",
+                pqueue.y, tgt_id, tgt.y,
+            );
+
+            // Waypoints should be monotonically non-decreasing in y
+            // (allowing small tolerance for floating point)
+            for w in e.points.windows(2) {
+                assert!(
+                    w[1].1 >= w[0].1 - 1.0,
+                    "PQueue->{} edge goes upward: waypoint y={:.1} followed by y={:.1}. \
+                    All points: {:?}",
+                    tgt_id, w[0].1, w[1].1, e.points,
+                );
+            }
+        }
     }
 }

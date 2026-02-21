@@ -1,0 +1,83 @@
+graph TD
+    subgraph CI["CI/CD Pipeline"]
+        Commit["git push"] --> Build["Build"]
+        Build --> Lint["Lint"]
+        Build --> Unit["Unit Tests"]
+        Build --> Integration["Integration Tests"]
+        Lint --> Gate["Quality Gate"]
+        Unit --> Gate
+        Integration --> Gate
+    end
+
+    subgraph Staging["Staging Environment"]
+        subgraph StageFE["Frontend"]
+            SCDN["CDN"]
+            SWeb["Web App"]
+            SWeb --> SCDN
+        end
+        subgraph StageBE["Backend"]
+            SAPI["API Gateway"]
+            SAuth["Auth Service"]
+            SQueue["Job Queue"]
+            SAPI --> SAuth
+            SAPI --> SQueue
+        end
+        subgraph StageData["Data Layer"]
+            SPG["PostgreSQL"]
+            SRedis["Redis"]
+        end
+        SWeb -->|API calls| SAPI
+        SAuth --> SPG
+        SQueue --> SRedis
+    end
+
+    subgraph Prod["Production Environment"]
+        subgraph ProdFE["Frontend"]
+            PCDN["CDN"]
+            PWA["Web App"]
+            PPWA["PWA Shell"]
+            PWA --> PCDN
+            PPWA --> PCDN
+        end
+        subgraph ProdBE["Backend"]
+            PAPI["API Gateway"]
+            PAuth["Auth Service"]
+            PQueue["Job Queue"]
+            PNotify["Notifications"]
+            PAPI --> PAuth
+            PAPI --> PQueue
+            PQueue --> PNotify
+        end
+        subgraph ProdData["Data Layer"]
+            PPrimary["PG Primary"]
+            PReplica["PG Replica"]
+            PRedis["Redis Cluster"]
+            PS3["Object Store"]
+            PPrimary --> PReplica
+        end
+        PWA -->|API calls| PAPI
+        PAuth --> PPrimary
+        PQueue --> PRedis
+        PQueue --> PS3
+        PAPI -.->|read replica| PReplica
+    end
+
+    subgraph External["External Services"]
+        Stripe["Stripe"]
+        SendGrid["SendGrid"]
+        Datadog["Datadog"]
+    end
+
+    subgraph Monitoring["Observability"]
+        Grafana["Grafana"]
+        Alerts["PagerDuty"]
+        Grafana --> Alerts
+    end
+
+    Gate -->|deploy staging| SAPI
+    Gate -->|deploy prod| PAPI
+    PNotify --> SendGrid
+    PAPI -.->|payments| Stripe
+    SAuth -.->|metrics| Datadog
+    PAuth -.->|metrics| Datadog
+    Datadog --> Grafana

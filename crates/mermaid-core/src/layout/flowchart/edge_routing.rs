@@ -168,10 +168,8 @@ pub fn route_edges(
 }
 
 /// Route a long edge through its bend points (from dummy node positions).
-/// Densifies segments with linearly-interpolated control points so the
-/// B-spline (which only approximates interior control points) stays pinned
-/// to the desired path — especially for straight vertical/horizontal runs.
-/// After densification, enforces clearance from intermediate node boxes.
+/// Computes endpoint intersections with node shapes and passes the raw
+/// control points to the B-spline curve generator for smooth rendering.
 fn route_with_bend_points(
     from: &PositionedNode,
     to: &PositionedNode,
@@ -187,32 +185,13 @@ fn route_with_bend_points(
     let last_target = bend_points.last().copied().unwrap_or((from.x, from.y));
     let end = intersect_shape(to, last_target.0, last_target.1);
 
-    // Build the raw waypoint sequence
-    let mut raw = Vec::with_capacity(bend_points.len() + 2);
-    raw.push(start);
-    raw.extend_from_slice(bend_points);
-    raw.push(end);
-
-    // Densify: insert linearly-interpolated points between each consecutive
-    // pair so that the B-spline has enough control points to stay on track.
-    let max_gap = 30.0;
-    let mut points = Vec::new();
-    for pair in raw.windows(2) {
-        let (x0, y0) = pair[0];
-        let (x1, y1) = pair[1];
-        let dx = x1 - x0;
-        let dy = y1 - y0;
-        let dist = (dx * dx + dy * dy).sqrt();
-        let n = (dist / max_gap).ceil().max(1.0) as usize;
-        for i in 0..n {
-            let t = i as f64 / n as f64;
-            points.push((x0 + dx * t, y0 + dy * t));
-        }
-    }
-    // Push the final point
-    if let Some(&last) = raw.last() {
-        points.push(last);
-    }
+    // Build the waypoint sequence: start + bend points + end.
+    // The B-spline curve generator handles smoothing, so we pass
+    // only the raw control points — no densification needed.
+    let mut points = Vec::with_capacity(bend_points.len() + 2);
+    points.push(start);
+    points.extend_from_slice(bend_points);
+    points.push(end);
 
     points
 }
