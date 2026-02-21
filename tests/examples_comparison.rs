@@ -347,6 +347,62 @@ const EXAMPLES: &[Example] = &[
       Pen and paper
       Mermaid"#,
     },
+    // ── State Diagrams ────────────────────────────────────────
+    Example {
+        name: "Simple state diagram",
+        category: "State Diagram",
+        source: r#"stateDiagram-v2
+    [*] --> Still
+    Still --> [*]
+    Still --> Moving
+    Moving --> Still
+    Moving --> Crash
+    Crash --> [*]"#,
+    },
+    Example {
+        name: "Composite states with transitions",
+        category: "State Diagram",
+        source: r#"stateDiagram-v2
+    [*] --> Active
+    Active --> [*]
+
+    state Active {
+        [*] --> Idle
+        Idle --> Processing : start
+        Processing --> Idle : done
+        Processing --> Error : fail
+        Error --> Idle : retry
+    }"#,
+    },
+    Example {
+        name: "Fork, join, choice, and notes",
+        category: "State Diagram",
+        source: r#"stateDiagram-v2
+    state fork_state <<fork>>
+    state join_state <<join>>
+    state if_state <<choice>>
+
+    [*] --> fork_state
+    fork_state --> TaskA
+    fork_state --> TaskB
+
+    TaskA --> join_state
+    TaskB --> join_state
+
+    join_state --> if_state
+
+    if_state --> Success : passed
+    if_state --> Failure : failed
+
+    Success --> [*]
+    Failure --> Retry
+    Retry --> fork_state
+
+    note right of if_state
+        Evaluate results
+        from both tasks
+    end note"#,
+    },
 ];
 
 fn html_escape(s: &str) -> String {

@@ -50,8 +50,9 @@ pub fn insert_dummy_nodes(
         let edge_idx = graph.find_edge(src, tgt).expect("long edge disappeared");
         let edge_data = graph.remove_edge(edge_idx).unwrap();
 
-        // Determine the label rank (midpoint) for labeled edges
-        let label_rank = if edge_data.label.is_some() {
+        // Determine the label rank (midpoint) for labeled edges or edges
+        // with phantom dimensions (used by state diagrams for spacing).
+        let label_rank = if edge_data.label.is_some() || edge_data.label_width > 0.0 {
             Some((src_rank + tgt_rank) / 2)
         } else {
             None

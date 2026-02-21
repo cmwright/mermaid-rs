@@ -4,6 +4,7 @@ pub mod gitgraph;
 pub mod mindmap;
 pub mod pie;
 pub mod sequence;
+pub mod statediagram;
 
 use crate::error::{MermaidError, Result};
 
@@ -16,6 +17,7 @@ pub enum DiagramKind {
     Mindmap,
     Pie,
     Sequence,
+    StateDiagram,
 }
 
 /// Detect the diagram kind from the first significant line of source.
@@ -25,6 +27,10 @@ pub fn detect_diagram_kind(source: &str) -> Result<DiagramKind> {
         // Skip empty lines, comments (%%...), directives (%%{...}%%), and frontmatter (---)
         if trimmed.is_empty() || trimmed.starts_with("%%") || trimmed == "---" {
             continue;
+        }
+
+        if trimmed.starts_with("stateDiagram") {
+            return Ok(DiagramKind::StateDiagram);
         }
 
         if trimmed.starts_with("gantt") {

@@ -7,6 +7,7 @@ use crate::layout::gitgraph;
 use crate::layout::mindmap;
 use crate::layout::pie;
 use crate::layout::sequence;
+use crate::layout::statediagram;
 use crate::layout::text_measure::TextMeasurer;
 use crate::parser::{self, DiagramKind};
 #[cfg(feature = "png")]
@@ -17,6 +18,7 @@ use crate::render::svg_gitgraph;
 use crate::render::svg_mindmap;
 use crate::render::svg_pie;
 use crate::render::svg_sequence;
+use crate::render::svg_statediagram;
 use crate::render::theme::Theme;
 
 /// Output format for rendering.
@@ -118,6 +120,7 @@ pub fn render(source: &str, config: &RenderConfig) -> Result<RenderOutput> {
         DiagramKind::Pie => render_pie_svg(source, config)?,
         DiagramKind::Mindmap => render_mindmap_svg(source, config)?,
         DiagramKind::Sequence => render_sequence_svg(source, config)?,
+        DiagramKind::StateDiagram => render_statediagram_svg(source, config)?,
     };
 
     match config.output_format {
@@ -211,6 +214,15 @@ fn render_mindmap_svg(source: &str, config: &RenderConfig) -> Result<String> {
     // 3. Render SVG
     let svg = svg_mindmap::render_svg(&layout, &config.theme)?;
 
+    Ok(svg)
+}
+
+fn render_statediagram_svg(source: &str, config: &RenderConfig) -> Result<String> {
+    let ast = crate::parser::statediagram::parse_statediagram(source)?;
+    let font_ref = config.font_provider.font_ref()?;
+    let measurer = TextMeasurer::new(font_ref, config.theme.font_size as f32);
+    let positioned = statediagram::layout_statediagram(&ast, &measurer)?;
+    let svg = svg_statediagram::render_svg(&positioned, &config.theme)?;
     Ok(svg)
 }
 
