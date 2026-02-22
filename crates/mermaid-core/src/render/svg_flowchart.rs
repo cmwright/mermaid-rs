@@ -6,7 +6,7 @@ use crate::layout::flowchart::{
     PositionedEdge, PositionedGraph, PositionedNode, PositionedSubgraph,
 };
 use crate::render::html_util;
-use crate::render::svg_util::{build_basis_curve_path, escape_xml};
+use crate::render::svg_util::{build_basis_curve_path, escape_xml, fix_corners};
 use crate::render::theme::Theme;
 
 const SVG_PADDING: f64 = 8.0;
@@ -531,7 +531,8 @@ fn render_edge(svg: &mut String, edge: &PositionedEdge, theme: &Theme) {
     }
 
     let line_color = theme.line_color.to_css();
-    let path_d = build_basis_curve_path(&edge.points);
+    let fixed_points = fix_corners(&edge.points);
+    let path_d = build_basis_curve_path(&fixed_points);
 
     let stroke_width = match edge.line_style {
         LineStyle::Thick => theme.flowchart.edge_width * 2.0,

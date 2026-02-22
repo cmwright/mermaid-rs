@@ -104,6 +104,121 @@ fn basis_bezier(path: &mut String, x0: f64, y0: f64, x1: f64, y1: f64, x: f64, y
     );
 }
 
+/// Pre-process waypoints to smooth orthogonal corners before B-spline interpolation.
+/// Matches mermaid.js `fixCorners()` — detects 90° corners in the point sequence and
+/// replaces each corner point with three adjusted points (before-corner, rounded-corner,
+/// after-corner) using a 5px offset radius.
+pub fn fix_corners(points: &[(f64, f64)]) -> Vec<(f64, f64)> {
+    if points.len() < 3 {
+        return points.to_vec();
+    }
+
+    // Detect which indices are orthogonal corners.
+    let corner_indices = extract_corner_indices(points);
+
+    let mut result = Vec::with_capacity(points.len() + corner_indices.len() * 2);
+    for (i, &pt) in points.iter().enumerate() {
+        if corner_indices.contains(&i) {
+            let prev = points[i - 1];
+            let next = points[i + 1];
+            let corner = pt;
+
+            let new_prev = find_adjacent_point(prev, corner, 5.0);
+            let new_next = find_adjacent_point(next, corner, 5.0);
+
+            let x_diff = new_next.0 - new_prev.0;
+            let y_diff = new_next.1 - new_prev.1;
+
+            result.push(new_prev);
+
+            let a = std::f64::consts::SQRT_2 * 2.0;
+            let new_corner =
+                if (next.0 - prev.0).abs() > 10.0 && (next.1 - prev.1).abs() >= 10.0 {
+                    let r = 5.0;
+                    if (corner.0 - new_prev.0).abs() < 1e-6 {
+                        // Vertical incoming, horizontal outgoing
+                        (
+                            if x_diff < 0.0 {
+                                new_prev.0 - r + a
+                            } else {
+                                new_prev.0 + r - a
+                            },
+                            if y_diff < 0.0 {
+                                new_prev.1 - a
+                            } else {
+                                new_prev.1 + a
+                            },
+                        )
+                    } else {
+                        // Horizontal incoming, vertical outgoing
+                        (
+                            if x_diff < 0.0 {
+                                new_prev.0 - a
+                            } else {
+                                new_prev.0 + a
+                            },
+                            if y_diff < 0.0 {
+                                new_prev.1 - r + a
+                            } else {
+                                new_prev.1 + r - a
+                            },
+                        )
+                    }
+                } else {
+                    corner
+                };
+
+            result.push(new_corner);
+            result.push(new_next);
+        } else {
+            result.push(pt);
+        }
+    }
+
+    result
+}
+
+/// Detect indices of 90° orthogonal corners in a point sequence.
+fn extract_corner_indices(points: &[(f64, f64)]) -> Vec<usize> {
+    let mut indices = Vec::new();
+    for i in 1..points.len() - 1 {
+        let prev = points[i - 1];
+        let curr = points[i];
+        let next = points[i + 1];
+
+        let is_corner = (
+            // Vertical then horizontal
+            (prev.0 - curr.0).abs() < 1e-6
+                && (curr.1 - next.1).abs() < 1e-6
+                && (curr.0 - next.0).abs() > 5.0
+                && (curr.1 - prev.1).abs() > 5.0
+        ) || (
+            // Horizontal then vertical
+            (prev.1 - curr.1).abs() < 1e-6
+                && (curr.0 - next.0).abs() < 1e-6
+                && (curr.0 - prev.0).abs() > 5.0
+                && (curr.1 - next.1).abs() > 5.0
+        );
+
+        if is_corner {
+            indices.push(i);
+        }
+    }
+    indices
+}
+
+/// Find a point at `distance` from `point_b` along the direction from `point_b` to `point_a`.
+fn find_adjacent_point(point_a: (f64, f64), point_b: (f64, f64), distance: f64) -> (f64, f64) {
+    let x_diff = point_b.0 - point_a.0;
+    let y_diff = point_b.1 - point_a.1;
+    let length = (x_diff * x_diff + y_diff * y_diff).sqrt();
+    if length < 1e-9 {
+        return point_b;
+    }
+    let ratio = distance / length;
+    (point_b.0 - ratio * x_diff, point_b.1 - ratio * y_diff)
+}
+
 /// Build an SVG path with rounded 90-degree orthogonal corners (like mermaid.js git graph).
 /// Creates a path with horizontal and vertical segments connected by rounded corners.
 pub fn build_orthogonal_path(points: &[(f64, f64)]) -> String {
@@ -318,6 +433,54 @@ mod tests {
             q_count, 1,
             "expected exactly 1 Q (from first segment only): {path}"
         );
+    }
+
+    // ---------------------------------------------------------------
+    // fix_corners
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn fix_corners_fewer_than_three_points() {
+        let pts = vec![(0.0, 0.0), (10.0, 20.0)];
+        assert_eq!(fix_corners(&pts), pts);
+    }
+
+    #[test]
+    fn fix_corners_no_orthogonal_corner() {
+        // Diagonal points — no 90° corners
+        let pts = vec![(0.0, 0.0), (10.0, 10.0), (20.0, 20.0)];
+        assert_eq!(fix_corners(&pts), pts);
+    }
+
+    #[test]
+    fn fix_corners_vertical_then_horizontal() {
+        // Vertical segment then horizontal: (100,0) -> (100,50) -> (200,50)
+        let pts = vec![(100.0, 0.0), (100.0, 50.0), (200.0, 50.0)];
+        let result = fix_corners(&pts);
+        // Corner at index 1 should be replaced with 3 points
+        assert_eq!(result.len(), 5, "corner should be expanded: {:?}", result);
+        // First point unchanged
+        assert_eq!(result[0], (100.0, 0.0));
+        // Last point unchanged
+        assert_eq!(result[4], (200.0, 50.0));
+    }
+
+    #[test]
+    fn fix_corners_horizontal_then_vertical() {
+        // Horizontal segment then vertical: (0,100) -> (50,100) -> (50,200)
+        let pts = vec![(0.0, 100.0), (50.0, 100.0), (50.0, 200.0)];
+        let result = fix_corners(&pts);
+        assert_eq!(result.len(), 5, "corner should be expanded: {:?}", result);
+        assert_eq!(result[0], (0.0, 100.0));
+        assert_eq!(result[4], (50.0, 200.0));
+    }
+
+    #[test]
+    fn fix_corners_small_segments_skipped() {
+        // Segments shorter than 5px — should NOT be detected as corners
+        let pts = vec![(100.0, 0.0), (100.0, 3.0), (103.0, 3.0)];
+        let result = fix_corners(&pts);
+        assert_eq!(result.len(), 3, "small corner should not be expanded");
     }
 
     #[test]
