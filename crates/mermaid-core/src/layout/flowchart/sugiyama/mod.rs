@@ -6,6 +6,7 @@ pub mod nesting_graph;
 pub mod ordering;
 pub mod parent_dummy_chains;
 pub mod rank_assignment;
+pub mod recursive_ordering;
 
 use petgraph::graph::{DiGraph, NodeIndex};
 use std::collections::{HashMap, HashSet};
@@ -124,10 +125,18 @@ pub fn layout(
 
         // Phase 6: Convert ranks to layers and minimize crossings (with dummy nodes)
         let mut layers = rank_assignment::ranks_to_layers(graph, &ranks);
-        ordering::minimize_crossings(graph, &mut layers, membership, 24);
 
-        // Phase 6b: Subgraph-local ordering refinement
-        ordering::refine_subgraph_ordering(graph, &mut layers, membership, ast, &dummy_chains);
+        // Use the recursive ordering algorithm that properly handles compound
+        // graphs. Falls back to the flat barycenter first to get an initial
+        // ordering, then refines with the recursive algorithm.
+        ordering::minimize_crossings(graph, &mut layers, membership, 24);
+        recursive_ordering::minimize_crossings_recursive(
+            graph,
+            &mut layers,
+            membership,
+            &border_segments,
+            24,
+        );
 
         // Phase 6c: Remove empty layers.
         layers.retain(|layer| !layer.is_empty());
