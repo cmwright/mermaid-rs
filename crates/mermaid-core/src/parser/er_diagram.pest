@@ -1,0 +1,85 @@
+// Mermaid ER Diagram PEG Grammar
+// Handles: erDiagram, entities with attributes, relationships with cardinality
+
+er_diagram = {
+    SOI ~ NEWLINE* ~ directive* ~ diagram_header ~ NEWLINE* ~
+    (statement ~ stmt_sep)* ~ statement? ~
+    NEWLINE* ~ EOI
+}
+
+stmt_sep = _{ (NEWLINE | ";")+ }
+
+diagram_header = {
+    "erDiagram"
+}
+
+// ── Statements ──────────────────────────────────────────────
+
+statement = _{
+    comment
+    | directive
+    | entity_block
+    | relationship
+    | bare_entity
+}
+
+comment = _{ "%%" ~ (!NEWLINE ~ ANY)* }
+
+directive = {
+    "%%{" ~ directive_body ~ "}%%"
+}
+directive_body = @{ (!"}" ~ ANY)* }
+
+// ── Entity block with attributes ────────────────────────────
+
+entity_block = {
+    entity_id ~ "{" ~ NEWLINE* ~
+    (attribute ~ attr_sep)* ~ attribute? ~
+    NEWLINE* ~ "}"
+}
+
+attr_sep = _{ (NEWLINE | ";")+ }
+
+attribute = {
+    attr_type ~ attr_name ~ attr_key? ~ attr_comment?
+}
+
+attr_type = @{ (ASCII_ALPHANUMERIC | "_" | "-")+ }
+attr_name = @{ (ASCII_ALPHANUMERIC | "_" | "-")+ }
+attr_key  = @{ "PK" | "FK" | "UK" }
+attr_comment = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
+
+// ── Relationship ────────────────────────────────────────────
+// e.g.  CUSTOMER ||--o{ ORDER : "places"
+//       CUSTOMER ||..o{ ORDER : places
+
+relationship = {
+    entity_id ~ left_cardinality ~ relation_type ~ right_cardinality ~ entity_id ~ ":" ~ rel_label
+}
+
+left_cardinality = @{
+    "||" | "|o" | "o|" | "}|" | "|{" | "}o" | "o{"
+}
+
+relation_type = @{
+    "--" | ".."
+}
+
+right_cardinality = @{
+    "||" | "|o" | "o|" | "}|" | "|{" | "}o" | "o{"
+}
+
+rel_label = @{ (!NEWLINE ~ ANY)+ }
+
+// ── Bare entity (just a name, no attributes, no relationship) ─
+
+bare_entity = {
+    entity_id
+}
+
+// ── Primitives ──────────────────────────────────────────────
+
+entity_id = @{ (ASCII_ALPHANUMERIC | "_" | "-")+ }
+
+WHITESPACE = _{ " " | "\t" }
+NEWLINE    = _{ "\r\n" | "\n" | "\r" }

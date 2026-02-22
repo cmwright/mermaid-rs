@@ -1465,3 +1465,121 @@ fn render_output_png_variant() {
     let bytes = output.into_png().unwrap();
     assert_eq!(bytes, png_data);
 }
+
+// ===========================================================================
+// ER Diagram coverage
+// ===========================================================================
+
+#[test]
+fn er_diagram_simple() {
+    let svg = render_svg(r#"erDiagram
+    CUSTOMER ||--o{ ORDER : places
+    ORDER ||--|{ LINE-ITEM : contains
+    CUSTOMER {
+        string name PK
+        string email UK
+    }
+    ORDER {
+        int id PK
+        date created
+        int customerId FK
+    }
+    LINE-ITEM {
+        int quantity
+        float price
+    }"#);
+    assert!(svg.contains("<svg"));
+    assert!(svg.contains("CUSTOMER"));
+    assert!(svg.contains("ORDER"));
+    assert!(svg.contains("LINE-ITEM"));
+    // Check inline cardinality symbols are present (lines and circles)
+    assert!(svg.contains("<line"), "should have perpendicular lines for cardinality");
+    assert!(svg.contains("<circle"), "should have circle for zero-or-more cardinality");
+    // Check entity attributes rendered
+    assert!(svg.contains("name"));
+    assert!(svg.contains("email"));
+    assert!(svg.contains("PK"));
+    assert!(svg.contains("FK"));
+    assert!(svg.contains("UK"));
+    // Check relationship labels
+    assert!(svg.contains("places"));
+    assert!(svg.contains("contains"));
+}
+
+#[test]
+fn er_diagram_non_identifying() {
+    let svg = render_svg(r#"erDiagram
+    A ||..o{ B : has"#);
+    assert!(svg.contains("<svg"));
+    // Non-identifying relationship uses dashed line
+    assert!(svg.contains("stroke-dasharray"));
+}
+
+#[test]
+fn er_diagram_no_attributes() {
+    let svg = render_svg(r#"erDiagram
+    PERSON ||--o| ADDRESS : "lives at""#);
+    assert!(svg.contains("<svg"));
+    assert!(svg.contains("PERSON"));
+    assert!(svg.contains("ADDRESS"));
+    assert!(svg.contains("lives at"));
+}
+
+#[test]
+fn er_diagram_detect() {
+    let config = RenderConfig::default();
+    let result = render("erDiagram\n    A ||--|{ B : has", &config);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn er_diagram_zero_or_one_cardinality() {
+    // Exercises ZeroOrOne rendering (circle + perp line)
+    let svg = render_svg(r#"erDiagram
+    PERSON ||--o| ADDRESS : "lives at"
+    EMPLOYEE |o--|| DEPARTMENT : belongs"#);
+    assert!(svg.contains("<svg"));
+    assert!(svg.contains("PERSON"));
+    assert!(svg.contains("ADDRESS"));
+    assert!(svg.contains("DEPARTMENT"));
+    assert!(svg.contains("lives at"));
+    // ZeroOrOne renders a circle
+    assert!(svg.contains("<circle"));
+}
+
+#[test]
+fn er_diagram_all_cardinality_types() {
+    // Exercises all four cardinality types in a single diagram
+    let svg = render_svg(r#"erDiagram
+    A ||--|| B : "only-one"
+    C ||--o| D : "zero-or-one"
+    E ||--|{ F : "one-or-more"
+    G ||--o{ H : "zero-or-more""#);
+    assert!(svg.contains("<svg"));
+    // OnlyOne: perp lines only (no circle, no crow's foot beyond these)
+    assert!(svg.contains("A"));
+    assert!(svg.contains("B"));
+    // ZeroOrOne: circle present
+    assert!(svg.contains("<circle"));
+    // OneOrMore and ZeroOrMore: check all entities rendered
+    assert!(svg.contains("E"));
+    assert!(svg.contains("F"));
+    assert!(svg.contains("G"));
+    assert!(svg.contains("H"));
+}
+
+#[test]
+fn er_diagram_attribute_with_comment() {
+    // Exercises the comment column rendering
+    let svg = render_svg(r#"erDiagram
+    PRODUCT {
+        int id PK
+        string name
+        float price FK "retail price"
+    }"#);
+    assert!(svg.contains("PRODUCT"));
+    assert!(svg.contains("retail price"));
+    assert!(svg.contains("PK"));
+    assert!(svg.contains("FK"));
+    assert!(svg.contains("opacity"));
+}

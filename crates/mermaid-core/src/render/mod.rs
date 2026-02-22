@@ -3,6 +3,7 @@ pub mod icons;
 #[cfg(feature = "png")]
 pub mod png;
 pub mod svg_architecture;
+pub mod svg_er_diagram;
 pub mod svg_flowchart;
 pub mod svg_gantt;
 pub mod svg_gitgraph;

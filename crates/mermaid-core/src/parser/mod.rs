@@ -1,4 +1,5 @@
 pub mod architecture;
+pub mod er_diagram;
 pub mod flowchart;
 pub mod gantt;
 pub mod gitgraph;
@@ -13,6 +14,7 @@ use crate::error::{MermaidError, Result};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagramKind {
     Architecture,
+    ErDiagram,
     Flowchart,
     Gantt,
     GitGraph,
@@ -33,6 +35,10 @@ pub fn detect_diagram_kind(source: &str) -> Result<DiagramKind> {
 
         if trimmed.starts_with("architecture-beta") {
             return Ok(DiagramKind::Architecture);
+        }
+
+        if trimmed.starts_with("erDiagram") {
+            return Ok(DiagramKind::ErDiagram);
         }
 
         if trimmed.starts_with("stateDiagram") {

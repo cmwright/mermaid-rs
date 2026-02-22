@@ -410,6 +410,44 @@ const EXAMPLES: &[Example] = &[
   mq:B --> T:notifSvc
 "#,
     },
+    // ── ER Diagrams ──────────────────────────────────────────
+    Example {
+        name: "Basic ER diagram",
+        category: "ER Diagram",
+        source: r#"erDiagram
+    CUSTOMER ||--o{ ORDER : places
+    ORDER ||--|{ LINE-ITEM : contains
+    CUSTOMER {
+        string name PK
+        string email UK
+    }
+    ORDER {
+        int id PK
+        date created
+        int customerId FK
+    }
+    LINE-ITEM {
+        int quantity
+        float price
+    }"#,
+    },
+    Example {
+        name: "Non-identifying relationships",
+        category: "ER Diagram",
+        source: r#"erDiagram
+    PERSON ||--o{ CAR : owns
+    PERSON ||..o{ HOBBY : "interested in"
+    CAR }o..o{ MECHANIC : "serviced by""#,
+    },
+    Example {
+        name: "All cardinality types",
+        category: "ER Diagram",
+        source: r#"erDiagram
+    A ||--|| B : "one to one"
+    C ||--o| D : "one to zero-or-one"
+    E ||--|{ F : "one to one-or-more"
+    G ||--o{ H : "one to zero-or-more""#,
+    },
     // ── State Diagrams ────────────────────────────────────────
     Example {
         name: "Simple state diagram",

@@ -1,6 +1,7 @@
 use crate::ast::common::Color;
 use crate::error::Result;
 use crate::font::FontProvider;
+use crate::layout::er_diagram;
 use crate::layout::flowchart;
 use crate::layout::gantt;
 use crate::layout::gitgraph;
@@ -13,6 +14,7 @@ use crate::parser::{self, DiagramKind};
 #[cfg(feature = "png")]
 use crate::render::png;
 use crate::render::svg_architecture;
+use crate::render::svg_er_diagram;
 use crate::render::svg_flowchart;
 use crate::render::svg_gantt;
 use crate::render::svg_gitgraph;
@@ -116,6 +118,7 @@ pub fn render(source: &str, config: &RenderConfig) -> Result<RenderOutput> {
     let kind = parser::detect_diagram_kind(source)?;
     let svg = match kind {
         DiagramKind::Architecture => render_architecture_svg(source, config)?,
+        DiagramKind::ErDiagram => render_er_diagram_svg(source, config)?,
         DiagramKind::Flowchart => render_flowchart_svg(source, config)?,
         DiagramKind::Gantt => render_gantt_svg(source, config)?,
         DiagramKind::GitGraph => render_gitgraph_svg(source, config)?,
@@ -133,6 +136,15 @@ pub fn render(source: &str, config: &RenderConfig) -> Result<RenderOutput> {
             Ok(RenderOutput::Png(png))
         }
     }
+}
+
+fn render_er_diagram_svg(source: &str, config: &RenderConfig) -> Result<String> {
+    let ast = crate::parser::er_diagram::parse_er_diagram(source)?;
+    let font_ref = config.font_provider.font_ref()?;
+    let measurer = TextMeasurer::new(font_ref, config.theme.font_size as f32);
+    let positioned = er_diagram::layout_er_diagram(&ast, &measurer)?;
+    let svg = svg_er_diagram::render_svg(&positioned, &config.theme)?;
+    Ok(svg)
 }
 
 fn render_architecture_svg(source: &str, config: &RenderConfig) -> Result<String> {

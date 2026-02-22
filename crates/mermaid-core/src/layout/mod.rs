@@ -1,3 +1,4 @@
+pub mod er_diagram;
 pub mod flowchart;
 pub mod gantt;
 pub mod gitgraph;

@@ -16,6 +16,7 @@ pub struct Theme {
     // ── Diagram-specific ─────────────────────────────────────
     pub flowchart: FlowchartTheme,
     pub sequence: SequenceTheme,
+    pub er_diagram: ErDiagramTheme,
 }
 
 /// Flowchart-specific theme colours and sizes.
@@ -47,6 +48,17 @@ pub struct SequenceTheme {
     pub loop_line: Color,
     pub label_box_fill: Color,
     pub lifeline_color: Color,
+}
+
+/// ER-diagram-specific theme colours and sizes.
+#[derive(Debug, Clone)]
+pub struct ErDiagramTheme {
+    pub entity_fill: Color,
+    pub entity_border: Color,
+    pub entity_text: Color,
+    pub entity_header_fill: Color,
+    pub attr_row_alt_fill: Color,
+    pub edge_width: f64,
 }
 
 impl Default for Theme {
@@ -83,6 +95,14 @@ impl Default for Theme {
                 label_box_fill: Color::Hex("#ECECFF".into()),
                 lifeline_color: Color::Hex("#ccccff".into()),
             },
+            er_diagram: ErDiagramTheme {
+                entity_fill: Color::Hex("#ECECFF".into()),
+                entity_border: Color::Hex("#9370DB".into()),
+                entity_text: Color::Hex("#333333".into()),
+                entity_header_fill: Color::Hex("#d7d7ff".into()),
+                attr_row_alt_fill: Color::Hex("#f5f5ff".into()),
+                edge_width: 1.0,
+            },
         }
     }
 }
@@ -117,6 +137,14 @@ impl Theme {
                 label_box_fill: Color::Hex("#384252".into()),
                 lifeline_color: Color::Hex("#4a5568".into()),
             },
+            er_diagram: ErDiagramTheme {
+                entity_fill: Color::Hex("#1f2020".into()),
+                entity_border: Color::Hex("#81B1DB".into()),
+                entity_text: Color::Hex("#e0dfdf".into()),
+                entity_header_fill: Color::Hex("#2a3040".into()),
+                attr_row_alt_fill: Color::Hex("#2a2a2a".into()),
+                edge_width: 1.0,
+            },
             ..Self::default()
         }
     }
@@ -149,6 +177,14 @@ impl Theme {
                 label_box_fill: Color::Hex("#cde498".into()),
                 lifeline_color: Color::Hex("#a8d68e".into()),
             },
+            er_diagram: ErDiagramTheme {
+                entity_fill: Color::Hex("#cde498".into()),
+                entity_border: Color::Hex("#13540c".into()),
+                entity_text: Color::Hex("#13540c".into()),
+                entity_header_fill: Color::Hex("#b8d480".into()),
+                attr_row_alt_fill: Color::Hex("#e0f0c0".into()),
+                edge_width: 1.0,
+            },
             ..Self::default()
         }
     }
@@ -180,6 +216,14 @@ impl Theme {
                 loop_line: Color::Hex("#666666".into()),
                 label_box_fill: Color::Hex("#f4f4f4".into()),
                 lifeline_color: Color::Hex("#d9d9d9".into()),
+            },
+            er_diagram: ErDiagramTheme {
+                entity_fill: Color::Hex("#f4f4f4".into()),
+                entity_border: Color::Hex("#666666".into()),
+                entity_text: Color::Hex("#333333".into()),
+                entity_header_fill: Color::Hex("#e0e0e0".into()),
+                attr_row_alt_fill: Color::Hex("#f9f9f9".into()),
+                edge_width: 1.0,
             },
             ..Self::default()
         }
