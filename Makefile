@@ -6,7 +6,8 @@ BINARY := cargo run --
 FIXTURES := $(wildcard $(FIXTURES_DIR)/*.mmd)
 FIXTURE_SVGS := $(patsubst $(FIXTURES_DIR)/%.mmd,$(OUTPUT_DIR)/%.svg,$(FIXTURES))
 
-.PHONY: test-svgs clean-svgs build test test-examples build-wasm examples serve-examples coverage
+.PHONY: test-svgs clean-svgs build test test-examples build-wasm examples serve-examples coverage \
+  build-wasm-web install-live-editor build-live-editor dev-live-editor serve-live-editor
 
 build:
 	cargo build
@@ -52,3 +53,29 @@ coverage-summary:
 
 clean-svgs:
 	rm -rf $(OUTPUT_DIR)
+
+# Live Editor targets
+LIVE_EDITOR_DIR := live-editor
+LIVE_EDITOR_WASM_DIR := $(LIVE_EDITOR_DIR)/public/wasm
+
+build-wasm-web:
+	@command -v wasm-pack >/dev/null 2>&1 || { echo "Install wasm-pack: cargo install wasm-pack"; exit 1; }
+	@mkdir -p $(LIVE_EDITOR_WASM_DIR)
+	wasm-pack build crates/mermaid-wasm --target web --out-dir ../../$(LIVE_EDITOR_WASM_DIR)
+
+install-live-editor:
+	@cd $(LIVE_EDITOR_DIR) && npm install
+
+dev-live-editor: build-wasm-web install-live-editor
+	@cd $(LIVE_EDITOR_DIR) && npm run dev
+
+build-live-editor: build-wasm-web install-live-editor
+	@cd $(LIVE_EDITOR_DIR) && npm run build
+
+serve-live-editor: build-live-editor
+	@cd $(LIVE_EDITOR_DIR) && npx serve ../target/live-editor -p 8080 -s
+
+clean-live-editor:
+	rm -rf $(LIVE_EDITOR_DIR)/node_modules
+	rm -rf $(LIVE_EDITOR_WASM_DIR)
+	rm -rf target/live-editor

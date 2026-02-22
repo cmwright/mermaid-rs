@@ -36,12 +36,15 @@ cat diagram.mmd | cargo run -- -i - -o output.svg
 ```
 crates/
 ├── mermaid-cli/       # CLI binary (`mermaid`)
-└── mermaid-core/      # Core library
-    └── src/
-        ├── parser/    # PEG grammar + parsing → AST
-        ├── ast/       # Diagram data structures
-        ├── layout/    # Hierarchical graph layout (dagre/petgraph)
-        └── render/    # SVG generation + themes
+├── mermaid-core/      # Core library
+│   └── src/
+│       ├── parser/    # PEG grammar + parsing → AST
+│       ├── ast/       # Diagram data structures
+│       ├── layout/    # Hierarchical graph layout (dagre/petgraph)
+│       └── render/    # SVG generation + themes
+└── mermaid-wasm/      # WASM bindings for browser
+
+live-editor/           # Browser-based live editor (Rsbuild + TypeScript)
 ```
 
 **Pipeline:** Source `.mmd` → Parse (PEG) → AST → Layout (dagre) → SVG
@@ -57,9 +60,42 @@ crates/
 - **Subgraphs:** nested, with custom direction
 - **Themes:** default, dark, forest, neutral
 
+### Other Diagrams
+
+- **Sequence diagrams** - actors, messages, notes, loops, activations
+- **Gantt charts** - sections, tasks, dates
+- **Pie charts** - segments with values
+- **Git graphs** - branches, commits, merges
+- **Mind maps** - hierarchical tree diagrams
+- **Architecture diagrams** - service groups and connections
+- **State diagrams** - states and transitions
+
 ### Not Yet Implemented
 
-Sequence, class, state, ER, Gantt, and pie diagrams.
+Class diagrams, ER diagrams.
+
+## Live Editor
+
+A browser-based live editor similar to the Mermaid.js live editor is included. Edit diagrams in real-time with live preview, theme switching, and example templates.
+
+```bash
+# Start development server with hot reload
+make dev-live-editor
+
+# Build for production
+make build-live-editor
+
+# Serve production build
+make serve-live-editor
+```
+
+Features:
+- **Live preview** with 300ms debounced rendering
+- **Monaco Editor** with syntax highlighting
+- **4 themes** (default, dark, forest, neutral)
+- **12+ examples** (flowcharts, sequence diagrams, gantt, pie, etc.)
+- **URL sharing** - diagrams are encoded in the URL hash
+- **Export** - download or copy SVG
 
 ## Testing
 

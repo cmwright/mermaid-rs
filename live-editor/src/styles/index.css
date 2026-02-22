@@ -1,0 +1,224 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    font-family: 'Hack', monospace;
+  }
+  
+  html, body, #app {
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+  
+  body {
+    background-color: #1e1e1e;
+    color: #d4d4d4;
+  }
+}
+
+@layer components {
+  .split-container {
+    display: flex;
+    height: 100%;
+    width: 100%;
+  }
+  
+  .gutter {
+    background-color: #3e3e42;
+    cursor: col-resize;
+    width: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+  }
+  
+  .gutter:hover {
+    background-color: #5a5a5e;
+  }
+  
+  .gutter::after {
+    content: '';
+    width: 2px;
+    height: 24px;
+    background-color: #6e6e73;
+    border-radius: 1px;
+  }
+  
+  .panel {
+    height: 100%;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+  }
+
+  .editor-container {
+    flex: 1;
+    overflow: hidden;
+  }
+
+  .preview-pane {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    height: 100%;
+  }
+
+  .preview-label {
+    background-color: #252526;
+    color: #9d9d9d;
+    padding: 4px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid #3e3e42;
+    flex-shrink: 0;
+    user-select: none;
+  }
+
+  .preview-container {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    background-color: #ffffff;
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .preview-container svg {
+    max-width: 100%;
+    max-height: 100%;
+    height: auto;
+    width: auto;
+  }
+
+  .gutter-vertical {
+    background-color: #3e3e42;
+    cursor: row-resize;
+    height: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+  }
+
+  .gutter-vertical:hover {
+    background-color: #5a5a5e;
+  }
+
+  .gutter-vertical::after {
+    content: '';
+    width: 24px;
+    height: 2px;
+    background-color: #6e6e73;
+    border-radius: 1px;
+  }
+  
+  .toolbar {
+    background-color: #252526;
+    border-bottom: 1px solid #3e3e42;
+    padding: 8px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+  
+  .toolbar-btn {
+    background-color: #0e639c;
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background-color 0.2s;
+  }
+  
+  .toolbar-btn:hover {
+    background-color: #1177bb;
+  }
+  
+  .toolbar-btn.secondary {
+    background-color: #3c3c3c;
+  }
+  
+  .toolbar-btn.secondary:hover {
+    background-color: #4c4c4c;
+  }
+  
+  .toolbar-select {
+    background-color: #3c3c3c;
+    color: #d4d4d4;
+    border: 1px solid #5a5a5e;
+    padding: 6px 12px;
+    border-radius: 3px;
+    font-size: 12px;
+    cursor: pointer;
+    min-width: 120px;
+  }
+  
+  .toolbar-select:focus {
+    outline: none;
+    border-color: #0e639c;
+  }
+  
+  .error-panel {
+    background-color: #5a1d1d;
+    color: #f48771;
+    padding: 12px 16px;
+    font-size: 12px;
+    border-top: 1px solid #3e3e42;
+    max-height: 150px;
+    overflow: auto;
+    flex-shrink: 0;
+  }
+  
+  .error-panel:empty {
+    display: none;
+  }
+  
+  .loading-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(30, 30, 30, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s;
+  }
+  
+  .loading-overlay.active {
+    opacity: 1;
+    pointer-events: all;
+  }
+  
+  .spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid #3e3e42;
+    border-top-color: #0e639c;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+  }
+  
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+}
