@@ -12,7 +12,6 @@ pub const EDGE_SEP: f64 = 20.0;
 pub const RANK_SEP: f64 = 80.0;
 pub const SUBGRAPH_PADDING: f64 = 8.0;
 pub const SUBGRAPH_TITLE_HEIGHT: f64 = 18.0;
-pub const SUBGRAPH_GROUP_GAP: f64 = 20.0;
 
 // ── Positioned types (public API) ───────────────────────────
 

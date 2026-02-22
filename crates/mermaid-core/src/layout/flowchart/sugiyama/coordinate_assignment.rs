@@ -385,7 +385,9 @@ fn node_separation(
     let v_sep = if v_is_dummy { EDGE_SEP } else { NODE_SEP };
     let base_sep = (u_sep + v_sep) / 2.0;
 
-    // Skip subgraph gap for dummy nodes (they have no membership)
+    // Add gap for subgraph borders between nodes in different subgraphs.
+    // Count the actual number of subgraph borders crossed (each border adds
+    // SUBGRAPH_PADDING for the space between the node and the border line).
     let gap = if u_is_dummy || v_is_dummy {
         0.0
     } else {
@@ -404,8 +406,10 @@ fn node_separation(
                 .zip(v_path.iter())
                 .take_while(|(a, b)| a == b)
                 .count();
-            let divergence = u_path.len().max(v_path.len()) - common;
-            SUBGRAPH_GROUP_GAP * divergence as f64
+            // Total borders crossed = borders leaving u's subgraphs + borders
+            // entering v's subgraphs, each relative to their common ancestor.
+            let borders_crossed = (u_path.len() - common) + (v_path.len() - common);
+            borders_crossed as f64 * SUBGRAPH_PADDING
         } else {
             0.0
         }
@@ -675,7 +679,7 @@ mod tests {
 
     #[test]
     fn test_node_separation_different_subgraphs() {
-        // node_separation when u_path != v_path adds SUBGRAPH_GROUP_GAP
+        // node_separation when u_path != v_path adds border-aware gap
         let mut g = DiGraph::new();
         let a = g.add_node(make_node("A"));
         let b = g.add_node(make_node("B"));
