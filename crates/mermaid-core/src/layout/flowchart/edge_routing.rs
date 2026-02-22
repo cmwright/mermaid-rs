@@ -106,12 +106,13 @@ pub fn adjust_labels_for_subgraph_boundaries(
     }
 }
 
-/// Route edges using dummy-node bend points for long edges and S-curve fallback
-/// for short edges.
+/// Route edges using dummy-node bend points.
+/// After rank doubling, all edges span >= 2 ranks and have dummy nodes,
+/// so every edge is routed uniformly through the Sugiyama dummy node system.
 pub fn route_edges(
     positioned_nodes: &[PositionedNode],
     edges: &[EdgeDef],
-    is_horizontal: bool,
+    _is_horizontal: bool,
     bend_points: &HashMap<(String, String), Vec<(f64, f64)>>,
     label_positions: &HashMap<(String, String), (f64, f64)>,
     label_dimensions: &HashMap<(String, String), (f64, f64)>,
@@ -129,11 +130,12 @@ pub fn route_edges(
 
             let key = (edge.from.clone(), edge.to.clone());
             let points = if let Some(bps) = bend_points.get(&key) {
-                // Long edge: use dummy-node positions as waypoints
-                route_with_bend_points(from, to, bps, is_horizontal, positioned_nodes)
+                // Route through dummy-node positions as waypoints
+                route_with_bend_points(from, to, bps, positioned_nodes)
             } else {
-                // Short edge: intersect_rect endpoints + S-curve if needed
-                route_short_edge(from, to, positioned_nodes, is_horizontal)
+                // Fallback for edges without dummy chains (shouldn't happen
+                // after rank doubling, but handles edge cases gracefully)
+                route_direct(from, to)
             };
 
             // Use pre-computed label position from label dummy if available,
@@ -167,14 +169,13 @@ pub fn route_edges(
         .collect()
 }
 
-/// Route a long edge through its bend points (from dummy node positions).
+/// Route an edge through its bend points (from dummy node positions).
 /// Computes endpoint intersections with node shapes and passes the raw
 /// control points to the B-spline curve generator for smooth rendering.
 fn route_with_bend_points(
     from: &PositionedNode,
     to: &PositionedNode,
     bend_points: &[(f64, f64)],
-    _is_horizontal: bool,
     _nodes: &[PositionedNode],
 ) -> Vec<(f64, f64)> {
     // First bend point direction determines exit angle from source
@@ -196,72 +197,16 @@ fn route_with_bend_points(
     points
 }
 
-/// Route a short (single-rank-span) edge with intersect_rect endpoints.
-fn route_short_edge(
+/// Route a direct edge (no dummy-node bend points).
+/// This is a fallback that shouldn't trigger after rank doubling ensures
+/// all edges get dummy nodes, but handles edge cases gracefully.
+fn route_direct(
     from: &PositionedNode,
     to: &PositionedNode,
-    nodes: &[PositionedNode],
-    is_horizontal: bool,
 ) -> Vec<(f64, f64)> {
     let start = intersect_shape(from, to.x, to.y);
     let end = intersect_shape(to, from.x, from.y);
-
-    let eps = 1e-6;
-
-    // Straight line for axis-aligned edges
-    let aligned = if is_horizontal {
-        (start.1 - end.1).abs() < eps
-    } else {
-        (start.0 - end.0).abs() < eps
-    };
-
-    if aligned && path_avoids_nodes(&[start, end], &from.id, &to.id, nodes) {
-        return vec![start, end];
-    }
-
-    // S-curve fallback for non-aligned short edges
-    let step = 30.0;
-    let (main_s, cross_s, main_e, cross_e) = if is_horizontal {
-        (start.0, start.1, end.0, end.1)
-    } else {
-        (start.1, start.0, end.1, end.0)
-    };
-
-    let main_dist = (main_e - main_s).abs();
-    let num_steps = (main_dist / step).ceil().max(6.0) as usize;
-
-    let offsets = [0.0, 30.0, -30.0, 60.0, -60.0, 100.0, -100.0];
-
-    for &off in &offsets {
-        let points = build_smooth_waypoints(
-            start,
-            end,
-            main_s,
-            cross_s,
-            main_e,
-            cross_e,
-            num_steps,
-            off,
-            is_horizontal,
-        );
-
-        if path_avoids_nodes(&points, &from.id, &to.id, nodes) {
-            return points;
-        }
-    }
-
-    // Last resort
-    build_smooth_waypoints(
-        start,
-        end,
-        main_s,
-        cross_s,
-        main_e,
-        cross_e,
-        num_steps,
-        0.0,
-        is_horizontal,
-    )
+    vec![start, end]
 }
 
 /// Shape-aware intersection: finds where a ray from the node's center toward
@@ -358,101 +303,6 @@ fn edge_label_anchor(points: &[(f64, f64)]) -> (f64, f64) {
     best_mid
 }
 
-/// Build waypoints along a smooth curve between start and end.
-#[allow(clippy::too_many_arguments)]
-fn build_smooth_waypoints(
-    start: (f64, f64),
-    end: (f64, f64),
-    main_s: f64,
-    cross_s: f64,
-    main_e: f64,
-    cross_e: f64,
-    num_steps: usize,
-    offset: f64,
-    is_horizontal: bool,
-) -> Vec<(f64, f64)> {
-    let mut points = Vec::with_capacity(num_steps + 1);
-    points.push(start);
-
-    let turn_frac = 0.25;
-
-    for i in 1..num_steps {
-        let t = i as f64 / num_steps as f64;
-        let main = main_s + (main_e - main_s) * t;
-
-        let cross = if t <= turn_frac {
-            let u = t / turn_frac;
-            let su = u * u * (3.0 - 2.0 * u);
-            cross_s + (cross_e - cross_s) * su
-        } else {
-            cross_e
-        } + offset * 4.0 * t * (1.0 - t);
-
-        if is_horizontal {
-            points.push((main, cross));
-        } else {
-            points.push((cross, main));
-        }
-    }
-
-    points.push(end);
-    points
-}
-
-fn path_avoids_nodes(
-    points: &[(f64, f64)],
-    from_id: &str,
-    to_id: &str,
-    nodes: &[PositionedNode],
-) -> bool {
-    for seg in points.windows(2) {
-        for n in nodes {
-            if n.id == from_id || n.id == to_id {
-                continue;
-            }
-            let min_x = n.x - n.width / 2.0 - 4.0;
-            let max_x = n.x + n.width / 2.0 + 4.0;
-            let min_y = n.y - n.height / 2.0 - 4.0;
-            let max_y = n.y + n.height / 2.0 + 4.0;
-            if segment_intersects_rect(seg[0], seg[1], min_x, min_y, max_x, max_y) {
-                return false;
-            }
-        }
-    }
-    true
-}
-
-fn segment_intersects_rect(
-    a: (f64, f64),
-    b: (f64, f64),
-    min_x: f64,
-    min_y: f64,
-    max_x: f64,
-    max_y: f64,
-) -> bool {
-    let eps = 1e-6;
-    if (a.1 - b.1).abs() < eps {
-        let y = a.1;
-        if y < min_y || y > max_y {
-            return false;
-        }
-        let (x1, x2) = if a.0 <= b.0 { (a.0, b.0) } else { (b.0, a.0) };
-        x2 > min_x && x1 < max_x
-    } else if (a.0 - b.0).abs() < eps {
-        let x = a.0;
-        if x < min_x || x > max_x {
-            return false;
-        }
-        let (y1, y2) = if a.1 <= b.1 { (a.1, b.1) } else { (b.1, a.1) };
-        y2 > min_y && y1 < max_y
-    } else {
-        let seg_min_x = a.0.min(b.0);
-        let seg_max_x = a.0.max(b.0);
-        let seg_min_y = a.1.min(b.1);
-        let seg_max_y = a.1.max(b.1);
-        seg_max_x > min_x && seg_min_x < max_x && seg_max_y > min_y && seg_min_y < max_y
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -594,96 +444,27 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // route_short_edge S-curve fallback (non-axis-aligned)
+    // route_direct (fallback for edges without dummy chains)
     // -----------------------------------------------------------------------
 
     #[test]
-    fn test_route_short_edge_aligned_vertical() {
-        // Two nodes vertically aligned -> straight line
+    fn test_route_direct_vertical() {
         let from = make_rect_node("A", 100.0, 50.0);
         let to = make_rect_node("B", 100.0, 200.0);
-        let nodes = vec![from.clone(), to.clone()];
-
-        let points = route_short_edge(&from, &to, &nodes, false);
-        // Should be a simple 2-point line
-        assert_eq!(points.len(), 2, "axis-aligned should produce 2 points");
+        let points = route_direct(&from, &to);
+        assert_eq!(points.len(), 2, "direct route should produce 2 points");
         assert!(
             (points[0].0 - points[1].0).abs() < 1.0,
-            "x coords should be nearly identical"
+            "x coords should be nearly identical for vertical edge"
         );
     }
 
     #[test]
-    fn test_route_short_edge_non_aligned_vertical() {
-        // Two nodes NOT vertically aligned -> S-curve with more points
+    fn test_route_direct_diagonal() {
         let from = make_rect_node("A", 100.0, 50.0);
         let to = make_rect_node("B", 250.0, 200.0);
-        let nodes = vec![from.clone(), to.clone()];
-
-        let points = route_short_edge(&from, &to, &nodes, false);
-        // S-curve produces more than 2 points
-        assert!(
-            points.len() > 2,
-            "non-aligned edge should produce S-curve with >2 points, got {}",
-            points.len()
-        );
-    }
-
-    #[test]
-    fn test_route_short_edge_non_aligned_horizontal() {
-        // Horizontal layout with non-aligned nodes
-        let from = make_rect_node("A", 50.0, 100.0);
-        let to = make_rect_node("B", 200.0, 250.0);
-        let nodes = vec![from.clone(), to.clone()];
-
-        let points = route_short_edge(&from, &to, &nodes, true);
-        assert!(
-            points.len() > 2,
-            "non-aligned horizontal edge should produce S-curve, got {} points",
-            points.len()
-        );
-    }
-
-    #[test]
-    fn test_route_short_edge_avoids_intermediate_node() {
-        // Place an intermediate node in the path; edge should attempt to avoid it
-        let from = make_rect_node("A", 100.0, 50.0);
-        let to = make_rect_node("B", 100.0, 250.0);
-        let blocker = make_rect_node("C", 100.0, 150.0);
-        let nodes = vec![from.clone(), to.clone(), blocker];
-
-        let points = route_short_edge(&from, &to, &nodes, false);
-        // Should produce more than 2 points because the straight line is blocked
-        assert!(
-            points.len() > 2,
-            "edge blocked by intermediate node should produce S-curve, got {} points",
-            points.len()
-        );
-    }
-
-    #[test]
-    fn test_route_short_edge_last_resort() {
-        // Dense blockers so all offset attempts fail -> last resort (lines 273-282)
-        let from = make_rect_node("A", 50.0, 50.0);
-        let to = make_rect_node("B", 250.0, 250.0);
-        let blockers: Vec<PositionedNode> = (0..20)
-            .flat_map(|i| {
-                (0..20).map(move |j| {
-                    make_rect_node(
-                        &format!("b{i}_{j}"),
-                        70.0 + i as f64 * 10.0,
-                        70.0 + j as f64 * 10.0,
-                    )
-                })
-            })
-            .collect();
-        let mut nodes = vec![from.clone(), to.clone()];
-        nodes.extend(blockers);
-
-        let points = route_short_edge(&from, &to, &nodes, false);
-        assert!(!points.is_empty());
-        // First point is the intersection of the edge with the from-node boundary, not the center
-        assert!(points.len() >= 2);
+        let points = route_direct(&from, &to);
+        assert_eq!(points.len(), 2, "direct route should produce 2 points");
     }
 
     // -----------------------------------------------------------------------
@@ -1072,7 +853,7 @@ mod tests {
         let nodes = vec![from.clone(), to.clone()];
 
         let bps = vec![(100.0, 150.0), (100.0, 250.0)];
-        let points = route_with_bend_points(&from, &to, &bps, false, &nodes);
+        let points = route_with_bend_points(&from, &to, &bps, &nodes);
 
         // Should start near from and end near to, passing through bend points
         assert!(points.len() > 2, "should have more than 2 points");
@@ -1217,63 +998,4 @@ mod tests {
         assert!((anchor.0 - 60.0).abs() < 0.1);
     }
 
-    // -----------------------------------------------------------------------
-    // path_avoids_nodes
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn test_path_avoids_nodes_clear_path() {
-        let nodes = vec![
-            make_rect_node("A", 100.0, 50.0),
-            make_rect_node("B", 100.0, 200.0),
-            make_rect_node("C", 300.0, 125.0), // far to the right, not blocking
-        ];
-        let path = vec![(100.0, 70.0), (100.0, 180.0)];
-        assert!(path_avoids_nodes(&path, "A", "B", &nodes));
-    }
-
-    #[test]
-    fn test_path_avoids_nodes_blocked() {
-        let nodes = vec![
-            make_rect_node("A", 100.0, 50.0),
-            make_rect_node("B", 100.0, 300.0),
-            make_rect_node("C", 100.0, 175.0), // directly in the path
-        ];
-        let path = vec![(100.0, 70.0), (100.0, 280.0)];
-        assert!(!path_avoids_nodes(&path, "A", "B", &nodes));
-    }
-
-    // -----------------------------------------------------------------------
-    // segment_intersects_rect
-    // -----------------------------------------------------------------------
-
-    #[test]
-    fn test_segment_intersects_rect_horizontal_hit() {
-        assert!(segment_intersects_rect((0.0, 5.0), (10.0, 5.0), 3.0, 0.0, 7.0, 10.0));
-    }
-
-    #[test]
-    fn test_segment_intersects_rect_horizontal_miss() {
-        assert!(!segment_intersects_rect((0.0, 15.0), (10.0, 15.0), 3.0, 0.0, 7.0, 10.0));
-    }
-
-    #[test]
-    fn test_segment_intersects_rect_vertical_hit() {
-        assert!(segment_intersects_rect((5.0, 0.0), (5.0, 10.0), 3.0, 3.0, 7.0, 7.0));
-    }
-
-    #[test]
-    fn test_segment_intersects_rect_vertical_miss() {
-        assert!(!segment_intersects_rect((1.0, 0.0), (1.0, 10.0), 3.0, 3.0, 7.0, 7.0));
-    }
-
-    #[test]
-    fn test_segment_intersects_rect_diagonal_hit() {
-        assert!(segment_intersects_rect((0.0, 0.0), (10.0, 10.0), 3.0, 3.0, 7.0, 7.0));
-    }
-
-    #[test]
-    fn test_segment_intersects_rect_diagonal_miss() {
-        assert!(!segment_intersects_rect((0.0, 0.0), (2.0, 2.0), 5.0, 5.0, 10.0, 10.0));
-    }
 }
