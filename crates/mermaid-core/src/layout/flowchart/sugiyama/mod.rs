@@ -5,7 +5,7 @@ pub mod ordering;
 pub mod rank_assignment;
 
 use petgraph::graph::{DiGraph, NodeIndex};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::ast::flowchart::{Direction, FlowchartAst};
 use crate::layout::flowchart::graph_builder::SubgraphMembership;
@@ -38,6 +38,16 @@ pub fn layout(
     // Phase 1: Remove cycles
     let reversed = cycle_removal::remove_cycles(graph);
 
+    // Record which edges were reversed (by their current src->tgt after reversal).
+    // After reversal, the "original" back-edge A->B becomes B->A in the graph.
+    // When insert_dummy_nodes processes B->A, it records original_source=B,
+    // original_target=A.  We mark those chains so sync_dummy_positions knows
+    // their dummies are intentionally far from the direct corridor.
+    let reversed_endpoints: HashSet<(NodeIndex, NodeIndex)> = reversed
+        .iter()
+        .filter_map(|&ei| graph.edge_endpoints(ei))
+        .collect();
+
     // Phase 2: Assign ranks
     let mut ranks = rank_assignment::assign_ranks(graph);
 
@@ -57,7 +67,14 @@ pub fn layout(
     }
 
     // Phase 3: Insert dummy nodes for long edges
-    let dummy_chains = dummy_nodes::insert_dummy_nodes(graph, &mut ranks);
+    let mut dummy_chains = dummy_nodes::insert_dummy_nodes(graph, &mut ranks);
+
+    // Mark dummy chains from reversed back-edges
+    for chain in &mut dummy_chains {
+        if reversed_endpoints.contains(&(chain.original_source, chain.original_target)) {
+            chain.is_reversed = true;
+        }
+    }
 
     // Phase 4: Convert ranks to layers and minimize crossings (with dummy nodes)
     let mut layers = rank_assignment::ranks_to_layers(graph, &ranks);

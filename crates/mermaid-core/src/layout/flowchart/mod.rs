@@ -75,7 +75,13 @@ pub fn layout_flowchart(
     );
 
     // 9.5. Sync dummy node positions with shifted real nodes
-    sync_dummy_positions(&graph, &result.dummy_chains, &positioned_nodes, &mut result.positions, &positioned_subgraphs);
+    sync_dummy_positions(
+        &graph,
+        &result.dummy_chains,
+        &positioned_nodes,
+        &mut result.positions,
+        &positioned_subgraphs,
+    );
 
     // 10. Extract bend points and label positions from dummy node positions, then route edges
     let extraction = build_edge_bend_points(&graph, &result.dummy_chains, &result.positions);
@@ -182,8 +188,10 @@ pub(crate) fn sync_dummy_positions(
         let tgt_dx = new_tgt.x - old_tgt.0;
         let tgt_dy = new_tgt.y - old_tgt.1;
 
-        let endpoints_moved = src_dx.abs() >= 0.1 || src_dy.abs() >= 0.1
-            || tgt_dx.abs() >= 0.1 || tgt_dy.abs() >= 0.1;
+        let endpoints_moved = src_dx.abs() >= 0.1
+            || src_dy.abs() >= 0.1
+            || tgt_dx.abs() >= 0.1
+            || tgt_dy.abs() >= 0.1;
 
         if endpoints_moved {
             // Update the real node positions in the map too
@@ -192,23 +200,25 @@ pub(crate) fn sync_dummy_positions(
         }
 
         // Check if any dummy falls outside the endpoint corridor.
-        // This catches both cases:
-        // 1. Cross-subgraph edges where Brandes-Köpf placed dummies at wrong x
-        //    (medians pulled by unrelated nodes in the same rank)
-        // 2. Edges where endpoints didn't shift but dummies are still wrong
+        // This catches cross-subgraph edges where Brandes-Köpf placed dummies
+        // at wrong x (medians pulled by unrelated nodes in the same rank).
+        // Skip for reversed (back-edge) chains: their dummies are intentionally
+        // placed far from the direct corridor to route around the graph.
         let n = chain.dummy_nodes.len();
         let corridor_min_x = new_src.x.min(new_tgt.x) - 50.0;
         let corridor_max_x = new_src.x.max(new_tgt.x) + 50.0;
         let mut any_outside = false;
 
-        for (i, &dummy) in chain.dummy_nodes.iter().enumerate() {
-            let t = (i + 1) as f64 / (n + 1) as f64;
-            let dx = src_dx + (tgt_dx - src_dx) * t;
-            if let Some(pos) = positions.get(&dummy) {
-                let shifted_x = pos.0 + dx;
-                if shifted_x < corridor_min_x || shifted_x > corridor_max_x {
-                    any_outside = true;
-                    break;
+        if !chain.is_reversed {
+            for (i, &dummy) in chain.dummy_nodes.iter().enumerate() {
+                let t = (i + 1) as f64 / (n + 1) as f64;
+                let dx = src_dx + (tgt_dx - src_dx) * t;
+                if let Some(pos) = positions.get(&dummy) {
+                    let shifted_x = pos.0 + dx;
+                    if shifted_x < corridor_min_x || shifted_x > corridor_max_x {
+                        any_outside = true;
+                        break;
+                    }
                 }
             }
         }
@@ -245,8 +255,12 @@ pub(crate) fn sync_dummy_positions(
         let src_id = &graph[chain.original_source].id;
         let tgt_id = &graph[chain.original_target].id;
 
-        let Some(new_src) = node_pos.get(src_id.as_str()) else { continue };
-        let Some(new_tgt) = node_pos.get(tgt_id.as_str()) else { continue };
+        let Some(new_src) = node_pos.get(src_id.as_str()) else {
+            continue;
+        };
+        let Some(new_tgt) = node_pos.get(tgt_id.as_str()) else {
+            continue;
+        };
 
         // Build unified obstacle list as (left, top, right, bottom) rects.
         // Subgraphs: exclude those containing either endpoint.
@@ -254,10 +268,14 @@ pub(crate) fn sync_dummy_positions(
         let mut obstacles: Vec<(f64, f64, f64, f64)> = Vec::new();
 
         for sg in positioned_subgraphs {
-            let src_inside = new_src.x >= sg.x && new_src.x <= sg.x + sg.width
-                && new_src.y >= sg.y && new_src.y <= sg.y + sg.height;
-            let tgt_inside = new_tgt.x >= sg.x && new_tgt.x <= sg.x + sg.width
-                && new_tgt.y >= sg.y && new_tgt.y <= sg.y + sg.height;
+            let src_inside = new_src.x >= sg.x
+                && new_src.x <= sg.x + sg.width
+                && new_src.y >= sg.y
+                && new_src.y <= sg.y + sg.height;
+            let tgt_inside = new_tgt.x >= sg.x
+                && new_tgt.x <= sg.x + sg.width
+                && new_tgt.y >= sg.y
+                && new_tgt.y <= sg.y + sg.height;
             if !src_inside && !tgt_inside {
                 obstacles.push((sg.x, sg.y, sg.x + sg.width, sg.y + sg.height));
             }
@@ -288,17 +306,17 @@ pub(crate) fn sync_dummy_positions(
             for (i, pos) in dummy_positions.iter().enumerate() {
                 let Some(p) = pos else { continue };
                 // Check if this dummy is inside the obstacle
-                if p.0 >= obs_left && p.0 <= obs_right
-                    && p.1 >= obs_top && p.1 <= obs_bottom
-                {
+                if p.0 >= obs_left && p.0 <= obs_right && p.1 >= obs_top && p.1 <= obs_bottom {
                     inside_indices.push(i);
                     continue;
                 }
                 // Check if the segment from this dummy to the next crosses
                 // through the obstacle (both x-overlapping, y spans across)
                 if let Some(Some(next)) = dummy_positions.get(i + 1) {
-                    if p.0 >= obs_left && p.0 <= obs_right
-                        && next.0 >= obs_left && next.0 <= obs_right
+                    if p.0 >= obs_left
+                        && p.0 <= obs_right
+                        && next.0 >= obs_left
+                        && next.0 <= obs_right
                     {
                         let seg_min_y = p.1.min(next.1);
                         let seg_max_y = p.1.max(next.1);
@@ -317,8 +335,7 @@ pub(crate) fn sync_dummy_positions(
             // Extend pushed zone by one dummy above and below so that
             // line segments at the transition don't clip the obstacle corner.
             let first = inside_indices[0].saturating_sub(1);
-            let last = (*inside_indices.last().unwrap() + 1)
-                .min(chain.dummy_nodes.len() - 1);
+            let last = (*inside_indices.last().unwrap() + 1).min(chain.dummy_nodes.len() - 1);
             let extended_indices: Vec<usize> = (first..=last).collect();
 
             // Determine which side to route: push to nearest edge of obstacle.
@@ -532,16 +549,16 @@ mod tests {
                     from: "A".into(),
                     to: "B".into(),
                     line_style: LineStyle::Solid,
-                arrow_start: ArrowEnd::None,
-                arrow_end: ArrowEnd::Arrow,
+                    arrow_start: ArrowEnd::None,
+                    arrow_end: ArrowEnd::Arrow,
                     label: None,
                 },
                 EdgeDef {
                     from: "A".into(),
                     to: "C".into(),
                     line_style: LineStyle::Solid,
-                arrow_start: ArrowEnd::None,
-                arrow_end: ArrowEnd::Arrow,
+                    arrow_start: ArrowEnd::None,
+                    arrow_end: ArrowEnd::Arrow,
                     label: None,
                 },
             ],
@@ -685,24 +702,31 @@ mod tests {
 
     #[test]
     fn test_layout_with_cycle() {
-        let result = layout_from_source(
-            "flowchart TD\n    A --> B\n    B --> C\n    C --> A",
-        );
+        let result = layout_from_source("flowchart TD\n    A --> B\n    B --> C\n    C --> A");
         assert_eq!(result.nodes.len(), 3);
         assert_eq!(result.edges.len(), 3);
         // All nodes should have finite, non-negative coordinates after normalization
         for node in &result.nodes {
-            assert!(node.x.is_finite() && node.x >= 0.0, "node {} has invalid x={}", node.id, node.x);
-            assert!(node.y.is_finite() && node.y >= 0.0, "node {} has invalid y={}", node.id, node.y);
+            assert!(
+                node.x.is_finite() && node.x >= 0.0,
+                "node {} has invalid x={}",
+                node.id,
+                node.x
+            );
+            assert!(
+                node.y.is_finite() && node.y >= 0.0,
+                "node {} has invalid y={}",
+                node.id,
+                node.y
+            );
         }
     }
 
     #[test]
     fn test_layout_with_self_loop_cycle() {
         // Self-loop A -> A and a longer cycle
-        let result = layout_from_source(
-            "flowchart TD\n    A --> B\n    B --> C\n    C --> D\n    D --> B",
-        );
+        let result =
+            layout_from_source("flowchart TD\n    A --> B\n    B --> C\n    C --> D\n    D --> B");
         assert_eq!(result.nodes.len(), 4);
         // Graph should still produce a valid layout
         for node in &result.nodes {
@@ -716,12 +740,15 @@ mod tests {
     #[test]
     fn test_layout_long_edge_spanning_multiple_ranks() {
         // A -> B -> C -> D, plus A -> D (spans 3 ranks)
-        let result = layout_from_source(
-            "flowchart TD\n    A --> B\n    B --> C\n    C --> D\n    A --> D",
-        );
+        let result =
+            layout_from_source("flowchart TD\n    A --> B\n    B --> C\n    C --> D\n    A --> D");
         assert_eq!(result.nodes.len(), 4);
         // Find the edge from A to D
-        let a_to_d = result.edges.iter().find(|e| e.from_id == "A" && e.to_id == "D").unwrap();
+        let a_to_d = result
+            .edges
+            .iter()
+            .find(|e| e.from_id == "A" && e.to_id == "D")
+            .unwrap();
         // Long edge should have bend points (more than 2 points)
         assert!(
             a_to_d.points.len() > 2,
@@ -737,19 +764,35 @@ mod tests {
         let result = layout_from_source(
             "flowchart TD\n    A --> B\n    B --> C\n    C --> D\n    A -->|long label| D",
         );
-        let a_to_d = result.edges.iter().find(|e| e.from_id == "A" && e.to_id == "D").unwrap();
+        let a_to_d = result
+            .edges
+            .iter()
+            .find(|e| e.from_id == "A" && e.to_id == "D")
+            .unwrap();
         assert!(a_to_d.label.is_some());
-        assert!(a_to_d.label_x.is_some(), "labeled long edge should have label_x");
-        assert!(a_to_d.label_y.is_some(), "labeled long edge should have label_y");
-        assert!(a_to_d.label_width.is_some(), "labeled long edge should have label_width from label_node");
-        assert!(a_to_d.label_height.is_some(), "labeled long edge should have label_height from label_node");
+        assert!(
+            a_to_d.label_x.is_some(),
+            "labeled long edge should have label_x"
+        );
+        assert!(
+            a_to_d.label_y.is_some(),
+            "labeled long edge should have label_y"
+        );
+        assert!(
+            a_to_d.label_width.is_some(),
+            "labeled long edge should have label_width from label_node"
+        );
+        assert!(
+            a_to_d.label_height.is_some(),
+            "labeled long edge should have label_height from label_node"
+        );
     }
 
     #[test]
     fn test_sync_dummy_positions_skip_when_source_missing_from_node_pos() {
+        use crate::layout::flowchart::types::*;
         use petgraph::graph::DiGraph;
         use sugiyama::dummy_nodes::DummyChain;
-        use crate::layout::flowchart::types::*;
 
         let mut graph = DiGraph::new();
         let a = graph.add_node(NodeData {
@@ -779,9 +822,12 @@ mod tests {
                 arrow_end: ArrowEnd::Arrow,
                 label_width: 0.0,
                 label_height: 0.0,
+                weight: 1,
+                minlen: 1,
             },
             dummy_nodes: vec![],
             label_node: None,
+            is_reversed: false,
         };
 
         // positioned_nodes has only B, not A - sync_dummy_positions should continue (skip chain)
@@ -805,9 +851,9 @@ mod tests {
 
     #[test]
     fn test_sync_dummy_positions_skip_when_target_missing_from_node_pos() {
+        use crate::layout::flowchart::types::*;
         use petgraph::graph::DiGraph;
         use sugiyama::dummy_nodes::DummyChain;
-        use crate::layout::flowchart::types::*;
 
         let mut graph = DiGraph::new();
         let a = graph.add_node(NodeData {
@@ -837,9 +883,12 @@ mod tests {
                 arrow_end: ArrowEnd::Arrow,
                 label_width: 0.0,
                 label_height: 0.0,
+                weight: 1,
+                minlen: 1,
             },
             dummy_nodes: vec![],
             label_node: None,
+            is_reversed: false,
         };
 
         // positioned_nodes has only A, not B - sync_dummy_positions should continue (line 161)
@@ -863,9 +912,9 @@ mod tests {
 
     #[test]
     fn test_sync_dummy_positions_skip_when_old_src_missing_from_positions() {
+        use crate::layout::flowchart::types::*;
         use petgraph::graph::DiGraph;
         use sugiyama::dummy_nodes::DummyChain;
-        use crate::layout::flowchart::types::*;
 
         let mut graph = DiGraph::new();
         let a = graph.add_node(NodeData {
@@ -895,14 +944,35 @@ mod tests {
                 arrow_end: ArrowEnd::Arrow,
                 label_width: 0.0,
                 label_height: 0.0,
+                weight: 1,
+                minlen: 1,
             },
             dummy_nodes: vec![],
             label_node: None,
+            is_reversed: false,
         };
 
         let positioned_nodes = vec![
-            PositionedNode { id: "A".into(), label: "A".into(), shape: NodeShape::Rectangle, style: Default::default(), x: 60.0, y: 50.0, width: 40.0, height: 20.0 },
-            PositionedNode { id: "B".into(), label: "B".into(), shape: NodeShape::Rectangle, style: Default::default(), x: 100.0, y: 150.0, width: 40.0, height: 20.0 },
+            PositionedNode {
+                id: "A".into(),
+                label: "A".into(),
+                shape: NodeShape::Rectangle,
+                style: Default::default(),
+                x: 60.0,
+                y: 50.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "B".into(),
+                label: "B".into(),
+                shape: NodeShape::Rectangle,
+                style: Default::default(),
+                x: 100.0,
+                y: 150.0,
+                width: 40.0,
+                height: 20.0,
+            },
         ];
         let mut positions = std::collections::HashMap::new();
         positions.insert(b, (100.0, 150.0));
@@ -914,9 +984,9 @@ mod tests {
 
     #[test]
     fn test_sync_dummy_positions_skip_when_old_tgt_missing_from_positions() {
+        use crate::layout::flowchart::types::*;
         use petgraph::graph::DiGraph;
         use sugiyama::dummy_nodes::DummyChain;
-        use crate::layout::flowchart::types::*;
 
         let mut graph = DiGraph::new();
         let a = graph.add_node(NodeData {
@@ -946,14 +1016,35 @@ mod tests {
                 arrow_end: ArrowEnd::Arrow,
                 label_width: 0.0,
                 label_height: 0.0,
+                weight: 1,
+                minlen: 1,
             },
             dummy_nodes: vec![],
             label_node: None,
+            is_reversed: false,
         };
 
         let positioned_nodes = vec![
-            PositionedNode { id: "A".into(), label: "A".into(), shape: NodeShape::Rectangle, style: Default::default(), x: 50.0, y: 50.0, width: 40.0, height: 20.0 },
-            PositionedNode { id: "B".into(), label: "B".into(), shape: NodeShape::Rectangle, style: Default::default(), x: 110.0, y: 150.0, width: 40.0, height: 20.0 },
+            PositionedNode {
+                id: "A".into(),
+                label: "A".into(),
+                shape: NodeShape::Rectangle,
+                style: Default::default(),
+                x: 50.0,
+                y: 50.0,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "B".into(),
+                label: "B".into(),
+                shape: NodeShape::Rectangle,
+                style: Default::default(),
+                x: 110.0,
+                y: 150.0,
+                width: 40.0,
+                height: 20.0,
+            },
         ];
         let mut positions = std::collections::HashMap::new();
         positions.insert(a, (50.0, 50.0));
@@ -965,9 +1056,9 @@ mod tests {
 
     #[test]
     fn test_sync_dummy_positions_skip_when_neither_endpoint_moved() {
+        use crate::layout::flowchart::types::*;
         use petgraph::graph::DiGraph;
         use sugiyama::dummy_nodes::DummyChain;
-        use crate::layout::flowchart::types::*;
 
         let mut graph = DiGraph::new();
         let a = graph.add_node(NodeData {
@@ -1005,16 +1096,37 @@ mod tests {
                 arrow_end: ArrowEnd::Arrow,
                 label_width: 0.0,
                 label_height: 0.0,
+                weight: 1,
+                minlen: 1,
             },
             dummy_nodes: vec![dummy],
             label_node: None,
+            is_reversed: false,
         };
 
         let (ax, ay) = (50.0, 50.0);
         let (bx, by) = (100.0, 150.0);
         let positioned_nodes = vec![
-            PositionedNode { id: "A".into(), label: "A".into(), shape: NodeShape::Rectangle, style: Default::default(), x: ax, y: ay, width: 40.0, height: 20.0 },
-            PositionedNode { id: "B".into(), label: "B".into(), shape: NodeShape::Rectangle, style: Default::default(), x: bx, y: by, width: 40.0, height: 20.0 },
+            PositionedNode {
+                id: "A".into(),
+                label: "A".into(),
+                shape: NodeShape::Rectangle,
+                style: Default::default(),
+                x: ax,
+                y: ay,
+                width: 40.0,
+                height: 20.0,
+            },
+            PositionedNode {
+                id: "B".into(),
+                label: "B".into(),
+                shape: NodeShape::Rectangle,
+                style: Default::default(),
+                x: bx,
+                y: by,
+                width: 40.0,
+                height: 20.0,
+            },
         ];
         let mut positions = std::collections::HashMap::new();
         positions.insert(a, (ax, ay));
@@ -1065,7 +1177,9 @@ mod tests {
         assert_eq!(result.nodes.len(), 9);
 
         // Verify each shape is correct
-        let shapes: Vec<(String, NodeShape)> = result.nodes.iter()
+        let shapes: Vec<(String, NodeShape)> = result
+            .nodes
+            .iter()
             .map(|n| (n.id.clone(), n.shape))
             .collect();
         let a = shapes.iter().find(|(id, _)| id == "A").unwrap();
@@ -1184,7 +1298,11 @@ mod tests {
         assert_eq!(result.subgraphs.len(), 3);
         // All subgraphs should have positive dimensions
         for sg in &result.subgraphs {
-            assert!(sg.width > 0.0 && sg.height > 0.0, "subgraph {} has bad dims", sg.id);
+            assert!(
+                sg.width > 0.0 && sg.height > 0.0,
+                "subgraph {} has bad dims",
+                sg.id
+            );
         }
     }
 
@@ -1203,8 +1321,6 @@ mod tests {
         );
         assert_eq!(result.subgraphs.len(), 2);
     }
-
-    // -- compound.rs: compact_subgraphs --
 
     #[test]
     fn test_layout_subgraph_compaction() {
@@ -1290,7 +1406,10 @@ mod tests {
         let from_b: Vec<_> = result.edges.iter().filter(|e| e.from_id == "B").collect();
         assert_eq!(from_b.len(), 2);
         for edge in &from_b {
-            assert!(edge.points.len() >= 2, "edge from B should have at least 2 points");
+            assert!(
+                edge.points.len() >= 2,
+                "edge from B should have at least 2 points"
+            );
             // First point should be on or near the diamond boundary
             let p0 = edge.points[0];
             let dx = p0.0 - b.x;
@@ -1331,8 +1450,14 @@ mod tests {
     fn test_normalize_empty_graph() {
         // Test with an empty node/edge list directly
         let (w, h) = normalize::normalize_and_compute_bounds(&mut [], &mut [], &mut []);
-        assert!((w - 8.0).abs() < 0.1, "empty graph width should be 8.0 (padding only)");
-        assert!((h - 8.0).abs() < 0.1, "empty graph height should be 8.0 (padding only)");
+        assert!(
+            (w - 8.0).abs() < 0.1,
+            "empty graph width should be 8.0 (padding only)"
+        );
+        assert!(
+            (h - 8.0).abs() < 0.1,
+            "empty graph height should be 8.0 (padding only)"
+        );
     }
 
     // -- normalize.rs: basic normalization --
@@ -1351,11 +1476,8 @@ mod tests {
         }];
         let mut edges = vec![];
         let mut subgraphs = vec![];
-        let (w, h) = normalize::normalize_and_compute_bounds(
-            &mut nodes,
-            &mut edges,
-            &mut subgraphs,
-        );
+        let (w, h) =
+            normalize::normalize_and_compute_bounds(&mut nodes, &mut edges, &mut subgraphs);
         // After normalization, node should have non-negative coords
         assert!(
             nodes[0].x >= 0.0,
@@ -1504,7 +1626,11 @@ mod tests {
     B -->|from SG1 to SG2| C"#,
         );
         assert_eq!(result.subgraphs.len(), 2);
-        let cross_edge = result.edges.iter().find(|e| e.from_id == "B" && e.to_id == "C").unwrap();
+        let cross_edge = result
+            .edges
+            .iter()
+            .find(|e| e.from_id == "B" && e.to_id == "C")
+            .unwrap();
         assert_eq!(cross_edge.label.as_deref(), Some("from SG1 to SG2"));
         assert!(cross_edge.label_x.is_some());
         assert!(cross_edge.label_y.is_some());
@@ -1597,7 +1723,7 @@ mod tests {
             arrow_end: ArrowEnd::Arrow,
             label: Some("test".into()),
             label_x: Some(150.0),
-            label_y: Some(95.0),  // center above y=100, label_top=85 < 100, label_bottom=105 > 100
+            label_y: Some(95.0), // center above y=100, label_top=85 < 100, label_bottom=105 > 100
             label_width: Some(40.0),
             label_height: Some(20.0),
             points: vec![(50.0, 50.0), (250.0, 150.0)],
@@ -1624,7 +1750,7 @@ mod tests {
             x: 50.0,
             y: 100.0,
             width: 200.0,
-            height: 200.0,  // bottom border at y=300
+            height: 200.0, // bottom border at y=300
             style: Default::default(),
         };
 
@@ -1637,7 +1763,7 @@ mod tests {
             arrow_end: ArrowEnd::Arrow,
             label: Some("test".into()),
             label_x: Some(150.0),
-            label_y: Some(295.0),  // center at 295 (above 300); label_bottom = 305 > 300
+            label_y: Some(295.0), // center at 295 (above 300); label_bottom = 305 > 300
             label_width: Some(40.0),
             label_height: Some(20.0),
             points: vec![(150.0, 250.0), (150.0, 350.0)],
@@ -1676,8 +1802,8 @@ mod tests {
             arrow_start: ArrowEnd::None,
             arrow_end: ArrowEnd::Arrow,
             label: Some("test".into()),
-            label_x: Some(95.0),   // center at 95 (left of 100); label_right=115 > 100
-            label_y: Some(150.0),  // vertically within subgraph
+            label_x: Some(95.0), // center at 95 (left of 100); label_right=115 > 100
+            label_y: Some(150.0), // vertically within subgraph
             label_width: Some(40.0),
             label_height: Some(20.0),
             points: vec![(50.0, 150.0), (200.0, 150.0)],
@@ -1703,7 +1829,7 @@ mod tests {
             label: Some("SG".into()),
             x: 100.0,
             y: 50.0,
-            width: 200.0,  // right border at x=300
+            width: 200.0, // right border at x=300
             height: 200.0,
             style: Default::default(),
         };
@@ -1716,7 +1842,7 @@ mod tests {
             arrow_start: ArrowEnd::None,
             arrow_end: ArrowEnd::Arrow,
             label: Some("test".into()),
-            label_x: Some(305.0),  // center at 305; label_left=285 < 300
+            label_x: Some(305.0), // center at 305; label_left=285 < 300
             label_y: Some(150.0),
             label_width: Some(40.0),
             label_height: Some(20.0),
@@ -1777,7 +1903,10 @@ mod tests {
         assert_eq!(result.subgraphs.len(), 4, "expected 4 subgraphs");
 
         let sg = |id: &str| -> &PositionedSubgraph {
-            result.subgraphs.iter().find(|s| s.id == id)
+            result
+                .subgraphs
+                .iter()
+                .find(|s| s.id == id)
                 .unwrap_or_else(|| panic!("subgraph '{id}' not found"))
         };
         let direct = sg("DirectGrants");
@@ -1807,17 +1936,20 @@ mod tests {
         assert!(
             direct.y + direct.height <= files.y + 1.0,
             "DirectGrants (bottom={:.0}) should be above Files (top={:.0})",
-            direct.y + direct.height, files.y,
+            direct.y + direct.height,
+            files.y,
         );
         assert!(
             rbac.y + rbac.height <= folders.y + 1.0,
             "RBAC (bottom={:.0}) should be above Folders (top={:.0})",
-            rbac.y + rbac.height, folders.y,
+            rbac.y + rbac.height,
+            folders.y,
         );
         assert!(
             files.y + files.height <= folders.y + 1.0,
             "Files (bottom={:.0}) should be above Folders (top={:.0})",
-            files.y + files.height, folders.y,
+            files.y + files.height,
+            folders.y,
         );
 
         // --- All three files should be horizontally aligned (same y) ---
@@ -1830,12 +1962,14 @@ mod tests {
         assert!(
             y_diff_12 < 1.0,
             "F1 (y={:.1}) and F2 (y={:.1}) should be horizontally aligned",
-            f1.y, f2.y,
+            f1.y,
+            f2.y,
         );
         assert!(
             y_diff_13 < 1.0,
             "F1 (y={:.1}) and F3 (y={:.1}) should be horizontally aligned",
-            f1.y, f3.y,
+            f1.y,
+            f3.y,
         );
     }
 
@@ -1846,12 +1980,18 @@ mod tests {
 
         // Helper to find a node
         let node = |id: &str| -> &PositionedNode {
-            result.nodes.iter().find(|n| n.id == id)
+            result
+                .nodes
+                .iter()
+                .find(|n| n.id == id)
                 .unwrap_or_else(|| panic!("node '{id}' not found"))
         };
         // Helper to find an edge
         let edge = |from: &str, to: &str| -> &PositionedEdge {
-            result.edges.iter().find(|e| e.from_id == from && e.to_id == to)
+            result
+                .edges
+                .iter()
+                .find(|e| e.from_id == from && e.to_id == to)
                 .unwrap_or_else(|| panic!("edge '{from}'->{to}' not found"))
         };
 
@@ -1869,7 +2009,11 @@ mod tests {
         assert!(
             start_dist_to_gate < gate.width + 50.0,
             "deploy_staging edge start ({:.1},{:.1}) too far from Gate ({:.1},{:.1}), dist={:.1}",
-            start.0, start.1, gate.x, gate.y, start_dist_to_gate,
+            start.0,
+            start.1,
+            gate.x,
+            gate.y,
+            start_dist_to_gate,
         );
 
         // End should be within SAPI's bounding box vicinity
@@ -1877,14 +2021,19 @@ mod tests {
         assert!(
             end_dist_to_sapi < sapi.width + 50.0,
             "deploy_staging edge end ({:.1},{:.1}) too far from SAPI ({:.1},{:.1}), dist={:.1}",
-            end.0, end.1, sapi.x, sapi.y, end_dist_to_sapi,
+            end.0,
+            end.1,
+            sapi.x,
+            sapi.y,
+            end_dist_to_sapi,
         );
 
         // The edge should go generally downward (gate.y < sapi.y)
         assert!(
             gate.y < sapi.y,
             "Gate (y={:.1}) should be above SAPI (y={:.1})",
-            gate.y, sapi.y,
+            gate.y,
+            sapi.y,
         );
 
         // CRITICAL: No waypoint should deviate more than a reasonable amount
@@ -1897,7 +2046,11 @@ mod tests {
                 p.0 >= corridor_min_x && p.0 <= corridor_max_x,
                 "deploy_staging waypoint [{i}] x={:.1} outside corridor [{:.1}, {:.1}] \
                 (Gate.x={:.1}, SAPI.x={:.1})",
-                p.0, corridor_min_x, corridor_max_x, gate.x, sapi.x,
+                p.0,
+                corridor_min_x,
+                corridor_max_x,
+                gate.x,
+                sapi.x,
             );
         }
 
@@ -1914,7 +2067,11 @@ mod tests {
                 p.0 >= prod_corridor_min_x && p.0 <= prod_corridor_max_x,
                 "deploy_prod waypoint [{i}] x={:.1} outside corridor [{:.1}, {:.1}] \
                 (Gate.x={:.1}, PAPI.x={:.1})",
-                p.0, prod_corridor_min_x, prod_corridor_max_x, gate.x, papi.x,
+                p.0,
+                prod_corridor_min_x,
+                prod_corridor_max_x,
+                gate.x,
+                papi.x,
             );
         }
 
@@ -1929,7 +2086,11 @@ mod tests {
                 p.0 >= pwa_corridor_min_x && p.0 <= pwa_corridor_max_x,
                 "pwa_papi waypoint [{i}] x={:.1} outside corridor [{:.1}, {:.1}] \
                 (PWA.x={:.1}, PAPI.x={:.1})",
-                p.0, pwa_corridor_min_x, pwa_corridor_max_x, pwa.x, papi.x,
+                p.0,
+                pwa_corridor_min_x,
+                pwa_corridor_max_x,
+                pwa.x,
+                papi.x,
             );
         }
     }
@@ -1940,11 +2101,17 @@ mod tests {
         let result = layout_from_source(source);
 
         let node = |id: &str| -> &PositionedNode {
-            result.nodes.iter().find(|n| n.id == id)
+            result
+                .nodes
+                .iter()
+                .find(|n| n.id == id)
                 .unwrap_or_else(|| panic!("node '{id}' not found"))
         };
         let edge = |from: &str, to: &str| -> &PositionedEdge {
-            result.edges.iter().find(|e| e.from_id == from && e.to_id == to)
+            result
+                .edges
+                .iter()
+                .find(|e| e.from_id == from && e.to_id == to)
                 .unwrap_or_else(|| panic!("edge '{from}'->'{to}' not found"))
         };
 
@@ -1962,7 +2129,13 @@ mod tests {
                     p.0 >= corridor_min_x && p.0 <= corridor_max_x,
                     "org_id edge {}->{} waypoint [{i}] x={:.1} outside corridor \
                     [{:.1}, {:.1}] (src.x={:.1}, tgt.x={:.1})",
-                    src_id, tgt_id, p.0, corridor_min_x, corridor_max_x, src.x, tgt.x,
+                    src_id,
+                    tgt_id,
+                    p.0,
+                    corridor_min_x,
+                    corridor_max_x,
+                    src.x,
+                    tgt.x,
                 );
             }
         }
@@ -1977,8 +2150,7 @@ mod tests {
 
         // Helper: check if a point is inside a subgraph bbox
         let point_in_subgraph = |px: f64, py: f64, sg: &PositionedSubgraph| -> bool {
-            px >= sg.x && px <= sg.x + sg.width
-                && py >= sg.y && py <= sg.y + sg.height
+            px >= sg.x && px <= sg.x + sg.width && py >= sg.y && py <= sg.y + sg.height
         };
 
         // Helper: check if a node center is inside a subgraph bbox
@@ -1988,7 +2160,10 @@ mod tests {
 
         // Find nodes by id
         let node = |id: &str| -> &PositionedNode {
-            result.nodes.iter().find(|n| n.id == id)
+            result
+                .nodes
+                .iter()
+                .find(|n| n.id == id)
                 .unwrap_or_else(|| panic!("node '{id}' not found"))
         };
 
@@ -2000,7 +2175,9 @@ mod tests {
         for (src_id, tgt_id) in &edges_to_check {
             let src_node = node(src_id);
             let tgt_node = node(tgt_id);
-            let e = result.edges.iter()
+            let e = result
+                .edges
+                .iter()
                 .find(|e| e.from_id == *src_id && e.to_id == *tgt_id)
                 .unwrap();
 
@@ -2024,10 +2201,21 @@ mod tests {
                             "Edge {}->{} passes through subgraph '{}' at ({:.1},{:.1}).\n\
                             Subgraph bounds: ({:.1},{:.1}) {}x{}\n\
                             Source {} at ({:.1},{:.1}), Target {} at ({:.1},{:.1})",
-                            src_id, tgt_id, sg.id, px, py,
-                            sg.x, sg.y, sg.width, sg.height,
-                            src_id, src_node.x, src_node.y,
-                            tgt_id, tgt_node.x, tgt_node.y,
+                            src_id,
+                            tgt_id,
+                            sg.id,
+                            px,
+                            py,
+                            sg.x,
+                            sg.y,
+                            sg.width,
+                            sg.height,
+                            src_id,
+                            src_node.x,
+                            src_node.y,
+                            tgt_id,
+                            tgt_node.x,
+                            tgt_node.y,
                         );
                     }
                 }
@@ -2043,7 +2231,10 @@ mod tests {
         let result = layout_from_source(source);
 
         let node = |id: &str| -> &PositionedNode {
-            result.nodes.iter().find(|n| n.id == id)
+            result
+                .nodes
+                .iter()
+                .find(|n| n.id == id)
                 .unwrap_or_else(|| panic!("node '{id}' not found"))
         };
 
@@ -2052,7 +2243,9 @@ mod tests {
         // PQueue has edges to: PNotify, PRedis, PS3
         for tgt_id in &["PNotify", "PRedis", "PS3"] {
             let tgt = node(tgt_id);
-            let e = result.edges.iter()
+            let e = result
+                .edges
+                .iter()
                 .find(|e| e.from_id == "PQueue" && e.to_id == *tgt_id)
                 .unwrap_or_else(|| panic!("edge PQueue->{tgt_id} not found"));
 
@@ -2060,7 +2253,9 @@ mod tests {
             assert!(
                 tgt.y > pqueue.y,
                 "PQueue (y={:.1}) should be above {} (y={:.1}) in TD layout",
-                pqueue.y, tgt_id, tgt.y,
+                pqueue.y,
+                tgt_id,
+                tgt.y,
             );
 
             // Waypoints should be monotonically non-decreasing in y
@@ -2070,7 +2265,10 @@ mod tests {
                     w[1].1 >= w[0].1 - 1.0,
                     "PQueue->{} edge goes upward: waypoint y={:.1} followed by y={:.1}. \
                     All points: {:?}",
-                    tgt_id, w[0].1, w[1].1, e.points,
+                    tgt_id,
+                    w[0].1,
+                    w[1].1,
+                    e.points,
                 );
             }
         }
@@ -2083,7 +2281,9 @@ mod tests {
         let source = include_str!("../../../../../tests/test_loop/complex_subgraphs.mmd");
         let result = layout_from_source(source);
 
-        let edge = result.edges.iter()
+        let edge = result
+            .edges
+            .iter()
             .find(|e| e.from_id == "PAPI" && e.to_id == "PReplica")
             .expect("edge PAPI->PReplica not found");
 
@@ -2113,8 +2313,13 @@ mod tests {
                         "PAPI->PReplica edge passes through node '{}' at ({:.1},{:.1}).\n\
                         Node bounds: ({:.1},{:.1})-({:.1},{:.1})\n\
                         Edge points: {:?}",
-                        node.id, px, py,
-                        left, top, right, bottom,
+                        node.id,
+                        px,
+                        py,
+                        left,
+                        top,
+                        right,
+                        bottom,
                         edge.points,
                     );
                 }
@@ -2130,7 +2335,10 @@ mod tests {
         let result = layout_from_source(source);
 
         let sg = |id: &str| -> &PositionedSubgraph {
-            result.subgraphs.iter().find(|s| s.id == id)
+            result
+                .subgraphs
+                .iter()
+                .find(|s| s.id == id)
                 .unwrap_or_else(|| panic!("subgraph '{id}' not found"))
         };
 

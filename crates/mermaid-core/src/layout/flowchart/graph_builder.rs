@@ -80,7 +80,9 @@ fn collect_subgraph_nodes(
             } else {
                 // Bare reference (from cross-subgraph link chain) — don't overwrite
                 // a labeled definition that was already inserted.
-                all_nodes.entry(node.id.clone()).or_insert((node.clone(), style));
+                all_nodes
+                    .entry(node.id.clone())
+                    .or_insert((node.clone(), style));
             }
         }
         for edge in &sg.edges {
@@ -191,7 +193,9 @@ fn collect_membership(
             } else {
                 // Implicit reference (bare node from a link-chain target) —
                 // only claim it if no other subgraph has claimed it yet.
-                membership.entry(node.id.clone()).or_insert_with(|| path.clone());
+                membership
+                    .entry(node.id.clone())
+                    .or_insert_with(|| path.clone());
             }
         }
         for edge in &sg.edges {
@@ -285,6 +289,8 @@ pub fn build_petgraph(
                 arrow_end: edge.arrow_end,
                 label_width,
                 label_height,
+                weight: 1,
+                minlen: 1,
             },
         );
     }
@@ -339,33 +345,31 @@ mod tests {
     #[test]
     fn test_collect_subgraph_nodes_nested() {
         let ast = FlowchartAst {
-            subgraphs: vec![
-                SubgraphDef {
-                    id: "Outer".to_string(),
+            subgraphs: vec![SubgraphDef {
+                id: "Outer".to_string(),
+                label: None,
+                direction: None,
+                nodes: vec![NodeDef {
+                    id: "A".into(),
+                    label: None,
+                    shape: NodeShape::Rectangle,
+                    class_shorthand: None,
+                }],
+                edges: vec![],
+                subgraphs: vec![SubgraphDef {
+                    id: "Inner".to_string(),
                     label: None,
                     direction: None,
                     nodes: vec![NodeDef {
-                        id: "A".into(),
+                        id: "B".into(),
                         label: None,
                         shape: NodeShape::Rectangle,
                         class_shorthand: None,
                     }],
                     edges: vec![],
-                    subgraphs: vec![SubgraphDef {
-                        id: "Inner".to_string(),
-                        label: None,
-                        direction: None,
-                        nodes: vec![NodeDef {
-                            id: "B".into(),
-                            label: None,
-                            shape: NodeShape::Rectangle,
-                            class_shorthand: None,
-                        }],
-                        edges: vec![],
-                        subgraphs: vec![],
-                    }],
-                },
-            ],
+                    subgraphs: vec![],
+                }],
+            }],
             ..Default::default()
         };
         let class_defs = build_class_map(&ast.class_defs);
@@ -426,37 +430,35 @@ mod tests {
     #[test]
     fn test_collect_subgraph_edges_recursive() {
         let ast = FlowchartAst {
-            subgraphs: vec![
-                SubgraphDef {
-                    id: "Outer".to_string(),
+            subgraphs: vec![SubgraphDef {
+                id: "Outer".to_string(),
+                label: None,
+                direction: None,
+                nodes: vec![],
+                edges: vec![EdgeDef {
+                    from: "A".into(),
+                    to: "B".into(),
+                    line_style: crate::ast::flowchart::LineStyle::Solid,
+                    arrow_start: crate::ast::flowchart::ArrowEnd::None,
+                    arrow_end: crate::ast::flowchart::ArrowEnd::Arrow,
+                    label: None,
+                }],
+                subgraphs: vec![SubgraphDef {
+                    id: "Inner".to_string(),
                     label: None,
                     direction: None,
                     nodes: vec![],
                     edges: vec![EdgeDef {
-                        from: "A".into(),
-                        to: "B".into(),
+                        from: "C".into(),
+                        to: "D".into(),
                         line_style: crate::ast::flowchart::LineStyle::Solid,
                         arrow_start: crate::ast::flowchart::ArrowEnd::None,
                         arrow_end: crate::ast::flowchart::ArrowEnd::Arrow,
                         label: None,
                     }],
-                    subgraphs: vec![SubgraphDef {
-                        id: "Inner".to_string(),
-                        label: None,
-                        direction: None,
-                        nodes: vec![],
-                        edges: vec![EdgeDef {
-                            from: "C".into(),
-                            to: "D".into(),
-                            line_style: crate::ast::flowchart::LineStyle::Solid,
-                            arrow_start: crate::ast::flowchart::ArrowEnd::None,
-                            arrow_end: crate::ast::flowchart::ArrowEnd::Arrow,
-                            label: None,
-                        }],
-                        subgraphs: vec![],
-                    }],
-                },
-            ],
+                    subgraphs: vec![],
+                }],
+            }],
             ..Default::default()
         };
         let all_edges = collect_all_edges(&ast);
@@ -467,33 +469,31 @@ mod tests {
     #[test]
     fn test_collect_membership_nested() {
         let ast = FlowchartAst {
-            subgraphs: vec![
-                SubgraphDef {
-                    id: "Outer".to_string(),
+            subgraphs: vec![SubgraphDef {
+                id: "Outer".to_string(),
+                label: None,
+                direction: None,
+                nodes: vec![NodeDef {
+                    id: "A".into(),
+                    label: None,
+                    shape: NodeShape::Rectangle,
+                    class_shorthand: None,
+                }],
+                edges: vec![],
+                subgraphs: vec![SubgraphDef {
+                    id: "Inner".to_string(),
                     label: None,
                     direction: None,
                     nodes: vec![NodeDef {
-                        id: "A".into(),
+                        id: "B".into(),
                         label: None,
                         shape: NodeShape::Rectangle,
                         class_shorthand: None,
                     }],
                     edges: vec![],
-                    subgraphs: vec![SubgraphDef {
-                        id: "Inner".to_string(),
-                        label: None,
-                        direction: None,
-                        nodes: vec![NodeDef {
-                            id: "B".into(),
-                            label: None,
-                            shape: NodeShape::Rectangle,
-                            class_shorthand: None,
-                        }],
-                        edges: vec![],
-                        subgraphs: vec![],
-                    }],
-                },
-            ],
+                    subgraphs: vec![],
+                }],
+            }],
             ..Default::default()
         };
         let membership = build_subgraph_membership(&ast);
@@ -509,16 +509,14 @@ mod tests {
         // Edge references nodes not in ast.nodes -> or_insert_with (lines 53-60)
         let ast = FlowchartAst {
             nodes: vec![],
-            edges: vec![
-                EdgeDef {
-                    from: "A".into(),
-                    to: "B".into(),
-                    line_style: crate::ast::flowchart::LineStyle::Solid,
-                    arrow_start: crate::ast::flowchart::ArrowEnd::None,
-                    arrow_end: crate::ast::flowchart::ArrowEnd::Arrow,
-                    label: None,
-                },
-            ],
+            edges: vec![EdgeDef {
+                from: "A".into(),
+                to: "B".into(),
+                line_style: crate::ast::flowchart::LineStyle::Solid,
+                arrow_start: crate::ast::flowchart::ArrowEnd::None,
+                arrow_end: crate::ast::flowchart::ArrowEnd::Arrow,
+                label: None,
+            }],
             ..Default::default()
         };
         let class_defs = build_class_map(&ast.class_defs);
@@ -540,16 +538,14 @@ mod tests {
                 label: None,
                 direction: None,
                 nodes: vec![],
-                edges: vec![
-                    EdgeDef {
-                        from: "X".into(),
-                        to: "Y".into(),
-                        line_style: crate::ast::flowchart::LineStyle::Solid,
-                        arrow_start: crate::ast::flowchart::ArrowEnd::None,
-                        arrow_end: crate::ast::flowchart::ArrowEnd::Arrow,
-                        label: None,
-                    },
-                ],
+                edges: vec![EdgeDef {
+                    from: "X".into(),
+                    to: "Y".into(),
+                    line_style: crate::ast::flowchart::LineStyle::Solid,
+                    arrow_start: crate::ast::flowchart::ArrowEnd::None,
+                    arrow_end: crate::ast::flowchart::ArrowEnd::Arrow,
+                    label: None,
+                }],
                 subgraphs: vec![],
             }],
             ..Default::default()

@@ -23,7 +23,14 @@ pub fn position_subgraphs(
         .collect();
 
     let mut result = Vec::new();
-    position_subgraphs_recursive(subgraphs, &node_pos, style_overrides, measurer, &mut result, membership);
+    position_subgraphs_recursive(
+        subgraphs,
+        &node_pos,
+        style_overrides,
+        measurer,
+        &mut result,
+        membership,
+    );
     result
 }
 
@@ -36,7 +43,14 @@ fn position_subgraphs_recursive(
     membership: &SubgraphMembership,
 ) {
     for sg in subgraphs {
-        position_subgraphs_recursive(&sg.subgraphs, node_pos, style_overrides, measurer, result, membership);
+        position_subgraphs_recursive(
+            &sg.subgraphs,
+            node_pos,
+            style_overrides,
+            measurer,
+            result,
+            membership,
+        );
 
         let mut min_x = f64::MAX;
         let mut min_y = f64::MAX;
@@ -426,70 +440,6 @@ fn shift_nodes_in_subgraph_main(
     }
 }
 
-/// Post-processing step to compact subgraph nodes by shifting them toward
-/// the subgraph's centroid. This helps keep nodes in the same subgraph closer
-/// together after the Sugiyama layout has spread them across ranks.
-pub fn compact_subgraphs(
-    nodes: &mut [PositionedNode],
-    membership: &SubgraphMembership,
-    is_horizontal: bool,
-) {
-    use std::collections::HashMap;
-
-    // Group nodes by their immediate subgraph
-    let mut subgraph_nodes: HashMap<&str, Vec<&mut PositionedNode>> = HashMap::new();
-
-    for node in nodes.iter_mut() {
-        if let Some(path) = membership.get(&node.id) {
-            if let Some(sg_id) = path.first() {
-                subgraph_nodes.entry(sg_id).or_default().push(node);
-            }
-        }
-    }
-
-    // For each subgraph, shift nodes toward the median position
-    for (_sg_id, mut sg_nodes) in subgraph_nodes {
-        if sg_nodes.len() <= 1 {
-            continue;
-        }
-
-        // Calculate median position on the main axis
-        let mut positions: Vec<f64> = sg_nodes
-            .iter()
-            .map(|n| if is_horizontal { n.x } else { n.y })
-            .collect();
-        positions.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-
-        let median = if positions.len() % 2 == 1 {
-            positions[positions.len() / 2]
-        } else {
-            (positions[positions.len() / 2 - 1] + positions[positions.len() / 2]) / 2.0
-        };
-
-        // Calculate current centroid
-        let min_pos = *positions.first().unwrap();
-        let max_pos = *positions.last().unwrap();
-        let centroid = (min_pos + max_pos) / 2.0;
-
-        // Shift nodes toward median (but preserve relative ordering)
-        // Use a weighted approach: nodes further from centroid move more
-        for node in &mut sg_nodes {
-            let pos = if is_horizontal { node.x } else { node.y };
-            let dist_from_centroid = (pos - centroid).abs();
-            let max_dist = (max_pos - min_pos).max(1.0);
-            let factor = 0.4 * (dist_from_centroid / max_dist); // Move up to 40% toward median
-
-            let shift = (median - pos) * factor;
-
-            if is_horizontal {
-                node.x += shift;
-            } else {
-                node.y += shift;
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -523,7 +473,13 @@ mod tests {
         }];
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer, &SubgraphMembership::new());
+        let result = position_subgraphs(
+            &subgraphs,
+            &positioned_nodes,
+            &[],
+            &measurer,
+            &SubgraphMembership::new(),
+        );
         assert_eq!(result.len(), 1);
         assert!(result[0].width > 0.0);
         assert!(result[0].height > 0.0);
@@ -563,7 +519,13 @@ mod tests {
         }];
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer, &SubgraphMembership::new());
+        let result = position_subgraphs(
+            &subgraphs,
+            &positioned_nodes,
+            &[],
+            &measurer,
+            &SubgraphMembership::new(),
+        );
         assert_eq!(result.len(), 2);
     }
 
@@ -704,52 +666,10 @@ mod tests {
         );
         let y_after: Vec<f64> = nodes.iter().map(|n| n.y).collect();
         let x_after: Vec<f64> = nodes.iter().map(|n| n.x).collect();
-        assert!(y_before != y_after || x_before != x_after, "overlap resolution should shift nodes");
-    }
-
-    #[test]
-    fn test_compact_subgraphs() {
-        let mut membership = SubgraphMembership::new();
-        membership.insert("A".to_string(), vec!["SG".to_string()]);
-        membership.insert("B".to_string(), vec!["SG".to_string()]);
-        membership.insert("C".to_string(), vec!["SG".to_string()]);
-
-        let mut nodes = vec![
-            PositionedNode {
-                id: "A".into(),
-                label: "A".into(),
-                shape: crate::ast::flowchart::NodeShape::Rectangle,
-                style: Default::default(),
-                x: 50.0,
-                y: 50.0,
-                width: 40.0,
-                height: 20.0,
-            },
-            PositionedNode {
-                id: "B".into(),
-                label: "B".into(),
-                shape: crate::ast::flowchart::NodeShape::Rectangle,
-                style: Default::default(),
-                x: 150.0,
-                y: 100.0,
-                width: 40.0,
-                height: 20.0,
-            },
-            PositionedNode {
-                id: "C".into(),
-                label: "C".into(),
-                shape: crate::ast::flowchart::NodeShape::Rectangle,
-                style: Default::default(),
-                x: 250.0,
-                y: 150.0,
-                width: 40.0,
-                height: 20.0,
-            },
-        ];
-        let y_before: Vec<f64> = nodes.iter().map(|n| n.y).collect();
-        compact_subgraphs(&mut nodes, &membership, false);
-        let y_after: Vec<f64> = nodes.iter().map(|n| n.y).collect();
-        assert_ne!(y_before, y_after);
+        assert!(
+            y_before != y_after || x_before != x_after,
+            "overlap resolution should shift nodes"
+        );
     }
 
     #[test]
@@ -844,7 +764,13 @@ mod tests {
         }];
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer, &SubgraphMembership::new());
+        let result = position_subgraphs(
+            &subgraphs,
+            &positioned_nodes,
+            &[],
+            &measurer,
+            &SubgraphMembership::new(),
+        );
         assert_eq!(result.len(), 1);
         assert!(result[0].height > 0.0);
     }
@@ -968,110 +894,19 @@ mod tests {
             },
         ];
         let y_before: Vec<f64> = nodes.iter().map(|n| n.y).collect();
-        separate_overlapping_sibling_subgraphs(&ast, &membership, &mut nodes, &subgraphs, &[], true);
+        separate_overlapping_sibling_subgraphs(
+            &ast,
+            &membership,
+            &mut nodes,
+            &subgraphs,
+            &[],
+            true,
+        );
         let y_after: Vec<f64> = nodes.iter().map(|n| n.y).collect();
-        assert!(y_before != y_after, "horizontal mode should shift nodes on y");
-    }
-
-    #[test]
-    fn test_compact_subgraphs_horizontal() {
-        // compact_subgraphs with is_horizontal: true (line 470 - node.x += shift)
-        let mut membership = SubgraphMembership::new();
-        membership.insert("A".to_string(), vec!["SG".to_string()]);
-        membership.insert("B".to_string(), vec!["SG".to_string()]);
-        membership.insert("C".to_string(), vec!["SG".to_string()]);
-
-        let mut nodes = vec![
-            PositionedNode {
-                id: "A".into(),
-                label: "A".into(),
-                shape: crate::ast::flowchart::NodeShape::Rectangle,
-                style: Default::default(),
-                x: 50.0,
-                y: 50.0,
-                width: 40.0,
-                height: 20.0,
-            },
-            PositionedNode {
-                id: "B".into(),
-                label: "B".into(),
-                shape: crate::ast::flowchart::NodeShape::Rectangle,
-                style: Default::default(),
-                x: 150.0,
-                y: 100.0,
-                width: 40.0,
-                height: 20.0,
-            },
-            PositionedNode {
-                id: "C".into(),
-                label: "C".into(),
-                shape: crate::ast::flowchart::NodeShape::Rectangle,
-                style: Default::default(),
-                x: 250.0,
-                y: 150.0,
-                width: 40.0,
-                height: 20.0,
-            },
-        ];
-        let x_before: Vec<f64> = nodes.iter().map(|n| n.x).collect();
-        compact_subgraphs(&mut nodes, &membership, true);
-        let x_after: Vec<f64> = nodes.iter().map(|n| n.x).collect();
-        assert_ne!(x_before, x_after);
-    }
-
-    #[test]
-    fn test_compact_subgraphs_even_positions() {
-        // compact_subgraphs with even number of nodes (lines 432, 438)
-        let mut membership = SubgraphMembership::new();
-        membership.insert("A".into(), vec!["SG".to_string()]);
-        membership.insert("B".into(), vec!["SG".to_string()]);
-        membership.insert("C".into(), vec!["SG".to_string()]);
-        membership.insert("D".into(), vec!["SG".to_string()]);
-
-        let mut nodes = vec![
-            PositionedNode {
-                id: "A".into(),
-                label: "A".into(),
-                shape: crate::ast::flowchart::NodeShape::Rectangle,
-                style: Default::default(),
-                x: 10.0,
-                y: 50.0,
-                width: 40.0,
-                height: 20.0,
-            },
-            PositionedNode {
-                id: "B".into(),
-                label: "B".into(),
-                shape: crate::ast::flowchart::NodeShape::Rectangle,
-                style: Default::default(),
-                x: 50.0,
-                y: 50.0,
-                width: 40.0,
-                height: 20.0,
-            },
-            PositionedNode {
-                id: "C".into(),
-                label: "C".into(),
-                shape: crate::ast::flowchart::NodeShape::Rectangle,
-                style: Default::default(),
-                x: 90.0,
-                y: 50.0,
-                width: 40.0,
-                height: 20.0,
-            },
-            PositionedNode {
-                id: "D".into(),
-                label: "D".into(),
-                shape: crate::ast::flowchart::NodeShape::Rectangle,
-                style: Default::default(),
-                x: 130.0,
-                y: 50.0,
-                width: 40.0,
-                height: 20.0,
-            },
-        ];
-        compact_subgraphs(&mut nodes, &membership, false);
-        assert!(nodes.iter().all(|n| n.y.is_finite()));
+        assert!(
+            y_before != y_after,
+            "horizontal mode should shift nodes on y"
+        );
     }
 
     #[test]
@@ -1102,7 +937,13 @@ mod tests {
         }];
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer, &SubgraphMembership::new());
+        let result = position_subgraphs(
+            &subgraphs,
+            &positioned_nodes,
+            &[],
+            &measurer,
+            &SubgraphMembership::new(),
+        );
         assert_eq!(result.len(), 1);
         assert!(result[0].width >= 2.0 * SUBGRAPH_TITLE_SIDE_PADDING);
     }
@@ -1149,7 +990,13 @@ mod tests {
         ];
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer, &SubgraphMembership::new());
+        let result = position_subgraphs(
+            &subgraphs,
+            &positioned_nodes,
+            &[],
+            &measurer,
+            &SubgraphMembership::new(),
+        );
         assert_eq!(result.len(), 1);
     }
 
@@ -1285,7 +1132,14 @@ mod tests {
                 style: Default::default(),
             },
         ];
-        separate_overlapping_sibling_subgraphs(&ast, &membership, &mut nodes, &subgraphs, &[], false);
+        separate_overlapping_sibling_subgraphs(
+            &ast,
+            &membership,
+            &mut nodes,
+            &subgraphs,
+            &[],
+            false,
+        );
         assert!(nodes.iter().all(|n| n.x.is_finite() && n.y.is_finite()));
     }
 
@@ -1408,47 +1262,16 @@ mod tests {
             },
         ];
         let x_before: Vec<f64> = nodes.iter().map(|n| n.x).collect();
-        separate_overlapping_sibling_subgraphs(&ast, &membership, &mut nodes, &subgraphs, &[], true);
+        separate_overlapping_sibling_subgraphs(
+            &ast,
+            &membership,
+            &mut nodes,
+            &subgraphs,
+            &[],
+            true,
+        );
         let x_after: Vec<f64> = nodes.iter().map(|n| n.x).collect();
         assert!(x_before != x_after || nodes.iter().all(|n| n.x.is_finite()));
-    }
-
-    #[test]
-    fn test_compact_subgraphs_single_node_skipped() {
-        // Subgraph with 1 node -> continue (line 328)
-        let mut membership = SubgraphMembership::new();
-        membership.insert("A".to_string(), vec!["SG".to_string()]);
-        membership.insert("B".to_string(), vec!["SG2".to_string()]);
-
-        let mut nodes = vec![
-            PositionedNode {
-                id: "A".into(),
-                label: "A".into(),
-                shape: crate::ast::flowchart::NodeShape::Rectangle,
-                style: Default::default(),
-                x: 50.0,
-                y: 50.0,
-                width: 40.0,
-                height: 20.0,
-            },
-            PositionedNode {
-                id: "B".into(),
-                label: "B".into(),
-                shape: crate::ast::flowchart::NodeShape::Rectangle,
-                style: Default::default(),
-                x: 150.0,
-                y: 50.0,
-                width: 40.0,
-                height: 20.0,
-            },
-        ];
-        let x_before: Vec<f64> = nodes.iter().map(|n| n.x).collect();
-        let y_before: Vec<f64> = nodes.iter().map(|n| n.y).collect();
-        compact_subgraphs(&mut nodes, &membership, false);
-        let x_after: Vec<f64> = nodes.iter().map(|n| n.x).collect();
-        let y_after: Vec<f64> = nodes.iter().map(|n| n.y).collect();
-        assert_eq!(x_before, x_after, "single-node subgraphs should not shift");
-        assert_eq!(y_before, y_after, "single-node subgraphs should not shift");
     }
 
     #[test]
@@ -1482,7 +1305,13 @@ mod tests {
         }];
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &style_overrides, &measurer, &SubgraphMembership::new());
+        let result = position_subgraphs(
+            &subgraphs,
+            &positioned_nodes,
+            &style_overrides,
+            &measurer,
+            &SubgraphMembership::new(),
+        );
         assert_eq!(result.len(), 1);
         assert!(result[0].style.fill.is_some());
     }

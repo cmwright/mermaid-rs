@@ -16,6 +16,10 @@ pub struct DummyChain {
     pub dummy_nodes: Vec<NodeIndex>,
     /// The dummy node that carries the edge label (if any).
     pub label_node: Option<NodeIndex>,
+    /// Whether the original edge was reversed during cycle removal (back-edge).
+    /// Back-edge dummy chains are intentionally routed far from the direct
+    /// source-target corridor to avoid crossings.
+    pub is_reversed: bool,
 }
 
 /// For edges spanning >1 rank, remove the original edge and insert a chain
@@ -96,6 +100,8 @@ pub fn insert_dummy_nodes(
                     arrow_end: edge_data.arrow_end,
                     label_width: 0.0,
                     label_height: 0.0,
+                    weight: 1,
+                    minlen: 1,
                 },
             );
             prev = dummy;
@@ -112,6 +118,8 @@ pub fn insert_dummy_nodes(
                 arrow_end: edge_data.arrow_end,
                 label_width: 0.0,
                 label_height: 0.0,
+                weight: 1,
+                minlen: 1,
             },
         );
 
@@ -121,34 +129,11 @@ pub fn insert_dummy_nodes(
             edge_data,
             dummy_nodes,
             label_node,
+            is_reversed: false, // set by caller if edge was reversed for cycle removal
         });
     }
 
     chains
-}
-
-/// Remove dummy nodes from the positions map and return bend points for long edges.
-#[allow(clippy::type_complexity)]
-pub fn extract_dummy_positions(
-    chains: &[DummyChain],
-    positions: &HashMap<NodeIndex, (f64, f64)>,
-) -> Vec<(NodeIndex, NodeIndex, EdgeData, Vec<(f64, f64)>)> {
-    chains
-        .iter()
-        .map(|chain| {
-            let bend_points: Vec<(f64, f64)> = chain
-                .dummy_nodes
-                .iter()
-                .filter_map(|&dummy| positions.get(&dummy).copied())
-                .collect();
-            (
-                chain.original_source,
-                chain.original_target,
-                chain.edge_data.clone(),
-                bend_points,
-            )
-        })
-        .collect()
 }
 
 #[cfg(test)]
@@ -168,7 +153,11 @@ mod tests {
     }
 
     fn make_edge_data(label: Option<&str>) -> EdgeData {
-        let (lw, lh) = if label.is_some() { (50.0, 15.0) } else { (0.0, 0.0) };
+        let (lw, lh) = if label.is_some() {
+            (50.0, 15.0)
+        } else {
+            (0.0, 0.0)
+        };
         EdgeData {
             line_style: LineStyle::Solid,
             arrow_start: ArrowEnd::None,
@@ -176,6 +165,8 @@ mod tests {
             label: label.map(String::from),
             label_width: lw,
             label_height: lh,
+            weight: 1,
+            minlen: 1,
         }
     }
 
@@ -210,7 +201,11 @@ mod tests {
 
         let chains = insert_dummy_nodes(&mut g, &mut ranks);
         assert_eq!(chains.len(), 1, "one long edge produces one chain");
-        assert_eq!(chains[0].dummy_nodes.len(), 1, "spanning 2 ranks needs 1 dummy");
+        assert_eq!(
+            chains[0].dummy_nodes.len(),
+            1,
+            "spanning 2 ranks needs 1 dummy"
+        );
         assert_eq!(chains[0].original_source, a);
         assert_eq!(chains[0].original_target, b);
         assert!(chains[0].label_node.is_none());
@@ -258,7 +253,10 @@ mod tests {
         assert!(chains[0].label_node.is_some());
 
         let label_dummy = chains[0].label_node.unwrap();
-        assert_eq!(ranks[&label_dummy], 2, "label dummy should be at midpoint rank");
+        assert_eq!(
+            ranks[&label_dummy], 2,
+            "label dummy should be at midpoint rank"
+        );
 
         // Label dummy should have the label dimensions
         let label_data = &g[label_dummy];
@@ -288,39 +286,6 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_dummy_positions() {
-        // Build a chain manually
-        let mut g = DiGraph::new();
-        let a = g.add_node(make_node("A"));
-        let b = g.add_node(make_node("B"));
-        g.add_edge(a, b, make_edge_data(None));
-
-        let mut ranks = HashMap::new();
-        ranks.insert(a, 0);
-        ranks.insert(b, 3);
-
-        let chains = insert_dummy_nodes(&mut g, &mut ranks);
-        assert_eq!(chains.len(), 1);
-
-        // Create positions for all nodes including dummies
-        let mut positions = HashMap::new();
-        positions.insert(a, (100.0, 0.0));
-        positions.insert(b, (100.0, 300.0));
-        for (i, &dummy) in chains[0].dummy_nodes.iter().enumerate() {
-            positions.insert(dummy, (100.0, (i + 1) as f64 * 100.0));
-        }
-
-        let extracted = extract_dummy_positions(&chains, &positions);
-        assert_eq!(extracted.len(), 1);
-        let (src, tgt, _data, bps) = &extracted[0];
-        assert_eq!(*src, a);
-        assert_eq!(*tgt, b);
-        assert_eq!(bps.len(), 2); // 2 dummies
-        assert!((bps[0].1 - 100.0).abs() < 0.1);
-        assert!((bps[1].1 - 200.0).abs() < 0.1);
-    }
-
-    #[test]
     fn test_dummy_chain_connectivity() {
         // Verify the chain of edges is properly connected
         let mut g = DiGraph::new();
@@ -336,11 +301,16 @@ mod tests {
         let chain = &chains[0];
 
         // Original edge should be removed
-        assert!(g.find_edge(a, b).is_none(), "original long edge should be removed");
+        assert!(
+            g.find_edge(a, b).is_none(),
+            "original long edge should be removed"
+        );
 
         // Path should be A -> dummy1 -> dummy2 -> B
         assert!(g.find_edge(a, chain.dummy_nodes[0]).is_some());
-        assert!(g.find_edge(chain.dummy_nodes[0], chain.dummy_nodes[1]).is_some());
+        assert!(g
+            .find_edge(chain.dummy_nodes[0], chain.dummy_nodes[1])
+            .is_some());
         assert!(g.find_edge(chain.dummy_nodes[1], b).is_some());
     }
 }

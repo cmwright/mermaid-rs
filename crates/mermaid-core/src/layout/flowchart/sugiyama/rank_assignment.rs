@@ -244,11 +244,8 @@ fn network_simplex(
     }
 
     // Map NodeIndex to dense local indices 0..n
-    let node_to_local: HashMap<NodeIndex, usize> = component
-        .iter()
-        .enumerate()
-        .map(|(i, &n)| (n, i))
-        .collect();
+    let node_to_local: HashMap<NodeIndex, usize> =
+        component.iter().enumerate().map(|(i, &n)| (n, i)).collect();
     let n = component.len();
     let m = edges.len();
 
@@ -257,8 +254,12 @@ fn network_simplex(
         .map(|&(s, t, _)| (node_to_local[&s], node_to_local[&t]))
         .collect();
 
-    // All edge weights are 1 (unweighted case)
-    let edge_weights: Vec<i64> = vec![1; m];
+    // Read edge weights and minlens from EdgeData
+    let edge_weights: Vec<i64> = edges.iter().map(|&(_, _, ei)| graph[ei].weight).collect();
+    let edge_minlens: Vec<i64> = edges
+        .iter()
+        .map(|&(_, _, ei)| graph[ei].minlen as i64)
+        .collect();
 
     // ── Step 1: Initial feasible rank assignment via longest-path ───────
     let mut rank: Vec<i64> = vec![0; n];
@@ -302,11 +303,11 @@ fn network_simplex(
             }
         }
 
-        // Longest-path: rank[t] = max(rank[s] + 1) over all predecessors
+        // Longest-path: rank[t] = max(rank[s] + minlen) over all predecessors
         for &node in &topo_order {
             for &ei in &in_adj[node] {
                 let (src, _) = local_edges[ei];
-                let candidate = rank[src] + 1;
+                let candidate = rank[src] + edge_minlens[ei];
                 if candidate > rank[node] {
                     rank[node] = candidate;
                 }
@@ -325,7 +326,7 @@ fn network_simplex(
     // Gather tight edges (undirected adjacency)
     let mut tight_adj: Vec<Vec<(usize, usize)>> = vec![Vec::new(); n];
     for (ei, &(s, t)) in local_edges.iter().enumerate() {
-        let slack = rank[t] - rank[s] - 1;
+        let slack = rank[t] - rank[s] - edge_minlens[ei];
         if slack == 0 {
             tight_adj[s].push((t, ei));
             tight_adj[t].push((s, ei));
@@ -365,11 +366,11 @@ fn network_simplex(
 
                 // One endpoint in tree, other not. Add edge and make it tight.
                 let added = if in_tree[s] && !in_tree[t] {
-                    rank[t] = rank[s] + 1;
+                    rank[t] = rank[s] + edge_minlens[ei];
                     in_tree[t] = true;
                     t
                 } else {
-                    rank[s] = rank[t] - 1;
+                    rank[s] = rank[t] - edge_minlens[ei];
                     in_tree[s] = true;
                     s
                 };
@@ -387,14 +388,14 @@ fn network_simplex(
                         }
                         let (es, et) = local_edges[ej];
                         if es == node && !in_tree[et] {
-                            if rank[et] - rank[es] == 1 {
+                            if rank[et] - rank[es] == edge_minlens[ej] {
                                 in_tree[et] = true;
                                 tree_edge[ej] = true;
                                 tree_edge_count += 1;
                                 bfs.push_back(et);
                             }
                         } else if et == node && !in_tree[es] {
-                            if rank[et] - rank[es] == 1 {
+                            if rank[et] - rank[es] == edge_minlens[ej] {
                                 in_tree[es] = true;
                                 tree_edge[ej] = true;
                                 tree_edge_count += 1;
@@ -426,7 +427,16 @@ fn network_simplex(
 
     // ── Step 4: Compute initial cut values ──────────────────────────────
     let mut cut_value: Vec<i64> = vec![0; m];
-    ns_compute_cut_values(m, &local_edges, &tree_edge, &edge_weights, &mut cut_value, &lim, &low, &par);
+    ns_compute_cut_values(
+        m,
+        &local_edges,
+        &tree_edge,
+        &edge_weights,
+        &mut cut_value,
+        &lim,
+        &low,
+        &par,
+    );
 
     // ── Step 5: Pivot loop ──────────────────────────────────────────────
     let max_iterations = (n * m).max(n * n) + 1;
@@ -495,7 +505,7 @@ fn network_simplex(
                 continue;
             }
 
-            let slack = rank[et] - rank[es] - 1;
+            let slack = rank[et] - rank[es] - edge_minlens[ei];
             if slack < 0 {
                 continue;
             }
@@ -514,7 +524,7 @@ fn network_simplex(
         // Compute the rank shift delta to make the entering edge tight
         let (es, et) = local_edges[entering];
         let s_in_tail = ns_in_subtree(es, tail_root, &low, &lim);
-        let slack = rank[et] - rank[es] - 1;
+        let slack = rank[et] - rank[es] - edge_minlens[entering];
 
         // If the entering edge source is in the tail, we shift tail ranks UP by +slack
         // (increasing tail ranks moves source closer to target).
@@ -550,7 +560,16 @@ fn network_simplex(
             *p = None;
         }
         ns_compute_tree_order(tree_root, &tree_adj, &mut lim, &mut low, &mut par);
-        ns_compute_cut_values(m, &local_edges, &tree_edge, &edge_weights, &mut cut_value, &lim, &low, &par);
+        ns_compute_cut_values(
+            m,
+            &local_edges,
+            &tree_edge,
+            &edge_weights,
+            &mut cut_value,
+            &lim,
+            &low,
+            &par,
+        );
     }
 
     // ── Step 6: Normalize ranks so minimum is 0 ────────────────────────
@@ -608,8 +627,7 @@ pub fn align_sibling_subgraph_ranks(
             if siblings.len() <= 1 {
                 continue;
             }
-            changed |=
-                align_one_sibling_group(siblings, graph, ranks, &id_to_idx, membership);
+            changed |= align_one_sibling_group(siblings, graph, ranks, &id_to_idx, membership);
         }
         if changed {
             propagate_ranks_forward(graph, ranks);
@@ -719,12 +737,6 @@ fn align_one_sibling_group(
                 .iter()
                 .flat_map(|&sg_idx| sg_nodes[sg_idx].iter().copied())
                 .collect();
-
-            let _tier_max = tier_nodes
-                .iter()
-                .filter_map(|n| ranks.get(n).copied())
-                .max()
-                .unwrap_or(0);
 
             if tier_idx > 0 {
                 let tier_min = tier_nodes
@@ -1064,6 +1076,8 @@ mod tests {
             label: None,
             label_width: 0.0,
             label_height: 0.0,
+            weight: 1,
+            minlen: 1,
         }
     }
 
@@ -1180,19 +1194,39 @@ mod tests {
                     label: None,
                     direction: None,
                     nodes: vec![
-                        NodeDef { id: "A".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
-                        NodeDef { id: "B".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
+                        NodeDef {
+                            id: "A".into(),
+                            label: None,
+                            shape: NodeShape::Rectangle,
+                            class_shorthand: None,
+                        },
+                        NodeDef {
+                            id: "B".into(),
+                            label: None,
+                            shape: NodeShape::Rectangle,
+                            class_shorthand: None,
+                        },
                     ],
-                    edges: vec![EdgeDef { from: "A".into(), to: "B".into(), line_style: LineStyle::Solid, arrow_start: ArrowEnd::None, arrow_end: ArrowEnd::Arrow, label: None }],
+                    edges: vec![EdgeDef {
+                        from: "A".into(),
+                        to: "B".into(),
+                        line_style: LineStyle::Solid,
+                        arrow_start: ArrowEnd::None,
+                        arrow_end: ArrowEnd::Arrow,
+                        label: None,
+                    }],
                     subgraphs: vec![],
                 },
                 SubgraphDef {
                     id: "Right".to_string(),
                     label: None,
                     direction: None,
-                    nodes: vec![
-                        NodeDef { id: "C".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
-                    ],
+                    nodes: vec![NodeDef {
+                        id: "C".into(),
+                        label: None,
+                        shape: NodeShape::Rectangle,
+                        class_shorthand: None,
+                    }],
                     edges: vec![],
                     subgraphs: vec![],
                 },
@@ -1234,8 +1268,18 @@ mod tests {
                 label: None,
                 direction: None,
                 nodes: vec![
-                    NodeDef { id: "A".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
-                    NodeDef { id: "B".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
+                    NodeDef {
+                        id: "A".into(),
+                        label: None,
+                        shape: NodeShape::Rectangle,
+                        class_shorthand: None,
+                    },
+                    NodeDef {
+                        id: "B".into(),
+                        label: None,
+                        shape: NodeShape::Rectangle,
+                        class_shorthand: None,
+                    },
                 ],
                 edges: vec![],
                 subgraphs: vec![],
@@ -1372,19 +1416,39 @@ mod tests {
                     label: None,
                     direction: None,
                     nodes: vec![
-                        NodeDef { id: "A".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
-                        NodeDef { id: "B".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
+                        NodeDef {
+                            id: "A".into(),
+                            label: None,
+                            shape: NodeShape::Rectangle,
+                            class_shorthand: None,
+                        },
+                        NodeDef {
+                            id: "B".into(),
+                            label: None,
+                            shape: NodeShape::Rectangle,
+                            class_shorthand: None,
+                        },
                     ],
-                    edges: vec![EdgeDef { from: "A".into(), to: "B".into(), line_style: LineStyle::Solid, arrow_start: ArrowEnd::None, arrow_end: ArrowEnd::Arrow, label: None }],
+                    edges: vec![EdgeDef {
+                        from: "A".into(),
+                        to: "B".into(),
+                        line_style: LineStyle::Solid,
+                        arrow_start: ArrowEnd::None,
+                        arrow_end: ArrowEnd::Arrow,
+                        label: None,
+                    }],
                     subgraphs: vec![],
                 },
                 SubgraphDef {
                     id: "Right".to_string(),
                     label: None,
                     direction: None,
-                    nodes: vec![
-                        NodeDef { id: "C".into(), label: None, shape: NodeShape::Rectangle, class_shorthand: None },
-                    ],
+                    nodes: vec![NodeDef {
+                        id: "C".into(),
+                        label: None,
+                        shape: NodeShape::Rectangle,
+                        class_shorthand: None,
+                    }],
                     edges: vec![],
                     subgraphs: vec![],
                 },
@@ -1405,6 +1469,9 @@ mod tests {
         let siblings = &ast.subgraphs;
         let changed = align_one_sibling_group(siblings, &g, &mut ranks, &id_to_idx, &membership);
         assert!(changed);
-        assert_eq!(ranks[&c], 1, "C should be promoted to match Left's max rank");
+        assert_eq!(
+            ranks[&c], 1,
+            "C should be promoted to match Left's max rank"
+        );
     }
 }

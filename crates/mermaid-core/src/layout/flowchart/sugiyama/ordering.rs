@@ -5,7 +5,7 @@ use crate::ast::flowchart::{FlowchartAst, SubgraphDef};
 use crate::layout::flowchart::graph_builder::SubgraphMembership;
 use crate::layout::flowchart::types::*;
 
-        use crate::layout::flowchart::sugiyama::dummy_nodes::DummyChain;
+use crate::layout::flowchart::sugiyama::dummy_nodes::DummyChain;
 
 // ---------------------------------------------------------------------------
 // Crossing-count infrastructure (Fenwick / BIT)
@@ -332,10 +332,7 @@ fn sort_layer_by_barycenter(
 // ---------------------------------------------------------------------------
 
 /// Information about a single subgraph for local refinement.
-#[allow(dead_code)]
 struct SubgraphInfo {
-    /// The subgraph's id.
-    id: String,
     /// The full membership path (e.g., ["Outer", "Inner"]).
     path: Vec<String>,
     /// All nodes in this subgraph including nested descendants.
@@ -546,7 +543,6 @@ fn collect_subgraphs_postorder(
 
         result.extend(children);
         result.push(SubgraphInfo {
-            id: sg.id.clone(),
             path,
             all_descendants,
             child_ids,
@@ -772,6 +768,8 @@ mod tests {
             label: None,
             label_width: 0.0,
             label_height: 0.0,
+            weight: 1,
+            minlen: 1,
         }
     }
 
@@ -1207,6 +1205,7 @@ mod tests {
             edge_data: make_edge(),
             dummy_nodes: vec![dummy],
             label_node: None,
+            is_reversed: false,
         }];
 
         let effective = build_node_membership(&g, &membership, &chains);

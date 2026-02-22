@@ -780,10 +780,7 @@ fn render_output_as_png_on_svg_returns_none() {
     let config = RenderConfig::default();
     let result = render(source, &config).unwrap();
     assert!(result.as_png().is_none(), "as_png() on SVG should be None");
-    assert!(
-        result.as_svg().is_some(),
-        "as_svg() on SVG should be Some"
-    );
+    assert!(result.as_svg().is_some(), "as_svg() on SVG should be Some");
 }
 
 // 42. as_svg() on PNG output returns None
@@ -796,10 +793,7 @@ fn render_output_as_svg_on_png_returns_none() {
     config.output_format = OutputFormat::Png;
     let result = render(source, &config).unwrap();
     assert!(result.as_svg().is_none(), "as_svg() on PNG should be None");
-    assert!(
-        result.as_png().is_some(),
-        "as_png() on PNG should be Some"
-    );
+    assert!(result.as_png().is_some(), "as_png() on PNG should be Some");
 }
 
 // ===========================================================================
@@ -1472,7 +1466,8 @@ fn render_output_png_variant() {
 
 #[test]
 fn er_diagram_simple() {
-    let svg = render_svg(r#"erDiagram
+    let svg = render_svg(
+        r#"erDiagram
     CUSTOMER ||--o{ ORDER : places
     ORDER ||--|{ LINE-ITEM : contains
     CUSTOMER {
@@ -1487,14 +1482,21 @@ fn er_diagram_simple() {
     LINE-ITEM {
         int quantity
         float price
-    }"#);
+    }"#,
+    );
     assert!(svg.contains("<svg"));
     assert!(svg.contains("CUSTOMER"));
     assert!(svg.contains("ORDER"));
     assert!(svg.contains("LINE-ITEM"));
     // Check inline cardinality symbols are present (lines and circles)
-    assert!(svg.contains("<line"), "should have perpendicular lines for cardinality");
-    assert!(svg.contains("<circle"), "should have circle for zero-or-more cardinality");
+    assert!(
+        svg.contains("<line"),
+        "should have perpendicular lines for cardinality"
+    );
+    assert!(
+        svg.contains("<circle"),
+        "should have circle for zero-or-more cardinality"
+    );
     // Check entity attributes rendered
     assert!(svg.contains("name"));
     assert!(svg.contains("email"));
@@ -1508,8 +1510,10 @@ fn er_diagram_simple() {
 
 #[test]
 fn er_diagram_non_identifying() {
-    let svg = render_svg(r#"erDiagram
-    A ||..o{ B : has"#);
+    let svg = render_svg(
+        r#"erDiagram
+    A ||..o{ B : has"#,
+    );
     assert!(svg.contains("<svg"));
     // Non-identifying relationship uses dashed line
     assert!(svg.contains("stroke-dasharray"));
@@ -1517,8 +1521,10 @@ fn er_diagram_non_identifying() {
 
 #[test]
 fn er_diagram_no_attributes() {
-    let svg = render_svg(r#"erDiagram
-    PERSON ||--o| ADDRESS : "lives at""#);
+    let svg = render_svg(
+        r#"erDiagram
+    PERSON ||--o| ADDRESS : "lives at""#,
+    );
     assert!(svg.contains("<svg"));
     assert!(svg.contains("PERSON"));
     assert!(svg.contains("ADDRESS"));
@@ -1535,9 +1541,11 @@ fn er_diagram_detect() {
 #[test]
 fn er_diagram_zero_or_one_cardinality() {
     // Exercises ZeroOrOne rendering (circle + perp line)
-    let svg = render_svg(r#"erDiagram
+    let svg = render_svg(
+        r#"erDiagram
     PERSON ||--o| ADDRESS : "lives at"
-    EMPLOYEE |o--|| DEPARTMENT : belongs"#);
+    EMPLOYEE |o--|| DEPARTMENT : belongs"#,
+    );
     assert!(svg.contains("<svg"));
     assert!(svg.contains("PERSON"));
     assert!(svg.contains("ADDRESS"));
@@ -1550,11 +1558,13 @@ fn er_diagram_zero_or_one_cardinality() {
 #[test]
 fn er_diagram_all_cardinality_types() {
     // Exercises all four cardinality types in a single diagram
-    let svg = render_svg(r#"erDiagram
+    let svg = render_svg(
+        r#"erDiagram
     A ||--|| B : "only-one"
     C ||--o| D : "zero-or-one"
     E ||--|{ F : "one-or-more"
-    G ||--o{ H : "zero-or-more""#);
+    G ||--o{ H : "zero-or-more""#,
+    );
     assert!(svg.contains("<svg"));
     // OnlyOne: perp lines only (no circle, no crow's foot beyond these)
     assert!(svg.contains("A"));
@@ -1571,15 +1581,131 @@ fn er_diagram_all_cardinality_types() {
 #[test]
 fn er_diagram_attribute_with_comment() {
     // Exercises the comment column rendering
-    let svg = render_svg(r#"erDiagram
+    let svg = render_svg(
+        r#"erDiagram
     PRODUCT {
         int id PK
         string name
         float price FK "retail price"
-    }"#);
+    }"#,
+    );
     assert!(svg.contains("PRODUCT"));
     assert!(svg.contains("retail price"));
     assert!(svg.contains("PK"));
     assert!(svg.contains("FK"));
     assert!(svg.contains("opacity"));
+}
+
+// ===========================================================================
+// State Diagram — edge crossing regression tests
+// ===========================================================================
+
+/// #25: Fork, join, choice, and notes — no edges should cross.
+///
+/// MermaidJS achieves zero edge crossings for this diagram. Our layout should
+/// find a node ordering that avoids all crossings too.
+#[test]
+fn statediagram_fork_join_choice_no_edge_crossings() {
+    use mermaid_core::font::FontProvider;
+    use mermaid_core::layout::statediagram::layout_statediagram;
+    use mermaid_core::layout::text_measure::TextMeasurer;
+    use mermaid_core::parser::statediagram::parse_statediagram;
+
+    let source = r#"stateDiagram-v2
+    state fork_state <<fork>>
+    state join_state <<join>>
+    state if_state <<choice>>
+
+    [*] --> fork_state
+    fork_state --> TaskA
+    fork_state --> TaskB
+
+    TaskA --> join_state
+    TaskB --> join_state
+
+    join_state --> if_state
+
+    if_state --> Success : passed
+    if_state --> Failure : failed
+
+    Success --> [*]
+    Failure --> Retry
+    Retry --> fork_state
+
+    note right of if_state
+        Evaluate results
+        from both tasks
+    end note"#;
+
+    let ast = parse_statediagram(source).expect("should parse");
+    let provider = FontProvider::default_font();
+    let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
+    let diagram = layout_statediagram(&ast, &measurer).expect("should layout");
+
+    // Collect all edge polylines (skip the note edge which is invisible/dotted)
+    let edges: Vec<(&str, &str, &[(f64, f64)])> = diagram
+        .transitions
+        .iter()
+        .filter(|t| {
+            // Skip note edges (dotted, no arrow)
+            t.line_style != mermaid_core::ast::flowchart::LineStyle::Dotted
+        })
+        .map(|t| (t.from_id.as_str(), t.to_id.as_str(), t.points.as_slice()))
+        .collect();
+
+    // Check every pair of edges for segment crossings
+    let mut crossings = Vec::new();
+    for i in 0..edges.len() {
+        for j in (i + 1)..edges.len() {
+            let (from_i, to_i, pts_i) = &edges[i];
+            let (from_j, to_j, pts_j) = &edges[j];
+
+            // Skip edges that share an endpoint — those naturally meet at a node
+            if from_i == from_j || from_i == to_j || to_i == from_j || to_i == to_j {
+                continue;
+            }
+
+            // Check all segment pairs
+            for si in 0..pts_i.len().saturating_sub(1) {
+                for sj in 0..pts_j.len().saturating_sub(1) {
+                    if segments_cross(pts_i[si], pts_i[si + 1], pts_j[sj], pts_j[sj + 1]) {
+                        crossings.push(format!(
+                            "{}->{} seg {} crosses {}->{} seg {}",
+                            from_i, to_i, si, from_j, to_j, sj
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    assert!(
+        crossings.is_empty(),
+        "Expected zero edge crossings but found {}:\n{}",
+        crossings.len(),
+        crossings.join("\n")
+    );
+}
+
+/// Check if two line segments (p1-p2) and (p3-p4) properly cross each other.
+/// Returns false for collinear overlaps and endpoint touches.
+fn segments_cross(p1: (f64, f64), p2: (f64, f64), p3: (f64, f64), p4: (f64, f64)) -> bool {
+    let d1 = cross_product(p3, p4, p1);
+    let d2 = cross_product(p3, p4, p2);
+    let d3 = cross_product(p1, p2, p3);
+    let d4 = cross_product(p1, p2, p4);
+
+    // Proper crossing: both segments straddle each other (strict sign change)
+    if ((d1 > 0.0 && d2 < 0.0) || (d1 < 0.0 && d2 > 0.0))
+        && ((d3 > 0.0 && d4 < 0.0) || (d3 < 0.0 && d4 > 0.0))
+    {
+        return true;
+    }
+
+    false
+}
+
+/// Cross product of vectors (b-a) and (c-a).
+fn cross_product(a: (f64, f64), b: (f64, f64), c: (f64, f64)) -> f64 {
+    (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0)
 }

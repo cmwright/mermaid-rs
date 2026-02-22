@@ -520,6 +520,8 @@ mod tests {
             label: None,
             label_width: 0.0,
             label_height: 0.0,
+            weight: 1,
+            minlen: 1,
         }
     }
 
@@ -538,7 +540,10 @@ mod tests {
         let (ax, ay) = positions[&a];
         let (bx, by) = positions[&b];
         assert!(by > ay, "B should be below A in TB direction");
-        assert!((ax - bx).abs() < 1.0, "A and B should be vertically aligned");
+        assert!(
+            (ax - bx).abs() < 1.0,
+            "A and B should be vertically aligned"
+        );
     }
 
     #[test]
@@ -560,7 +565,10 @@ mod tests {
             ay > by,
             "In BT, A (rank 0) should have higher y than B (rank 1) (A.y={ay:.1}, B.y={by:.1})"
         );
-        assert!((ax - bx).abs() < 1.0, "A and B should be vertically aligned");
+        assert!(
+            (ax - bx).abs() < 1.0,
+            "A and B should be vertically aligned"
+        );
     }
 
     #[test]
@@ -578,7 +586,10 @@ mod tests {
         let (ax, ay) = positions[&a];
         let (bx, by) = positions[&b];
         assert!(bx > ax, "B should be to the right of A in LR direction");
-        assert!((ay - by).abs() < 1.0, "A and B should be horizontally aligned");
+        assert!(
+            (ay - by).abs() < 1.0,
+            "A and B should be horizontally aligned"
+        );
     }
 
     #[test]
@@ -621,7 +632,10 @@ mod tests {
         let (ax, ay) = positions[&a];
         let (bx, by) = positions[&b];
         assert!((ay - by).abs() < 0.1, "same rank nodes should have same y");
-        assert!((ax - bx).abs() > 10.0, "same rank nodes should have different x");
+        assert!(
+            (ax - bx).abs() > 10.0,
+            "same rank nodes should have different x"
+        );
     }
 
     #[test]
@@ -638,10 +652,12 @@ mod tests {
         membership.insert("A".to_string(), vec!["SG1".to_string()]);
         membership.insert("B".to_string(), vec!["SG2".to_string()]);
 
-        let positions_with_sg = assign_coordinates(&g, &layers, Direction::TopToBottom, &membership, 50.0);
+        let positions_with_sg =
+            assign_coordinates(&g, &layers, Direction::TopToBottom, &membership, 50.0);
 
         let empty_membership = SubgraphMembership::new();
-        let positions_no_sg = assign_coordinates(&g, &layers, Direction::TopToBottom, &empty_membership, 50.0);
+        let positions_no_sg =
+            assign_coordinates(&g, &layers, Direction::TopToBottom, &empty_membership, 50.0);
 
         let sep_with = (positions_with_sg[&a].0 - positions_with_sg[&b].0).abs();
         let sep_without = (positions_no_sg[&a].0 - positions_no_sg[&b].0).abs();
@@ -681,12 +697,17 @@ mod tests {
         membership.insert("A".to_string(), vec!["SG1".to_string()]);
         membership.insert("B".to_string(), vec!["SG2".to_string()]);
 
-        let positions_sg = assign_coordinates(&g, &layers, Direction::TopToBottom, &membership, 50.0);
+        let positions_sg =
+            assign_coordinates(&g, &layers, Direction::TopToBottom, &membership, 50.0);
         let empty_membership = SubgraphMembership::new();
-        let positions_no_sg = assign_coordinates(&g, &layers, Direction::TopToBottom, &empty_membership, 50.0);
+        let positions_no_sg =
+            assign_coordinates(&g, &layers, Direction::TopToBottom, &empty_membership, 50.0);
 
         let sep_sg = (positions_sg[&a].0 - positions_sg[&b].0).abs();
         let sep_no = (positions_no_sg[&a].0 - positions_no_sg[&b].0).abs();
-        assert!(sep_sg > sep_no, "subgraph gap should increase separation (with={sep_sg}, without={sep_no})");
+        assert!(
+            sep_sg > sep_no,
+            "subgraph gap should increase separation (with={sep_sg}, without={sep_no})"
+        );
     }
 }

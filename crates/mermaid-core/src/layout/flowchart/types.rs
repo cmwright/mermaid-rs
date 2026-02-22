@@ -84,4 +84,8 @@ pub struct EdgeData {
     pub arrow_end: ArrowEnd,
     pub label_width: f64,
     pub label_height: f64,
+    /// Edge weight for rank assignment (network simplex). Higher weight = shorter edge preferred.
+    pub weight: i64,
+    /// Minimum number of ranks this edge must span.
+    pub minlen: usize,
 }

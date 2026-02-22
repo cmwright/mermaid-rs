@@ -110,6 +110,8 @@ mod tests {
             label: None,
             label_width: 0.0,
             label_height: 0.0,
+            weight: 1,
+            minlen: 1,
         }
     }
 
@@ -189,7 +191,10 @@ mod tests {
         let reversed = remove_cycles(&mut g);
         // Should handle multiple cycles
         let topo = petgraph::algo::toposort(&g, None);
-        assert!(topo.is_ok(), "graph should be acyclic after removing multiple cycles");
+        assert!(
+            topo.is_ok(),
+            "graph should be acyclic after removing multiple cycles"
+        );
 
         // Restore
         restore_cycles(&mut g, &reversed);
