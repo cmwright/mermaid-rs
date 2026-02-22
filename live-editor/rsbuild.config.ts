@@ -1,5 +1,7 @@
 import { defineConfig } from '@rsbuild/core';
 
+const publicPath = process.env.PUBLIC_PATH || '/';
+
 export default defineConfig({
   source: {
     entry: {
@@ -8,6 +10,9 @@ export default defineConfig({
   },
   html: {
     template: './index.html',
+    tags: publicPath !== '/'
+      ? [{ tag: 'base', attrs: { href: publicPath }, head: true, append: false }]
+      : [],
   },
   tools: {
     postcss: {
@@ -27,6 +32,7 @@ export default defineConfig({
     distPath: {
       root: '../target/live-editor',
     },
+    assetPrefix: publicPath,
     copy: [
       {
         from: './public',

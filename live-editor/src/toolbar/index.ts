@@ -11,10 +11,21 @@ export interface ToolbarConfig {
 }
 
 export function createToolbar(config: ToolbarConfig): void {
+  // Group examples by category
+  const categories = new Map<string, typeof examples>();
+  for (const e of examples) {
+    if (!categories.has(e.category)) categories.set(e.category, []);
+    categories.get(e.category)!.push(e);
+  }
+  const optgroups = Array.from(categories.entries())
+    .map(([cat, items]) =>
+      `<optgroup label="${escapeHtml(cat)}">${items.map(e => `<option value="${escapeHtml(e.name)}">${escapeHtml(e.name)}</option>`).join('')}</optgroup>`
+    ).join('');
+
   config.container.innerHTML = `
     <select id="example-select" class="toolbar-select">
       <option value="">Load Example...</option>
-      ${examples.map(e => `<option value="${escapeHtml(e.name)}">${escapeHtml(e.name)}</option>`).join('')}
+      ${optgroups}
     </select>
     
     <select id="theme-select" class="toolbar-select">

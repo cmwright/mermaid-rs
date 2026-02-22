@@ -24,10 +24,14 @@ async function loadWasmInternal(): Promise<void> {
   try {
     console.log('Loading WASM module...');
 
+    // Resolve the WASM JS path relative to the document so it works
+    // both at the root (local dev) and under a subpath (GitHub Pages).
+    const wasmUrl = new URL('wasm/mermaid_wasm.js', document.baseURI).href;
+
     // Use webpackIgnore to bypass rspack's module resolution and use native
     // browser import(). This lets the browser load the wasm-pack generated JS
     // directly, where import.meta.url resolves correctly for the WASM binary.
-    const wasm = await import(/* webpackIgnore: true */ '/wasm/mermaid_wasm.js');
+    const wasm = await import(/* webpackIgnore: true */ wasmUrl);
 
     console.log('WASM JS module imported:', Object.keys(wasm));
 
