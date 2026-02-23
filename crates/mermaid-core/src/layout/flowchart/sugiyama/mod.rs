@@ -71,11 +71,10 @@ pub fn layout(
     // ranks and normalizes to zero-based.
     nesting_graph::cleanup(graph, &mut ranks, &nesting_state);
 
-    // Phase 4b: Temporary compatibility: align sibling subgraph ranks.
-    // The nesting graph ensures containment but doesn't enforce vertical
-    // separation between sibling subgraphs. Border segments + recursive
-    // ordering (not yet implemented) will handle this properly. Until then,
-    // keep the alignment hacks as a fallback.
+    // Phase 4b: Align sibling subgraph ranks.
+    // The nesting graph ensures containment but doesn't fully enforce vertical
+    // separation between sibling subgraphs. These alignment passes fill that gap
+    // until the recursive ordering + border segments can handle it alone.
     rank_assignment::align_sibling_subgraph_ranks(graph, &mut ranks, ast, membership);
     rank_assignment::align_within_subgraph_peers(graph, &mut ranks, membership, ast);
 

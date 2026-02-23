@@ -62,7 +62,7 @@ pub fn layout_statediagram(
     let membership = graph_builder::build_subgraph_membership(&fc_ast);
 
     // Run Sugiyama with correct node sizes
-    let mut result = sugiyama::layout(&mut graph, fc_ast.direction, &membership, &fc_ast);
+    let result = sugiyama::layout(&mut graph, fc_ast.direction, &membership, &fc_ast);
 
     // Build positioned nodes
     let mut positioned_nodes = flowchart::build_positioned_nodes(&graph, &result.positions);
@@ -74,32 +74,6 @@ pub fn layout_statediagram(
         &fc_ast.style_overrides,
         measurer,
         &membership,
-    );
-
-    // Separate overlapping sibling subgraphs
-    compound::separate_overlapping_sibling_subgraphs(
-        &fc_ast,
-        &membership,
-        &mut positioned_nodes,
-        &positioned_subgraphs,
-        &all_edges,
-        is_horizontal,
-    );
-    positioned_subgraphs = compound::position_subgraphs(
-        &fc_ast.subgraphs,
-        &positioned_nodes,
-        &fc_ast.style_overrides,
-        measurer,
-        &membership,
-    );
-
-    // Sync dummy positions
-    flowchart::sync_dummy_positions(
-        &graph,
-        &result.dummy_chains,
-        &positioned_nodes,
-        &mut result.positions,
-        &positioned_subgraphs,
     );
 
     // Extract bend points and route edges
@@ -211,11 +185,7 @@ fn inject_bidi_phantom_widths(
 
 /// Wrap note labels to a maximum pixel width so notes don't stretch too wide.
 /// Modifies the FlowchartAst node labels in-place for nodes identified as notes.
-fn wrap_note_labels(
-    fc_ast: &mut FlowchartAst,
-    note_ids: &[String],
-    measurer: &TextMeasurer<'_>,
-) {
+fn wrap_note_labels(fc_ast: &mut FlowchartAst, note_ids: &[String], measurer: &TextMeasurer<'_>) {
     let max_note_width = 200.0;
 
     fn wrap_in_nodes(
@@ -272,10 +242,7 @@ fn collect_kinds(
 }
 
 /// Convert a StateDiagramAst into a FlowchartAst.
-fn convert_to_flowchart_ast(
-    ast: &StateDiagramAst,
-    note_ids: &mut Vec<String>,
-) -> FlowchartAst {
+fn convert_to_flowchart_ast(ast: &StateDiagramAst, note_ids: &mut Vec<String>) -> FlowchartAst {
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
     let mut subgraphs = Vec::new();
@@ -521,8 +488,7 @@ fn separate_bidirectional_edges(transitions: &mut [PositionedTransition]) {
         let bow = (len * 0.45).clamp(25.0, 60.0);
 
         // Edge i: bow in +perpendicular direction
-        transitions[i].raw_path_d =
-            Some(make_cubic_bezier_bow(sx, sy, ex, ey, px, py, bow));
+        transitions[i].raw_path_d = Some(make_cubic_bezier_bow(sx, sy, ex, ey, px, py, bow));
 
         // Edge j: bow in -perpendicular direction
         let (sx_j, sy_j) = pts_j[0];
@@ -559,15 +525,7 @@ fn separate_bidirectional_edges(transitions: &mut [PositionedTransition]) {
 /// Build an SVG cubic bezier path `d` attribute for a bowed edge.
 /// Uses a single `C` command with control points offset perpendicular to the
 /// edge direction, creating a smooth arc without B-spline smoothing.
-fn make_cubic_bezier_bow(
-    sx: f64,
-    sy: f64,
-    ex: f64,
-    ey: f64,
-    px: f64,
-    py: f64,
-    bow: f64,
-) -> String {
+fn make_cubic_bezier_bow(sx: f64, sy: f64, ex: f64, ey: f64, px: f64, py: f64, bow: f64) -> String {
     // Control points at 1/3 and 2/3 along the edge, both offset by bow
     let cx1 = sx + (ex - sx) * 0.33 + px * bow;
     let cy1 = sy + (ey - sy) * 0.33 + py * bow;
@@ -724,9 +682,8 @@ fn adjust_labels_for_nodes(
                     (push_up.abs(), 0.0, push_up),
                     (push_down.abs(), 0.0, push_down),
                 ];
-                if let Some(&(_, dx, dy)) = options
-                    .iter()
-                    .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
+                if let Some(&(_, dx, dy)) =
+                    options.iter().min_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
                 {
                     cur_x += dx;
                     cur_y += dy;
@@ -759,10 +716,7 @@ fn convert_from_flowchart_result(
                 height: node.height,
             });
         } else {
-            let kind = kind_map
-                .get(&node.id)
-                .copied()
-                .unwrap_or(StateKind::Normal);
+            let kind = kind_map.get(&node.id).copied().unwrap_or(StateKind::Normal);
             states.push(PositionedState {
                 id: node.id.clone(),
                 label: node.label.clone(),
