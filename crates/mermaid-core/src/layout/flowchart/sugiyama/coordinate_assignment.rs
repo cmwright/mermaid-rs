@@ -101,6 +101,10 @@ fn brandes_kopf(
     // Pre-compute reversed layers once (instead of cloning in the loop)
     let reversed_layers: Vec<Vec<NodeIndex>> = layers.iter().rev().cloned().collect();
 
+    // Detect type-1 and type-2 conflicts once (same for all 4 passes).
+    // Type-2 conflicts: edges that would cross a border node boundary.
+    let conflicts = find_type2_conflicts(graph, layers);
+
     for vert in 0..2u8 {
         // vert=0: up (top-to-bottom layers, predecessors)
         // vert=1: down (bottom-to-top layers, successors)
@@ -108,7 +112,6 @@ fn brandes_kopf(
 
         for horiz in 0..2u8 {
             // horiz=0: left (normal order), horiz=1: right (reversed)
-            // Build final_layers only when horiz=1 (reversed order within each layer)
             let reversed_within: Vec<Vec<NodeIndex>>;
             let final_layers: &[Vec<NodeIndex>] = if horiz == 0 {
                 base_layers
@@ -121,7 +124,8 @@ fn brandes_kopf(
             };
 
             let use_preds = vert == 0;
-            let root = vertical_alignment(graph, final_layers, use_preds);
+            let reverse_sep = horiz == 1;
+            let root = vertical_alignment(graph, final_layers, use_preds, &conflicts);
 
             let mut xs = horizontal_compaction(
                 graph,
@@ -130,6 +134,7 @@ fn brandes_kopf(
                 is_horizontal,
                 membership,
                 empty_path,
+                reverse_sep,
             );
 
             // For right-biased, negate coordinates
@@ -165,12 +170,117 @@ fn brandes_kopf(
     result
 }
 
+// ─────────────────────────────────────────────────────────────
+// Type-2 conflict detection — matches dagre's findType2Conflicts
+// ─────────────────────────────────────────────────────────────
+
+/// A conflict between two nodes: alignment between them should be avoided.
+/// Key: (min_index, max_index) ordered pair.
+type ConflictSet = HashSet<(NodeIndex, NodeIndex)>;
+
+fn conflict_key(a: NodeIndex, b: NodeIndex) -> (NodeIndex, NodeIndex) {
+    if a.index() < b.index() {
+        (a, b)
+    } else {
+        (b, a)
+    }
+}
+
+fn has_conflict(conflicts: &ConflictSet, a: NodeIndex, b: NodeIndex) -> bool {
+    conflicts.contains(&conflict_key(a, b))
+}
+
+/// Detect type-2 conflicts: edges that cross border node boundaries.
+///
+/// Border nodes partition each layer into segments. An inner-segment edge
+/// (dummy→dummy) that crosses a border node's predecessor position creates
+/// a type-2 conflict. These edges should not be aligned vertically.
+fn find_type2_conflicts(
+    graph: &DiGraph<NodeData, EdgeData>,
+    layers: &[Vec<NodeIndex>],
+) -> ConflictSet {
+    let mut conflicts = ConflictSet::new();
+
+    // Build position map for each layer
+    let pos_maps: Vec<HashMap<NodeIndex, usize>> = layers
+        .iter()
+        .map(|layer| layer.iter().enumerate().map(|(i, &n)| (n, i)).collect())
+        .collect();
+
+    // For each pair of adjacent layers (north, south), find type-2 conflicts.
+    // dagre scans the south layer looking for border nodes, and checks if
+    // inner-segment edges within each border-bounded segment cross the border.
+    for li in 1..layers.len() {
+        let north = &layers[li - 1];
+        let south = &layers[li];
+        let north_pos = &pos_maps[li - 1];
+
+        let mut prev_north_border_pos: i64 = -1;
+        let mut prev_south_pos: usize = 0;
+
+        for (south_idx, &south_node) in south.iter().enumerate() {
+            // Check if this south node is a border node
+            let is_border = graph[south_node].id.starts_with("__border_");
+
+            if !is_border && south_idx < south.len() - 1 {
+                continue;
+            }
+
+            // Find the north predecessor position of this border node (or end of layer)
+            let north_border_pos = if is_border {
+                // Find the predecessor of this border node in the north layer
+                graph
+                    .neighbors_directed(south_node, petgraph::Direction::Incoming)
+                    .filter_map(|n| north_pos.get(&n).copied())
+                    .next()
+                    .map(|p| p as i64)
+                    .unwrap_or(north.len() as i64)
+            } else {
+                north.len() as i64
+            };
+
+            // Check inner-segment edges in the segment [prev_south_pos..south_idx]
+            // that cross the [prev_north_border_pos..north_border_pos] boundary.
+            for scan_idx in prev_south_pos..=south_idx {
+                let scan_node = south[scan_idx];
+                let scan_is_dummy = graph[scan_node].id.starts_with("__dummy_");
+
+                for pred in graph.neighbors_directed(scan_node, petgraph::Direction::Incoming) {
+                    if let Some(&pred_pos) = north_pos.get(&pred) {
+                        let pred_is_dummy = graph[pred].id.starts_with("__dummy_");
+
+                        // Only flag inner-segment (dummy-to-dummy) edges that cross
+                        // the border boundary.
+                        if scan_is_dummy && pred_is_dummy {
+                            let pp = pred_pos as i64;
+                            if pp < prev_north_border_pos || pp > north_border_pos {
+                                conflicts.insert(conflict_key(scan_node, pred));
+                            }
+                        }
+                    }
+                }
+            }
+
+            prev_south_pos = south_idx;
+            prev_north_border_pos = north_border_pos;
+        }
+    }
+
+    conflicts
+}
+
+// ─────────────────────────────────────────────────────────────
+// Vertical alignment — with conflict awareness
+// ─────────────────────────────────────────────────────────────
+
 /// Form vertical blocks by aligning each node with its median neighbor
-/// in the adjacent layer. Returns root map (node → block root).
+/// in the adjacent layer. Skips edges that have type-2 conflicts.
+/// Returns root map (node → block root).
 fn vertical_alignment(
     graph: &DiGraph<NodeData, EdgeData>,
     layers: &[Vec<NodeIndex>],
     use_predecessors: bool,
+    conflicts: &ConflictSet,
 ) -> HashMap<NodeIndex, NodeIndex> {
     let total: usize = layers.iter().map(|l| l.len()).sum();
     let mut root: HashMap<NodeIndex, NodeIndex> = HashMap::with_capacity(total);
@@ -215,7 +325,8 @@ fn vertical_alignment(
 
             for &w in ws.iter().take(hi + 1).skip(lo) {
                 let w_pos = pos.get(&w).copied().unwrap_or(0) as i64;
-                if align[&v] == v && prev_idx < w_pos {
+                // Skip alignment if there's a type-2 conflict between v and w
+                if align[&v] == v && prev_idx < w_pos && !has_conflict(conflicts, v, w) {
                     // Form block: w → v, and v joins w's block
                     align.insert(w, v);
                     let rw = root[&w];
@@ -232,6 +343,10 @@ fn vertical_alignment(
 
 /// Assign cross-axis coordinates via block-graph compaction.
 /// Two passes: left-to-right placement, then right-to-left compaction.
+///
+/// `reverse_sep`: when true (right-biased pass), border-left nodes are pinned;
+/// when false (left-biased pass), border-right nodes are pinned.
+/// This matches dagre's pass2 border-type-aware compaction.
 fn horizontal_compaction(
     graph: &DiGraph<NodeData, EdgeData>,
     layers: &[Vec<NodeIndex>],
@@ -239,6 +354,7 @@ fn horizontal_compaction(
     is_horizontal: bool,
     membership: &SubgraphMembership,
     empty_path: &[String],
+    reverse_sep: bool,
 ) -> HashMap<NodeIndex, f64> {
     // Build block graph: out_edges[from_root][to_root] = min_separation
     let mut out_edges: HashMap<NodeIndex, HashMap<NodeIndex, f64>> = HashMap::new();
@@ -329,8 +445,33 @@ fn horizontal_compaction(
         xs.insert(block, x);
     }
 
-    // Pass 2: right-to-left compaction
+    // Pass 2: right-to-left compaction with border-type awareness.
+    // dagre's pass2 skips compaction for border nodes whose borderType matches
+    // the current direction. In a left-biased pass (reverse_sep=false),
+    // borderRight nodes are pinned (they resist leftward pull). In a right-biased
+    // pass (reverse_sep=true), borderLeft nodes are pinned.
+    //
+    // Note: we only check for border nodes that are block roots to avoid
+    // scanning all layers for each block. This is a pragmatic simplification.
+    let pin_border_type = if reverse_sep {
+        "__border_bl_"
+    } else {
+        "__border_br_"
+    };
+
+    // Pre-compute which blocks contain pinned border nodes.
+    let pinned_blocks: HashSet<NodeIndex> = layers
+        .iter()
+        .flat_map(|layer| layer.iter())
+        .filter(|&&v| graph[v].id.starts_with(pin_border_type))
+        .map(|&v| root[&v])
+        .collect();
+
     for &block in topo.iter().rev() {
+        if pinned_blocks.contains(&block) {
+            continue;
+        }
+
         if let Some(succs) = out_edges.get(&block) {
             let min_succ = succs
                 .iter()
@@ -367,8 +508,12 @@ fn node_separation(
     let un = &graph[u];
     let vn = &graph[v];
 
-    let u_is_dummy = un.id.starts_with("__dummy_");
-    let v_is_dummy = vn.id.starts_with("__dummy_");
+    let u_is_dummy = un.id.starts_with("__dummy_")
+        || un.id.starts_with("__border_")
+        || un.id.starts_with("__nesting_");
+    let v_is_dummy = vn.id.starts_with("__dummy_")
+        || vn.id.starts_with("__border_")
+        || vn.id.starts_with("__nesting_");
 
     let u_size = if is_horizontal { un.height } else { un.width };
     let v_size = if is_horizontal { vn.height } else { vn.width };

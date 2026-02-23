@@ -48,6 +48,10 @@ pub fn assign_ranks(graph: &DiGraph<NodeData, EdgeData>) -> HashMap<NodeIndex, u
     for (&node, &cid) in &component_id {
         components[cid].push(node);
     }
+    // Deterministic ordering within each component
+    for comp in &mut components {
+        comp.sort_unstable();
+    }
 
     let mut ranks: HashMap<NodeIndex, usize> = HashMap::new();
 
@@ -80,6 +84,120 @@ pub fn assign_ranks(graph: &DiGraph<NodeData, EdgeData>) -> HashMap<NodeIndex, u
 
     // Safety: any node not yet assigned gets rank 0
     for node in graph.node_indices() {
+        ranks.entry(node).or_insert(0);
+    }
+
+    ranks
+}
+
+/// Network simplex rank assignment on a non-compound graph, matching dagre's
+/// `rank(util.asNonCompoundGraph(g))`.
+///
+/// `asNonCompoundGraph` strips nodes that have children in the compound graph —
+/// in dagre's case, this means subgraph container nodes (like "Files", "RBAC")
+/// and the nesting root. The nesting border nodes (bt, bb) are KEPT because
+/// they are leaf nodes in the compound hierarchy (children of subgraph nodes,
+/// but have no children themselves).
+///
+/// Inside network simplex, parallel edges are merged (sum weights, max minlen)
+/// matching dagre's `simplify`.
+pub fn assign_ranks_non_compound(
+    graph: &DiGraph<NodeData, EdgeData>,
+    nesting_state: &super::nesting_graph::NestingState,
+) -> HashMap<NodeIndex, usize> {
+    if graph.node_count() == 0 {
+        return HashMap::new();
+    }
+
+    // In dagre, asNonCompoundGraph strips nodes with children.
+    // The nesting root has children (everything connected to it) → strip it.
+    // Subgraph container nodes don't exist in our graph (we don't add them).
+    // The nesting bt/bb nodes are leaf nodes → KEEP them.
+    // So we only strip the root node.
+    let mut compound_nodes: HashSet<NodeIndex> = HashSet::new();
+    compound_nodes.insert(nesting_state.root);
+
+    // Collect leaf nodes (everything except compound nodes).
+    let leaf_nodes: Vec<NodeIndex> = graph
+        .node_indices()
+        .filter(|ni| !compound_nodes.contains(ni))
+        .collect();
+
+    if leaf_nodes.is_empty() {
+        return HashMap::new();
+    }
+
+    let leaf_set: HashSet<NodeIndex> = leaf_nodes.iter().copied().collect();
+
+    // Find connected components among leaf nodes (treating edges as undirected).
+    let mut component_id: HashMap<NodeIndex, usize> = HashMap::new();
+    let mut num_components = 0usize;
+
+    for &start in &leaf_nodes {
+        if component_id.contains_key(&start) {
+            continue;
+        }
+        let cid = num_components;
+        num_components += 1;
+        let mut queue = VecDeque::new();
+        queue.push_back(start);
+        component_id.insert(start, cid);
+        while let Some(node) = queue.pop_front() {
+            for neighbor in graph.neighbors_directed(node, petgraph::Direction::Outgoing) {
+                if leaf_set.contains(&neighbor) && !component_id.contains_key(&neighbor) {
+                    component_id.insert(neighbor, cid);
+                    queue.push_back(neighbor);
+                }
+            }
+            for neighbor in graph.neighbors_directed(node, petgraph::Direction::Incoming) {
+                if leaf_set.contains(&neighbor) && !component_id.contains_key(&neighbor) {
+                    component_id.insert(neighbor, cid);
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+    }
+
+    // Group leaf nodes by component
+    let mut components: Vec<Vec<NodeIndex>> = vec![Vec::new(); num_components];
+    for (&node, &cid) in &component_id {
+        components[cid].push(node);
+    }
+    // Deterministic ordering within each component
+    for comp in &mut components {
+        comp.sort_unstable();
+    }
+
+    let mut ranks: HashMap<NodeIndex, usize> = HashMap::new();
+
+    for comp_nodes in &components {
+        if comp_nodes.len() == 1 {
+            ranks.insert(comp_nodes[0], 0);
+            continue;
+        }
+
+        let comp_set: HashSet<NodeIndex> = comp_nodes.iter().copied().collect();
+        let has_edges = comp_nodes.iter().any(|&n| {
+            graph
+                .neighbors_directed(n, petgraph::Direction::Outgoing)
+                .any(|nb| comp_set.contains(&nb))
+        });
+
+        if !has_edges {
+            for &node in comp_nodes {
+                ranks.insert(node, 0);
+            }
+            continue;
+        }
+
+        let comp_ranks = network_simplex(graph, comp_nodes);
+        for (node, rank) in comp_ranks {
+            ranks.insert(node, rank);
+        }
+    }
+
+    // Safety: any leaf node not yet assigned gets rank 0
+    for &node in &leaf_nodes {
         ranks.entry(node).or_insert(0);
     }
 
@@ -219,6 +337,8 @@ fn ns_compute_cut_values(
 }
 
 /// Run the network simplex algorithm on a single connected component.
+/// Includes `simplify` (dagre's util.simplify): merges parallel edges between
+/// the same node pair by summing weights and taking max minlen.
 /// Returns a map from NodeIndex to rank (0-based, normalized).
 fn network_simplex(
     graph: &DiGraph<NodeData, EdgeData>,
@@ -227,7 +347,7 @@ fn network_simplex(
     let comp_set: HashSet<NodeIndex> = component.iter().copied().collect();
 
     // Collect directed edges within this component
-    let edges: Vec<(NodeIndex, NodeIndex, EdgeIndex)> = graph
+    let raw_edges: Vec<(NodeIndex, NodeIndex, EdgeIndex)> = graph
         .edge_indices()
         .filter_map(|ei| {
             let (src, tgt) = graph.edge_endpoints(ei).unwrap();
@@ -239,7 +359,7 @@ fn network_simplex(
         })
         .collect();
 
-    if edges.is_empty() {
+    if raw_edges.is_empty() {
         return component.iter().map(|&n| (n, 0)).collect();
     }
 
@@ -247,99 +367,176 @@ fn network_simplex(
     let node_to_local: HashMap<NodeIndex, usize> =
         component.iter().enumerate().map(|(i, &n)| (n, i)).collect();
     let n = component.len();
-    let m = edges.len();
 
-    let local_edges: Vec<(usize, usize)> = edges
-        .iter()
-        .map(|&(s, t, _)| (node_to_local[&s], node_to_local[&t]))
-        .collect();
+    // ── Simplify: merge parallel edges (dagre's util.simplify) ─────────
+    // For each (src, tgt) pair, sum weights and take max minlen.
+    let mut merged: HashMap<(usize, usize), (i64, i64)> = HashMap::new();
+    for &(src, tgt, ei) in &raw_edges {
+        let ls = node_to_local[&src];
+        let lt = node_to_local[&tgt];
+        let w = graph[ei].weight;
+        let ml = graph[ei].minlen as i64;
+        let entry = merged.entry((ls, lt)).or_insert((0, 1));
+        entry.0 += w; // sum weights
+        entry.1 = entry.1.max(ml); // max minlen
+    }
 
-    // Read edge weights and minlens from EdgeData
-    let edge_weights: Vec<i64> = edges.iter().map(|&(_, _, ei)| graph[ei].weight).collect();
-    let edge_minlens: Vec<i64> = edges
-        .iter()
-        .map(|&(_, _, ei)| graph[ei].minlen as i64)
-        .collect();
+    let mut local_edges: Vec<(usize, usize)> = merged.keys().copied().collect();
+    local_edges.sort_unstable(); // Deterministic edge ordering
+    let edge_weights: Vec<i64> = local_edges.iter().map(|k| merged[k].0).collect();
+    let edge_minlens: Vec<i64> = local_edges.iter().map(|k| merged[k].1).collect();
+    let m = local_edges.len();
 
     // ── Step 1: Initial feasible rank assignment via longest-path ───────
+    // Matches dagre's longestPath (rank/util.js) exactly:
+    //   - DFS from source nodes (no in-edges)
+    //   - Sinks (no out-edges) get rank 0
+    //   - For each node: rank = min(dfs(successor) - minlen)
+    //   - Produces negative ranks that get normalized later
     let mut rank: Vec<i64> = vec![0; n];
     {
-        let mut in_deg: Vec<usize> = vec![0; n];
         let mut out_adj: Vec<Vec<usize>> = vec![Vec::new(); n];
-        let mut in_adj: Vec<Vec<usize>> = vec![Vec::new(); n];
+        let mut in_count: Vec<usize> = vec![0; n];
         for (ei, &(s, t)) in local_edges.iter().enumerate() {
             out_adj[s].push(ei);
-            in_adj[t].push(ei);
-            in_deg[t] += 1;
+            in_count[t] += 1;
         }
 
-        // Kahn's algorithm for topological sort
-        let mut queue: VecDeque<usize> = VecDeque::new();
+        // dagre: g.sources().forEach(dfs)
+        // Sources are nodes with no incoming edges.
+        let sources: Vec<usize> = (0..n).filter(|&i| in_count[i] == 0).collect();
+
+        // Iterative DFS matching dagre's recursive dfs(v):
+        //   if visited[v] { return rank[v]; }
+        //   visited[v] = true;
+        //   rank[v] = min(dfs(w) - minlen for (v,w) in outEdges(v));
+        //   if no out-edges: rank[v] = 0;
+        let mut visited = vec![false; n];
+
+        // Stack frames: (node, adj_index, current_min)
+        // When adj_index == out_adj[node].len(), we've visited all successors.
+        let mut stack: Vec<(usize, usize, i64)> = Vec::new();
+
+        for &source in &sources {
+            if visited[source] {
+                continue;
+            }
+            stack.push((source, 0, i64::MAX));
+
+            while let Some(frame) = stack.last_mut() {
+                let node = frame.0;
+                let adj_idx = frame.1;
+
+                if !visited[node] && adj_idx == 0 {
+                    // First visit: mark as in-progress
+                    // (We don't mark visited yet — dagre checks visited at
+                    // entry and returns early. We mark after processing.)
+                }
+
+                if adj_idx < out_adj[node].len() {
+                    let ei = out_adj[node][adj_idx];
+                    let (_, t) = local_edges[ei];
+                    frame.1 += 1; // advance to next adjacency
+
+                    if visited[t] {
+                        // Successor already computed — use its rank
+                        let candidate = rank[t] - edge_minlens[ei];
+                        if candidate < frame.2 {
+                            frame.2 = candidate;
+                        }
+                    } else {
+                        // Need to recurse into successor first
+                        stack.push((t, 0, i64::MAX));
+                    }
+                } else {
+                    // All successors processed — compute rank for this node
+                    let (node, _, current_min) = stack.pop().unwrap();
+                    if visited[node] {
+                        // Already computed (can happen with diamond patterns)
+                        // Update parent frame if needed
+                        if let Some(parent_frame) = stack.last_mut() {
+                            let parent_node = parent_frame.0;
+                            let parent_adj_idx = parent_frame.1 - 1;
+                            let ei = out_adj[parent_node][parent_adj_idx];
+                            let candidate = rank[node] - edge_minlens[ei];
+                            if candidate < parent_frame.2 {
+                                parent_frame.2 = candidate;
+                            }
+                        }
+                        continue;
+                    }
+
+                    // dagre: rank = POSITIVE_INFINITY means no out-edges → rank = 0
+                    rank[node] = if current_min == i64::MAX {
+                        0
+                    } else {
+                        current_min
+                    };
+                    visited[node] = true;
+
+                    // Propagate result back to parent frame
+                    if let Some(parent_frame) = stack.last_mut() {
+                        let parent_node = parent_frame.0;
+                        let parent_adj_idx = parent_frame.1 - 1;
+                        let ei = out_adj[parent_node][parent_adj_idx];
+                        let candidate = rank[node] - edge_minlens[ei];
+                        if candidate < parent_frame.2 {
+                            parent_frame.2 = candidate;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Safety: any unvisited nodes (disconnected) get rank 0
+        // (dagre only calls dfs from sources, but the graph should be connected
+        // within a component after simplification)
         for i in 0..n {
-            if in_deg[i] == 0 {
-                queue.push_back(i);
-            }
-        }
-
-        let mut topo_order: Vec<usize> = Vec::with_capacity(n);
-        while let Some(node) = queue.pop_front() {
-            topo_order.push(node);
-            for &ei in &out_adj[node] {
-                let (_, t) = local_edges[ei];
-                in_deg[t] -= 1;
-                if in_deg[t] == 0 {
-                    queue.push_back(t);
-                }
-            }
-        }
-
-        // Handle any nodes not reached (cycles)
-        if topo_order.len() < n {
-            let in_topo: HashSet<usize> = topo_order.iter().copied().collect();
-            for i in 0..n {
-                if !in_topo.contains(&i) {
-                    topo_order.push(i);
-                }
-            }
-        }
-
-        // Longest-path: rank[t] = max(rank[s] + minlen) over all predecessors
-        for &node in &topo_order {
-            for &ei in &in_adj[node] {
-                let (src, _) = local_edges[ei];
-                let candidate = rank[src] + edge_minlens[ei];
-                if candidate > rank[node] {
-                    rank[node] = candidate;
-                }
+            if !visited[i] {
+                rank[i] = 0;
             }
         }
     }
 
     // ── Step 2: Build initial feasible spanning tree ────────────────────
-    // Start from tight edges (slack == 0), then add non-tight edges
-    // adjusting ranks to make them tight.
+    // Matches dagre's feasibleTree (rank/feasible-tree.js) exactly:
+    //   1. Start with an arbitrary node (node 0)
+    //   2. Grow maximal tight tree via DFS (tightTree)
+    //   3. If tree doesn't span all nodes:
+    //      a. Find minimum slack edge crossing tree boundary (findMinSlackEdge)
+    //      b. Shift ALL tree node ranks by delta (shiftRanks)
+    //      c. Repeat from step 2
 
     let mut tree_edge: Vec<bool> = vec![false; m];
     let mut in_tree: Vec<bool> = vec![false; n];
     let mut tree_edge_count: usize = 0;
 
-    // Gather tight edges (undirected adjacency)
-    let mut tight_adj: Vec<Vec<(usize, usize)>> = vec![Vec::new(); n];
+    // Start with node 0 in the tree
+    in_tree[0] = true;
+
+    // Build undirected adjacency for all edges (not just tight ones)
+    let mut all_adj: Vec<Vec<(usize, usize)>> = vec![Vec::new(); n];
     for (ei, &(s, t)) in local_edges.iter().enumerate() {
-        let slack = rank[t] - rank[s] - edge_minlens[ei];
-        if slack == 0 {
-            tight_adj[s].push((t, ei));
-            tight_adj[t].push((s, ei));
-        }
+        all_adj[s].push((t, ei));
+        all_adj[t].push((s, ei));
     }
 
-    // DFS to build spanning tree from tight edges, starting at node 0
-    in_tree[0] = true;
-    {
-        let mut stack: Vec<usize> = vec![0];
+    // Repeat: grow tight tree, then shift ranks if needed
+    loop {
+        // tightTree: DFS from all current tree nodes, adding tight edges.
+        // dagre: `function tightTree(t, g) { t.nodes().forEach(dfs); }`
+        // The DFS adds any neighbor connected by a tight edge (slack == 0).
+        let tree_nodes: Vec<usize> = (0..n).filter(|&i| in_tree[i]).collect();
+        let mut stack: Vec<usize> = tree_nodes;
         while let Some(node) = stack.pop() {
-            for &(nb, ei) in &tight_adj[node] {
-                if !in_tree[nb] {
+            for &(nb, ei) in &all_adj[node] {
+                if in_tree[nb] {
+                    continue;
+                }
+                // Check if this edge is tight (slack == 0)
+                let (s, t) = local_edges[ei];
+                let slack = rank[t] - rank[s] - edge_minlens[ei];
+                if slack == 0 {
                     in_tree[nb] = true;
                     tree_edge[ei] = true;
                     tree_edge_count += 1;
@@ -347,64 +544,40 @@ fn network_simplex(
                 }
             }
         }
-    }
 
-    // If the tight-edge tree doesn't span all nodes, greedily add non-tight
-    // edges and adjust ranks to make them tight.
-    if tree_edge_count < n - 1 {
-        let mut progress = true;
-        while tree_edge_count < n - 1 && progress {
-            progress = false;
-            for ei in 0..m {
-                if tree_edge[ei] {
-                    continue;
-                }
-                let (s, t) = local_edges[ei];
-                if in_tree[s] == in_tree[t] {
-                    continue;
-                }
+        if tree_edge_count >= n - 1 {
+            break; // All nodes in tree
+        }
 
-                // One endpoint in tree, other not. Add edge and make it tight.
-                let added = if in_tree[s] && !in_tree[t] {
-                    rank[t] = rank[s] + edge_minlens[ei];
-                    in_tree[t] = true;
-                    t
-                } else {
-                    rank[s] = rank[t] - edge_minlens[ei];
-                    in_tree[s] = true;
-                    s
-                };
-                tree_edge[ei] = true;
-                tree_edge_count += 1;
-                progress = true;
-
-                // BFS to find more tight edges from the added node
-                let mut bfs = VecDeque::new();
-                bfs.push_back(added);
-                while let Some(node) = bfs.pop_front() {
-                    for ej in 0..m {
-                        if tree_edge[ej] {
-                            continue;
-                        }
-                        let (es, et) = local_edges[ej];
-                        if es == node && !in_tree[et] {
-                            if rank[et] - rank[es] == edge_minlens[ej] {
-                                in_tree[et] = true;
-                                tree_edge[ej] = true;
-                                tree_edge_count += 1;
-                                bfs.push_back(et);
-                            }
-                        } else if et == node && !in_tree[es] {
-                            if rank[et] - rank[es] == edge_minlens[ej] {
-                                in_tree[es] = true;
-                                tree_edge[ej] = true;
-                                tree_edge_count += 1;
-                                bfs.push_back(es);
-                            }
-                        }
-                    }
+        // findMinSlackEdge: find edge with smallest slack crossing tree boundary.
+        // dagre: edge where exactly one endpoint is in tree.
+        let mut min_slack = i64::MAX;
+        let mut min_edge: Option<usize> = None;
+        for ei in 0..m {
+            let (s, t) = local_edges[ei];
+            if in_tree[s] != in_tree[t] {
+                let slack = rank[t] - rank[s] - edge_minlens[ei];
+                if slack < min_slack {
+                    min_slack = slack;
+                    min_edge = Some(ei);
                 }
             }
+        }
+
+        // shiftRanks: shift all tree node ranks by delta.
+        // dagre: delta = t.hasNode(edge.v) ? slack : -slack
+        // If the source of the min-slack edge is in the tree, shift tree up by +slack.
+        // If the target is in the tree, shift tree down by -slack.
+        if let Some(ei) = min_edge {
+            let (s, _t) = local_edges[ei];
+            let delta = if in_tree[s] { min_slack } else { -min_slack };
+            for i in 0..n {
+                if in_tree[i] {
+                    rank[i] += delta;
+                }
+            }
+        } else {
+            break; // No crossing edge found (disconnected graph)
         }
     }
 
@@ -441,54 +614,50 @@ fn network_simplex(
     // ── Step 5: Pivot loop ──────────────────────────────────────────────
     let max_iterations = (n * m).max(n * n) + 1;
     for _iter in 0..max_iterations {
-        // Find a tree edge with the most negative cut value (leaving edge)
+        // leaveEdge: find FIRST tree edge with negative cut value.
+        // dagre: tree.edges().find(e => tree.edge(e).cutvalue < 0)
+        // Note: dagre finds the FIRST (not most negative), so order matters.
         let leaving = {
-            let mut best: Option<usize> = None;
-            let mut best_val: i64 = 0;
+            let mut found: Option<usize> = None;
             for ei in 0..m {
-                if tree_edge[ei] && cut_value[ei] < best_val {
-                    best_val = cut_value[ei];
-                    best = Some(ei);
+                if tree_edge[ei] && cut_value[ei] < 0 {
+                    found = Some(ei);
+                    break;
                 }
             }
-            match best {
+            match found {
                 Some(e) => e,
                 None => break, // Optimal - no negative cut values
             }
         };
 
-        // Determine the tail component (the child's subtree)
+        // enterEdge: matching dagre's enterEdge(t, g, edge) exactly.
+        //
+        // 1. Find the graph direction: v is tail (source), w is head (target).
+        //    In our local_edges, (s, t) = (source, target) in the directed graph.
         let (ls, lt) = local_edges[leaving];
-        let tail_root = if par[lt] == Some(ls) {
-            lt
-        } else if par[ls] == Some(lt) {
-            ls
+
+        // 2. Determine which subtree is the "tail" component.
+        //    dagre: if (vLabel.lim > wLabel.lim) → root is in v's subtree,
+        //    so tailLabel = wLabel, flip = true.
+        //
+        //    In our tree: lim[v] > lim[w] means v's post-order number is higher,
+        //    so v is closer to the root (or IS the root). The tail component
+        //    (the one that would be disconnected) is w's subtree.
+        let (tail_root, flip) = if lim[ls] > lim[lt] {
+            (lt, true) // root is in ls's side, tail = lt's subtree
         } else {
-            lt // fallback
+            (ls, false) // root is in lt's side, tail = ls's subtree
         };
 
-        // Find the entering edge: non-tree edge with minimum slack crossing
-        // the partition. The entering edge replaces the leaving edge.
+        // 3. Filter candidates: non-tree edges where
+        //    flip === isDescendant(edge.v, tailLabel) &&
+        //    flip !== isDescendant(edge.w, tailLabel)
         //
-        // For a tree edge with negative cut value, we need a non-tree edge
-        // that connects across the cut and would improve the objective.
-        // Specifically, we look for edges that "go against" the surplus:
-        // - If the tree edge is s->t with tail_root=t (child=t),
-        //   and cut_value < 0 means too much flow head->tail,
-        //   we want non-tree edges going from head to tail (to tighten).
-        //   Actually, for the standard NS algorithm:
-        //   We want non-tree edges (u,v) where exactly one of u,v is in the
-        //   tail component AND the edge direction is from the component with
-        //   "too many edges" leaving it.
-        //
-        // The correct rule (matching dagre/Graphviz):
-        // For a leaving edge with negative cut value:
-        //   - If tail_root is the target of the original directed edge (tail_root == lt
-        //     when par[lt] == Some(ls)), then we look for non-tree edges where
-        //     the target is NOT in tail (edge goes tail -> head) with minimum slack.
-        //   Wait - let's just use the standard approach: scan all non-tree edges
-        //   crossing the cut and pick the one with minimum slack.
-
+        // When flip=false: edge.v NOT in tail, edge.w in tail
+        //   → edge goes from head component into tail component
+        // When flip=true: edge.v in tail, edge.w NOT in tail
+        //   → edge goes from tail component into head component
         let mut entering: Option<usize> = None;
         let mut min_slack: i64 = i64::MAX;
 
@@ -497,22 +666,17 @@ fn network_simplex(
                 continue;
             }
             let (es, et) = local_edges[ei];
-            let s_in_tail = ns_in_subtree(es, tail_root, &low, &lim);
-            let t_in_tail = ns_in_subtree(et, tail_root, &low, &lim);
+            let v_in_tail = ns_in_subtree(es, tail_root, &low, &lim);
+            let w_in_tail = ns_in_subtree(et, tail_root, &low, &lim);
 
-            // Must cross the partition
-            if s_in_tail == t_in_tail {
-                continue;
-            }
-
-            let slack = rank[et] - rank[es] - edge_minlens[ei];
-            if slack < 0 {
-                continue;
-            }
-
-            if slack < min_slack {
-                min_slack = slack;
-                entering = Some(ei);
+            // dagre: flip === isDescendant(edge.v, tailLabel) &&
+            //        flip !== isDescendant(edge.w, tailLabel)
+            if (flip == v_in_tail) && (flip != w_in_tail) {
+                let slack = rank[et] - rank[es] - edge_minlens[ei];
+                if slack < min_slack {
+                    min_slack = slack;
+                    entering = Some(ei);
+                }
             }
         }
 
@@ -521,14 +685,12 @@ fn network_simplex(
             None => break,
         };
 
-        // Compute the rank shift delta to make the entering edge tight
+        // exchangeEdges + updateRanks:
+        // Compute rank shift delta to make the entering edge tight.
         let (es, et) = local_edges[entering];
         let s_in_tail = ns_in_subtree(es, tail_root, &low, &lim);
         let slack = rank[et] - rank[es] - edge_minlens[entering];
 
-        // If the entering edge source is in the tail, we shift tail ranks UP by +slack
-        // (increasing tail ranks moves source closer to target).
-        // If the entering edge target is in the tail, we shift tail ranks DOWN by -slack.
         let delta = if s_in_tail { slack } else { -slack };
 
         if delta != 0 {
@@ -584,6 +746,13 @@ fn network_simplex(
 /// Convert rank map to layers: Vec<Vec<NodeIndex>> indexed by rank.
 /// Nodes are inserted in stable topological order to keep layout quality while
 /// remaining deterministic across runs.
+/// Convert rank assignments to layer arrays.
+///
+/// Uses DFS from lowest-rank nodes following outgoing edges, matching dagre's
+/// `initOrder`. To ensure good subgraph structure, nodes at the same rank are
+/// grouped by subgraph: we first process each subgraph's border-left chain,
+/// then the subgraph's content nodes, then its border-right chain. This ensures
+/// nodes from the same subgraph are contiguous in each layer.
 pub fn ranks_to_layers(
     graph: &DiGraph<NodeData, EdgeData>,
     ranks: &HashMap<NodeIndex, usize>,
@@ -595,11 +764,56 @@ pub fn ranks_to_layers(
     let max_rank = *ranks.values().max().unwrap();
     let mut layers = vec![Vec::new(); max_rank + 1];
 
-    let topo_order = topological_sort(graph);
-    for node in topo_order {
+    // Sort all ranked nodes by rank (ascending). Within the same rank,
+    // put content nodes first, then dummies, then borders.
+    let mut nodes_by_rank: Vec<NodeIndex> = ranks.keys().copied().collect();
+    nodes_by_rank.sort_by(|&a, &b| {
+        let rank_a = ranks[&a];
+        let rank_b = ranks[&b];
+        rank_a.cmp(&rank_b).then_with(|| {
+            let id_a = &graph[a].id;
+            let id_b = &graph[b].id;
+            let kind_a = if id_a.starts_with("__border_") {
+                2
+            } else if id_a.starts_with("__dummy_") || id_a.starts_with("__nesting_") {
+                1
+            } else {
+                0
+            };
+            let kind_b = if id_b.starts_with("__border_") {
+                2
+            } else if id_b.starts_with("__dummy_") || id_b.starts_with("__nesting_") {
+                1
+            } else {
+                0
+            };
+            kind_a.cmp(&kind_b).then_with(|| a.cmp(&b))
+        })
+    });
+
+    let mut visited: HashSet<NodeIndex> = HashSet::new();
+
+    fn dfs(
+        node: NodeIndex,
+        graph: &DiGraph<NodeData, EdgeData>,
+        ranks: &HashMap<NodeIndex, usize>,
+        layers: &mut [Vec<NodeIndex>],
+        visited: &mut HashSet<NodeIndex>,
+    ) {
+        if !visited.insert(node) {
+            return;
+        }
         if let Some(&rank) = ranks.get(&node) {
             layers[rank].push(node);
         }
+        // Follow outgoing edges (successors).
+        for neighbor in graph.neighbors_directed(node, petgraph::Direction::Outgoing) {
+            dfs(neighbor, graph, ranks, layers, visited);
+        }
+    }
+
+    for &node in &nodes_by_rank {
+        dfs(node, graph, ranks, &mut layers, &mut visited);
     }
 
     layers

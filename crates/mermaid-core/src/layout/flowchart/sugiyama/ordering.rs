@@ -232,7 +232,8 @@ fn sort_layer_by_barycenter(
     // to their optimal barycenter position — matching dagre's behaviour.
     let mut groups: Vec<(Vec<String>, Vec<NodeIndex>)> = Vec::new();
     for &node in layer.iter() {
-        let is_dummy = graph[node].id.starts_with("__dummy_");
+        let is_dummy =
+            graph[node].id.starts_with("__dummy_") || graph[node].id.starts_with("__nesting_");
         let path = if is_dummy {
             vec![graph[node].id.clone()]
         } else {

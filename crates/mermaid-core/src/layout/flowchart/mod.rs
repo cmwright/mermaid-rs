@@ -101,8 +101,12 @@ pub(crate) fn build_positioned_nodes(
         .node_indices()
         .filter_map(|idx| {
             let node = &graph[idx];
-            // Skip dummy and border segment nodes
-            if node.id.starts_with("__dummy_") || node.id.starts_with("__border_") {
+            // Skip dummy, border segment, nesting, and edge proxy nodes
+            if node.id.starts_with("__dummy_")
+                || node.id.starts_with("__border_")
+                || node.id.starts_with("__nesting_")
+                || node.id.starts_with("__edge_proxy_")
+            {
                 return None;
             }
             let &(x, y) = positions.get(&idx)?;

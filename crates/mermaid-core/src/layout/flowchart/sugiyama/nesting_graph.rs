@@ -226,7 +226,11 @@ pub fn run(
                 .collect();
 
             for &child_node in &direct_child_nodes {
-                // Leaf child (not a subgraph)
+                // Leaf child (not a subgraph):
+                // dagre: `thisWeight = childNode.borderTop ? weight : 2 * weight`
+                // For leaf nodes, borderTop is undefined, so thisWeight = 2 * weight.
+                // dagre: `minlen = childTop !== childBottom ? 1 : height - depths[v] + 1`
+                // For leaf nodes, childTop === childBottom === child, so minlen = height - depth + 1.
                 let child_w = 2 * nesting_weight;
                 let child_minlen = height - sg_depth + 1;
 
@@ -242,6 +246,12 @@ pub fn run(
                 );
                 nesting_edges.push(e1);
                 nesting_edges.push(e2);
+
+                // dagre: for leaf nodes, also adds root → v with weight=0, minlen=nodeSep.
+                // This ensures all leaf nodes have the same minimum distance from root,
+                // allowing network simplex to freely optimize their positions.
+                let e_root = graph.add_edge(root, child_node, make_nesting_edge(0, node_sep));
+                nesting_edges.push(e_root);
             }
 
             for child_sg in &sg.subgraphs {
@@ -316,36 +326,24 @@ pub fn run(
     }
 }
 
-/// Remove all nesting graph infrastructure from the graph.
+/// Remove nesting graph infrastructure from the graph.
 ///
-/// - Removes the synthetic root node and all its edges
-/// - Removes all nesting edges
-/// - Removes border-top and border-bottom nodes
-/// - Restores original edge minlens
-/// - Compacts empty ranks (matching dagre's `removeEmptyRanks`)
-/// - Normalizes ranks so the minimum is 0
+/// Removes:
+/// - All nesting edges
+/// - The synthetic root node
+/// - All nesting border nodes (bt/bb)
+///
+/// NOTE: In dagre, bt/bb stay in the graph because dagre's graphlib supports
+/// compound graphs where these are proper children of subgraph nodes. In our
+/// petgraph-based system, keeping them causes ordering/coordinate issues
+/// since they appear as regular leaf nodes. So we remove them, but the caller
+/// should read their ranks BEFORE calling cleanup (via assignRankMinMax).
 pub fn cleanup(
     graph: &mut DiGraph<NodeData, EdgeData>,
     ranks: &mut HashMap<NodeIndex, usize>,
     state: &NestingState,
 ) {
-    // Step 1: Restore original minlens on real edges
-    for (&ei, &orig) in &state.original_minlens {
-        if graph.edge_weight(ei).is_some() {
-            graph[ei].minlen = orig;
-        }
-    }
-
-    // Step 2: Remove empty ranks (dagre's removeEmptyRanks).
-    // The nesting graph inflated minlens by node_rank_factor, creating many
-    // empty intermediate ranks. We compact them out, but preserve empty ranks
-    // at multiples of node_rank_factor (structural gaps for border nodes).
-    if state.node_rank_factor > 1 {
-        remove_empty_ranks(ranks, state.node_rank_factor);
-    }
-
-    // Step 3: Remove nesting infrastructure nodes.
-    // Collect all node indices to remove, sort descending, remove.
+    // Collect all nesting infrastructure nodes to remove.
     let mut to_remove: Vec<NodeIndex> = Vec::new();
     to_remove.push(state.root);
     for (_, &(bt, bb)) in &state.subgraph_borders {
@@ -353,74 +351,26 @@ pub fn cleanup(
         to_remove.push(bb);
     }
 
-    // Deduplicate and sort descending by index
+    // Deduplicate and sort descending by index (petgraph uses swap-remove,
+    // so removing from highest index first avoids index invalidation).
     to_remove.sort_by(|a, b| b.index().cmp(&a.index()));
     to_remove.dedup();
 
     for ni in to_remove {
         if graph.node_weight(ni).is_none() {
-            continue; // already removed (e.g., by a prior swap)
+            continue;
         }
 
-        // Before removing, if this node is the last node, just remove it.
-        // Otherwise, the last node will be swapped into this slot.
+        // Handle petgraph's swap-remove: when removing a node that isn't the
+        // last, the last node takes the removed node's index.
         let last_idx = NodeIndex::new(graph.node_count() - 1);
         if ni != last_idx {
-            // The node at `last_idx` will move to `ni` after removal.
-            // Update the ranks map to reflect this.
             if let Some(rank) = ranks.remove(&last_idx) {
                 ranks.insert(ni, rank);
             }
         }
         ranks.remove(&ni);
         graph.remove_node(ni);
-    }
-
-    // Step 4: Normalize ranks so minimum is 0
-    if let Some(&min_rank) = ranks.values().min() {
-        if min_rank > 0 {
-            for rank in ranks.values_mut() {
-                *rank -= min_rank;
-            }
-        }
-    }
-}
-
-/// Compact empty ranks, matching dagre's `removeEmptyRanks`.
-///
-/// After nesting graph inflation, many intermediate ranks are empty.
-/// This compresses them out, but keeps empty ranks at multiples of
-/// `node_rank_factor` (structural gaps for subgraph borders).
-fn remove_empty_ranks(ranks: &mut HashMap<NodeIndex, usize>, node_rank_factor: usize) {
-    if ranks.is_empty() {
-        return;
-    }
-
-    let min_rank = *ranks.values().min().unwrap();
-
-    // Build sparse layers
-    let max_rank = *ranks.values().max().unwrap();
-    let num_layers = max_rank - min_rank + 1;
-    let mut occupied = vec![false; num_layers];
-    for &rank in ranks.values() {
-        occupied[rank - min_rank] = true;
-    }
-
-    // Compute cumulative delta (negative shift to compact empty ranks)
-    let mut delta: Vec<i64> = vec![0; num_layers];
-    let mut d: i64 = 0;
-    for i in 0..num_layers {
-        if !occupied[i] && i % node_rank_factor != 0 {
-            d -= 1;
-        }
-        delta[i] = d;
-    }
-
-    // Apply delta to all ranks
-    for rank in ranks.values_mut() {
-        let idx = *rank - min_rank;
-        let new_rank = (*rank as i64 + delta[idx]) as usize;
-        *rank = new_rank;
     }
 }
 

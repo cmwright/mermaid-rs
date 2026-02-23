@@ -5,19 +5,21 @@
 //! is that it processes subgraphs recursively: innermost subgraphs are sorted
 //! first, then their results are used as atomic blocks when sorting the parent.
 //!
-//! ## Algorithm overview
+//! ## Algorithm overview (matching dagre exactly)
 //!
 //! For each sweep (alternating up/down):
-//! 1. Build a layer graph for each layer (edges to the adjacent fixed layer)
-//! 2. For each layer graph, recursively sort the root's children:
+//! 1. Build position maps for the fixed layer
+//! 2. For each movable layer, recursively sort the root's children:
 //!    a. Compute barycenters from the fixed layer
-//!    b. Recurse into child subgraphs
-//!    c. Resolve conflicts with the constraint graph
-//!    d. Sort by barycenter
-//!    e. Pin border nodes at the left/right edges
+//!    b. Recurse into child subgraphs, merge recursive barycenters
+//!    c. Resolve conflicts with the constraint graph (Forster's algorithm)
+//!    d. Expand subgraph entries into their sorted child lists
+//!    e. Sort by barycenter with biased tie-breaking, interleaving unsortable entries
+//!    f. Pin border nodes at the left/right edges, incorporate border predecessors
 //! 3. Record subgraph ordering constraints for subsequent layers
 
 use petgraph::graph::{DiGraph, NodeIndex};
+use petgraph::visit::EdgeRef;
 use std::collections::{HashMap, HashSet};
 
 use crate::layout::flowchart::graph_builder::SubgraphMembership;
@@ -31,10 +33,7 @@ use crate::layout::flowchart::types::*;
 /// Maximum consecutive non-improving iterations before early stop.
 const MAX_NO_IMPROVEMENT: usize = 4;
 
-/// Subgraph-recursive crossing minimization.
-///
-/// This replaces the flat `minimize_crossings` + `refine_subgraph_ordering`
-/// with a single recursive algorithm that properly handles compound graphs.
+/// Subgraph-recursive crossing minimization matching dagre's `order()`.
 pub fn minimize_crossings_recursive(
     graph: &DiGraph<NodeData, EdgeData>,
     layers: &mut [Vec<NodeIndex>],
@@ -47,10 +46,10 @@ pub fn minimize_crossings_recursive(
     }
 
     // Build parent map: node -> immediate parent subgraph id.
-    let parent_map = build_parent_map(graph, membership);
+    let parent_map = build_parent_map(graph, membership, border_segments);
 
-    // Build children map: subgraph id -> direct children node indices in each layer.
-    // We need this to know which nodes to sort within each subgraph.
+    // Build subgraph parent map: sg_id -> parent sg_id (for walking hierarchy).
+    let sg_parent_map = build_sg_parent_map(membership);
 
     let mut best_layers: Vec<Vec<NodeIndex>> = layers.to_vec();
     let mut best_cc = count_total_crossings(graph, layers);
@@ -59,35 +58,43 @@ pub fn minimize_crossings_recursive(
     for iteration in 0..num_iterations {
         let bias_right = iteration % 4 >= 2;
 
+        // Constraint graph accumulates ordering constraints during a sweep.
+        // dagre creates a fresh one per sweep direction.
+        let mut constraint_graph = ConstraintGraph::new();
+
+        // dagre: i % 2 ? downLayerGraphs : upLayerGraphs
+        // i=0 → up sweep, i=1 → down sweep, i=2 → up sweep, ...
         if iteration % 2 == 0 {
-            // Down sweep: process layers top to bottom
-            let mut constraint_graph = ConstraintGraph::new();
-            for i in 1..layers.len() {
-                let fixed_positions = build_position_map(&layers[i - 1]);
+            // Up sweep: process layers bottom to top
+            // dagre: upLayerGraphs = range(maxRank-1, -1, -1), "outEdges"
+            for i in (0..layers.len().saturating_sub(1)).rev() {
+                let fixed_order = build_order_map(&layers[i + 1]);
                 sweep_layer(
                     graph,
                     &mut layers[i],
-                    &fixed_positions,
-                    petgraph::Direction::Incoming,
+                    &fixed_order,
+                    petgraph::Direction::Outgoing,
                     membership,
                     &parent_map,
+                    &sg_parent_map,
                     border_segments,
                     bias_right,
                     &mut constraint_graph,
                 );
             }
         } else {
-            // Up sweep: process layers bottom to top
-            let mut constraint_graph = ConstraintGraph::new();
-            for i in (0..layers.len().saturating_sub(1)).rev() {
-                let fixed_positions = build_position_map(&layers[i + 1]);
+            // Down sweep: process layers top to bottom
+            // dagre: downLayerGraphs = range(1, maxRank+1), "inEdges"
+            for i in 1..layers.len() {
+                let fixed_order = build_order_map(&layers[i - 1]);
                 sweep_layer(
                     graph,
                     &mut layers[i],
-                    &fixed_positions,
-                    petgraph::Direction::Outgoing,
+                    &fixed_order,
+                    petgraph::Direction::Incoming,
                     membership,
                     &parent_map,
+                    &sg_parent_map,
                     border_segments,
                     bias_right,
                     &mut constraint_graph,
@@ -100,6 +107,10 @@ pub fn minimize_crossings_recursive(
             best_cc = cc;
             best_layers = layers.to_vec();
             no_improve = 0;
+        } else if cc == best_cc {
+            // dagre: equal quality still saves (allows drifting through plateaus)
+            best_layers = layers.to_vec();
+            no_improve += 1;
         } else {
             no_improve += 1;
         }
@@ -116,28 +127,40 @@ pub fn minimize_crossings_recursive(
 }
 
 // ---------------------------------------------------------------------------
-// Constraint graph
+// Constraint graph — matches dagre's cg (a Graph with string node ids)
 // ---------------------------------------------------------------------------
 
 /// Tracks ordering constraints between sibling nodes/subgraphs.
 /// An edge (a, b) means "a must come before b".
+/// Uses string IDs (node IDs or subgraph IDs) to identify entries.
 struct ConstraintGraph {
-    edges: HashSet<(String, String)>,
+    /// Forward edges: from -> set of to
+    edges: HashMap<String, HashSet<String>>,
 }
 
 impl ConstraintGraph {
     fn new() -> Self {
         Self {
-            edges: HashSet::new(),
+            edges: HashMap::new(),
         }
     }
 
     fn add_edge(&mut self, from: &str, to: &str) {
-        self.edges.insert((from.to_string(), to.to_string()));
+        self.edges
+            .entry(from.to_string())
+            .or_default()
+            .insert(to.to_string());
     }
 
-    fn has_edge(&self, from: &str, to: &str) -> bool {
-        self.edges.contains(&(from.to_string(), to.to_string()))
+    /// Get all constraint edges as (from, to) pairs.
+    fn all_edges(&self) -> Vec<(String, String)> {
+        let mut result = Vec::new();
+        for (from, tos) in &self.edges {
+            for to in tos {
+                result.push((from.clone(), to.clone()));
+            }
+        }
+        result
     }
 }
 
@@ -146,13 +169,15 @@ impl ConstraintGraph {
 // ---------------------------------------------------------------------------
 
 /// Process a single layer: sort it using the recursive subgraph algorithm.
+/// Matches dagre's `sweepLayerGraphs` inner loop body.
 fn sweep_layer(
     graph: &DiGraph<NodeData, EdgeData>,
     layer: &mut Vec<NodeIndex>,
-    fixed_positions: &HashMap<NodeIndex, usize>,
+    fixed_order: &HashMap<NodeIndex, usize>,
     direction: petgraph::Direction,
     membership: &SubgraphMembership,
     parent_map: &HashMap<NodeIndex, Option<String>>,
+    sg_parent_map: &HashMap<String, Option<String>>,
     border_segments: &BorderSegments,
     bias_right: bool,
     constraint_graph: &mut ConstraintGraph,
@@ -161,15 +186,17 @@ fn sweep_layer(
         return;
     }
 
-    // Sort the root level (nodes that have no parent subgraph in this layer).
+    // Sort the root level (no parent subgraph).
+    // This matches dagre's `sortSubgraph(lg, root, cg, biasRight)`.
     let result = sort_subgraph(
         graph,
         layer,
         None, // root level
-        fixed_positions,
+        fixed_order,
         direction,
         membership,
         parent_map,
+        sg_parent_map,
         border_segments,
         bias_right,
         constraint_graph,
@@ -177,12 +204,17 @@ fn sweep_layer(
 
     *layer = result.vs;
 
+    // Assign order values to nodes in the layer (so fixed_order works for next layer).
+    // dagre does: `sorted.vs.forEach((v, i) => lg.node(v).order = i)`
+    // We don't mutate the graph, but the next layer will build its own fixed_order.
+
     // Record subgraph constraints for subsequent layers.
-    add_subgraph_constraints(graph, parent_map, &layer, constraint_graph);
+    // Matches dagre's `addSubgraphConstraints(lg, cg, sorted.vs)`.
+    add_subgraph_constraints(parent_map, sg_parent_map, layer, constraint_graph);
 }
 
 // ---------------------------------------------------------------------------
-// Recursive subgraph sort
+// Recursive subgraph sort — matches dagre's `sortSubgraph`
 // ---------------------------------------------------------------------------
 
 /// Result of sorting a subgraph.
@@ -195,43 +227,97 @@ struct SortResult {
     weight: f64,
 }
 
-/// An entry in the sort: either a single node or a sorted subgraph.
+/// An entry for the sort algorithm. Can represent a single node or a group
+/// of nodes (from conflict resolution or subgraph expansion).
 struct SortEntry {
-    /// The node(s) in this entry. For a subgraph, these are the recursively
-    /// sorted children. For a leaf, this is a single node.
+    /// The node(s) in this entry.
     vs: Vec<NodeIndex>,
-    /// The representative node (for looking up the entry).
-    v: NodeIndex,
+    /// The representative node ID (for constraint graph lookups).
+    v_id: String,
     /// Barycenter from the fixed layer.
     barycenter: Option<f64>,
-    /// Weight (number of edges to fixed layer).
+    /// Weight (sum of edge weights to fixed layer).
     weight: f64,
     /// Original index in the movable set (for stable tie-breaking).
     i: usize,
+    /// Whether this entry has been merged into another.
+    merged: bool,
 }
 
 /// Recursively sort nodes within a subgraph (or at root level if sg_id is None).
+/// Matches dagre's `sortSubgraph(g, v, cg, biasRight)`.
 fn sort_subgraph(
     graph: &DiGraph<NodeData, EdgeData>,
     layer: &[NodeIndex],
     sg_id: Option<&str>,
-    fixed_positions: &HashMap<NodeIndex, usize>,
+    fixed_order: &HashMap<NodeIndex, usize>,
     direction: petgraph::Direction,
     membership: &SubgraphMembership,
     parent_map: &HashMap<NodeIndex, Option<String>>,
+    sg_parent_map: &HashMap<String, Option<String>>,
     border_segments: &BorderSegments,
     bias_right: bool,
     constraint_graph: &mut ConstraintGraph,
 ) -> SortResult {
-    // Find children of this subgraph in the current layer.
-    let movable: Vec<NodeIndex> = layer
-        .iter()
-        .copied()
-        .filter(|&ni| {
-            let parent = parent_map.get(&ni).and_then(|p| p.as_deref());
-            parent == sg_id
-        })
-        .collect();
+    // Identify border nodes for this subgraph (if any).
+    // dagre: `let bl = node ? node.borderLeft : undefined`
+    let (border_left, border_right) = get_border_nodes_for_layer(sg_id, layer, border_segments);
+
+    // Find child subgraphs: subgraphs whose parent is sg_id and which have
+    // members in this layer.
+    let child_subgraphs: HashSet<String> =
+        find_child_subgraphs_in_layer(layer, sg_id, parent_map, sg_parent_map, border_segments)
+            .into_iter()
+            .collect();
+
+    // Build the movable list matching dagre's `g.children(v)`.
+    // In dagre's layer graph, children of a compound node v include:
+    //   - Base nodes at this rank whose parent is v
+    //   - Subgraph nodes that span this rank whose parent is v
+    // We reconstruct this by walking the layer in order. For each node:
+    //   - If its parent == sg_id → it's a direct leaf child
+    //   - If its parent is a child subgraph of sg_id → the first time we see
+    //     that child subgraph, we add a subgraph placeholder entry
+    //
+    // This interleaving ensures the `i` indices match dagre's ordering.
+    enum MovableItem {
+        Leaf(NodeIndex),
+        Subgraph(String),
+    }
+
+    let mut movable: Vec<MovableItem> = Vec::new();
+    let mut seen_child_sgs: HashSet<String> = HashSet::new();
+
+    for &ni in layer {
+        // Skip border nodes
+        if Some(ni) == border_left || Some(ni) == border_right {
+            continue;
+        }
+
+        let node_parent = parent_map.get(&ni).and_then(|p| p.as_deref());
+
+        if node_parent == sg_id {
+            // Direct child of this subgraph — add as leaf
+            movable.push(MovableItem::Leaf(ni));
+        } else if let Some(np) = node_parent {
+            // Check if this node belongs to a child subgraph of sg_id.
+            // Walk up until we find one of our child_subgraphs or reach sg_id.
+            let mut sg = Some(np.to_string());
+            while let Some(ref sg_check) = sg {
+                if child_subgraphs.contains(sg_check) {
+                    if seen_child_sgs.insert(sg_check.clone()) {
+                        movable.push(MovableItem::Subgraph(sg_check.clone()));
+                    }
+                    break;
+                }
+                let next = sg_parent_map.get(sg_check).cloned().flatten();
+                if next.as_deref() == sg_id {
+                    break;
+                }
+                sg = next;
+            }
+        }
+    }
 
     if movable.is_empty() {
         return SortResult {
@@ -241,170 +327,165 @@ fn sort_subgraph(
         };
     }
 
-    // Identify border nodes (if this is a subgraph with borders).
-    let (border_left, border_right) = if let Some(sg) = sg_id {
-        // Find border nodes by checking if they're in the layer.
-        let bl = border_segments
-            .subgraphs
-            .get(sg)
-            .and_then(|borders| {
-                borders
-                    .border_left
-                    .values()
-                    .find(|&&ni| layer.contains(&ni))
-            })
-            .copied();
-        let br = border_segments
-            .subgraphs
-            .get(sg)
-            .and_then(|borders| {
-                borders
-                    .border_right
-                    .values()
-                    .find(|&&ni| layer.contains(&ni))
-            })
-            .copied();
-        (bl, br)
-    } else {
-        (None, None)
-    };
+    // Build barycenter entries for each movable item.
+    // dagre: `let barycenters = barycenter(g, movable)` computes barycenters
+    // for ALL movable items (leaf nodes get barycenters from edges; subgraph
+    // nodes from edges in the layer graph — typically none, so no barycenter).
+    // Then: for each entry with children, recurse and mergeBarycenters.
+    let mut entries: Vec<SortEntry> = Vec::with_capacity(movable.len());
+    let mut subgraph_results: HashMap<String, SortResult> = HashMap::new();
+    // Map from sentinel NodeIndex → subgraph ID, for expand_subgraphs.
+    // We use NodeIndex::new(usize::MAX - n) as unique sentinels.
+    let mut sentinel_map: HashMap<NodeIndex, String> = HashMap::new();
+    let mut sentinel_counter: usize = 0;
 
-    // Remove border nodes from movable set (they'll be pinned at the edges).
-    let movable: Vec<NodeIndex> = movable
-        .into_iter()
-        .filter(|ni| Some(*ni) != border_left && Some(*ni) != border_right)
-        .collect();
-
-    // Compute barycenters for each movable node.
-    let mut entries: Vec<SortEntry> = movable
-        .iter()
-        .enumerate()
-        .map(|(i, &ni)| {
-            let (barycenter, weight) = compute_barycenter(graph, ni, fixed_positions, direction);
-            SortEntry {
-                vs: vec![ni],
-                v: ni,
-                barycenter,
-                weight,
-                i,
+    for (i, item) in movable.into_iter().enumerate() {
+        match item {
+            MovableItem::Leaf(ni) => {
+                let (barycenter, weight) = compute_barycenter(graph, ni, fixed_order, direction);
+                entries.push(SortEntry {
+                    vs: vec![ni],
+                    v_id: graph[ni].id.clone(),
+                    barycenter,
+                    weight,
+                    i,
+                    merged: false,
+                });
             }
-        })
-        .collect();
+            MovableItem::Subgraph(ref child_sg_id) => {
+                // Recurse into child subgraph.
+                // dagre: sortSubgraph(g, entry.v, cg, biasRight)
+                let child_result = sort_subgraph(
+                    graph,
+                    layer,
+                    Some(child_sg_id),
+                    fixed_order,
+                    direction,
+                    membership,
+                    parent_map,
+                    sg_parent_map,
+                    border_segments,
+                    bias_right,
+                    constraint_graph,
+                );
 
-    // Recurse into child subgraphs.
-    // A child subgraph is identified by: it's a node in the movable set that
-    // is a border-left node of some subgraph (indicating a subgraph is present
-    // at this layer). Actually, we should check which nodes are "subgraph
-    // representatives" — nodes that have children in this layer.
-    //
-    // Simpler approach: find all subgraph IDs that have children in this layer
-    // and whose parent is the current sg_id.
-    let child_subgraphs: Vec<String> =
-        find_child_subgraphs_in_layer(layer, sg_id, membership, parent_map, graph, border_segments);
+                // The subgraph "node" in dagre's layer graph typically has no
+                // in-edges (it's a compound parent, not a base node), so its
+                // initial barycenter is None. After recursion, we merge the
+                // recursive result's barycenter with the entry's.
+                //
+                // dagre: if (subgraphResult.barycenter !== undefined) {
+                //           mergeBarycenters(entry, subgraphResult);
+                //        }
+                //
+                // Since the initial barycenter is None, mergeBarycenters just
+                // copies the recursive result's barycenter and weight.
+                let entry_barycenter = child_result.barycenter;
+                let entry_weight = child_result.weight;
 
-    for child_sg in &child_subgraphs {
-        // Recursively sort the child subgraph.
-        let child_result = sort_subgraph(
-            graph,
-            layer,
-            Some(child_sg),
-            fixed_positions,
-            direction,
-            membership,
-            parent_map,
-            border_segments,
-            bias_right,
-            constraint_graph,
-        );
+                // Use a unique sentinel NodeIndex for this subgraph.
+                // expandSubgraphs will replace it with the sorted children.
+                let sentinel = NodeIndex::new(usize::MAX - sentinel_counter);
+                sentinel_counter += 1;
+                sentinel_map.insert(sentinel, child_sg_id.clone());
 
-        // Find the entry for the first node of this child subgraph and expand it.
-        // Actually, the child subgraph members aren't directly in our entries
-        // (they're children of the child subgraph, not direct children of us).
-        // We need to find which of our movable nodes belongs to this child subgraph.
-        //
-        // In dagre, the layer graph has a node for the subgraph itself.
-        // In our approach, we need to find the entry whose node is a member
-        // of the child subgraph and replace it with the recursive result.
-
-        // Find entries that belong to this child subgraph.
-        // These are entries whose node's parent is the child subgraph.
-        // But wait — we already filtered movable to only include direct children
-        // of sg_id. Nodes belonging to child_sg would have parent = child_sg,
-        // not sg_id. So they wouldn't be in our entries.
-        //
-        // This means the child subgraph sort result needs to be treated as a
-        // single atomic entry in our sort. We add it as a new entry.
-        if !child_result.vs.is_empty() {
-            entries.push(SortEntry {
-                vs: child_result.vs,
-                v: entries.last().map(|e| e.v).unwrap_or(NodeIndex::new(0)),
-                barycenter: child_result.barycenter,
-                weight: child_result.weight,
-                i: entries.len(),
-            });
+                entries.push(SortEntry {
+                    vs: vec![sentinel],
+                    v_id: child_sg_id.clone(),
+                    barycenter: entry_barycenter,
+                    weight: entry_weight,
+                    i,
+                    merged: false,
+                });
+                subgraph_results.insert(child_sg_id.clone(), child_result);
+            }
         }
     }
 
     // Resolve conflicts with the constraint graph.
-    resolve_conflicts(&mut entries, constraint_graph, graph);
+    // dagre: `let entries = resolveConflicts(barycenters, cg)`
+    let mut resolved = resolve_conflicts(&entries, constraint_graph);
+
+    // Expand subgraphs: replace subgraph placeholders with their sorted children.
+    // dagre: `expandSubgraphs(entries, subgraphs)`
+    expand_subgraphs(&mut resolved, &subgraph_results, &sentinel_map);
 
     // Sort entries by barycenter.
-    sort_entries(&mut entries, bias_right);
+    // dagre: `let result = sort(entries, biasRight)`
+    let sort_result = sort_resolved_entries(resolved, bias_right);
 
-    // Flatten entries into final order.
-    let mut vs: Vec<NodeIndex> = Vec::new();
+    // Pin border nodes.
+    // dagre: if (bl) { result.vs = [bl, result.vs, br].flat(true); ... }
+    let mut vs = Vec::new();
+    let mut result_barycenter = sort_result.barycenter;
+    let mut result_weight = sort_result.weight;
 
-    // Pin border_left at the start.
     if let Some(bl) = border_left {
         vs.push(bl);
     }
-
-    for entry in &entries {
-        vs.extend_from_slice(&entry.vs);
-    }
-
-    // Pin border_right at the end.
+    vs.extend_from_slice(&sort_result.vs);
     if let Some(br) = border_right {
         vs.push(br);
     }
 
-    // Compute aggregate barycenter.
-    let total_weight: f64 = entries.iter().map(|e| e.weight).sum();
-    let aggregate_bc = if total_weight > 0.0 {
-        let weighted_sum: f64 = entries
-            .iter()
-            .filter_map(|e| e.barycenter.map(|bc| bc * e.weight))
-            .sum();
-        Some(weighted_sum / total_weight)
-    } else {
-        None
-    };
+    // If this subgraph has border nodes with predecessors on the fixed layer,
+    // incorporate their positions into the aggregate barycenter.
+    // dagre: border predecessor handling
+    if border_left.is_some() {
+        let bl = border_left.unwrap();
+        let br = border_right.unwrap();
+
+        // Get predecessors of border nodes on the fixed layer.
+        let bl_pred_order = get_neighbor_order(graph, bl, direction, fixed_order);
+        let br_pred_order = get_neighbor_order(graph, br, direction, fixed_order);
+
+        if let (Some(bl_order), Some(br_order)) = (bl_pred_order, br_pred_order) {
+            if result_barycenter.is_none() {
+                result_barycenter = Some(0.0);
+                result_weight = 0.0;
+            }
+            let bc = result_barycenter.unwrap();
+            result_barycenter =
+                Some((bc * result_weight + bl_order + br_order) / (result_weight + 2.0));
+            result_weight += 2.0;
+        }
+    }
 
     SortResult {
         vs,
-        barycenter: aggregate_bc,
-        weight: total_weight,
+        barycenter: result_barycenter,
+        weight: result_weight,
     }
 }
 
 // ---------------------------------------------------------------------------
-// Barycenter computation
+// Barycenter computation — matches dagre's `barycenter.js`
 // ---------------------------------------------------------------------------
 
-/// Compute the barycenter of a node from its neighbors in the fixed layer.
+/// Compute the barycenter of a node from its neighbors on the fixed layer.
+/// Uses edge weights (dagre aggregates them in the layer graph; we sum directly).
 fn compute_barycenter(
     graph: &DiGraph<NodeData, EdgeData>,
     node: NodeIndex,
-    fixed_positions: &HashMap<NodeIndex, usize>,
+    fixed_order: &HashMap<NodeIndex, usize>,
     direction: petgraph::Direction,
 ) -> (Option<f64>, f64) {
     let mut sum = 0.0;
     let mut weight = 0.0;
 
-    for neighbor in graph.neighbors_directed(node, direction) {
-        if let Some(&pos) = fixed_positions.get(&neighbor) {
-            sum += pos as f64;
-            weight += 1.0;
+    // dagre uses g.inEdges(v) and looks up edge weight + neighbor order.
+    // We iterate over directed neighbors.
+    let edges: Vec<_> = graph.edges_directed(node, direction).collect();
+    for edge_ref in &edges {
+        let neighbor = if direction == petgraph::Direction::Incoming {
+            edge_ref.source()
+        } else {
+            edge_ref.target()
+        };
+        if let Some(&order) = fixed_order.get(&neighbor) {
+            let edge_weight = edge_ref.weight().weight.max(1) as f64;
+            sum += edge_weight * order as f64;
+            weight += edge_weight;
         }
     }
 
@@ -415,190 +496,349 @@ fn compute_barycenter(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Conflict resolution
-// ---------------------------------------------------------------------------
-
-/// Resolve conflicts between entries and the constraint graph.
-///
-/// If the constraint graph says "A must come before B" but barycenters put
-/// B before A, merge them into a single entry.
-fn resolve_conflicts(
-    entries: &mut Vec<SortEntry>,
-    constraint_graph: &ConstraintGraph,
+/// Get the order of the first neighbor of a node on the fixed layer.
+/// Used for border node predecessor lookups.
+fn get_neighbor_order(
     graph: &DiGraph<NodeData, EdgeData>,
-) {
-    if entries.len() <= 1 {
-        return;
-    }
-
-    // Check each constraint edge and merge if needed.
-    // For now, use a simplified approach: check pairwise constraints
-    // and merge entries that violate them.
-    let mut merged = vec![false; entries.len()];
-
-    for i in 0..entries.len() {
-        if merged[i] {
-            continue;
-        }
-        for j in (i + 1)..entries.len() {
-            if merged[j] {
-                continue;
-            }
-
-            // Check if there's a constraint j->i (j must come before i).
-            // If so and j is after i in barycenter order, merge.
-            let id_i = entries[i]
-                .vs
-                .first()
-                .map(|&ni| graph[ni].id.clone())
-                .unwrap_or_default();
-            let id_j = entries[j]
-                .vs
-                .first()
-                .map(|&ni| graph[ni].id.clone())
-                .unwrap_or_default();
-
-            if constraint_graph.has_edge(&id_j, &id_i) {
-                // j should come before i, but j has index > i.
-                // Check if barycenters agree.
-                if let (Some(bc_i), Some(bc_j)) = (entries[i].barycenter, entries[j].barycenter) {
-                    if bc_j > bc_i {
-                        // Conflict: merge j into i.
-                        let j_vs = std::mem::take(&mut entries[j].vs);
-                        let j_weight = entries[j].weight;
-                        let j_bc = entries[j].barycenter;
-
-                        // Prepend j's nodes (it should come before i).
-                        let mut new_vs = j_vs;
-                        new_vs.extend_from_slice(&entries[i].vs);
-                        entries[i].vs = new_vs;
-
-                        // Merge barycenters.
-                        let i_weight = entries[i].weight;
-                        let total_w = i_weight + j_weight;
-                        if total_w > 0.0 {
-                            let i_bc = entries[i].barycenter.unwrap_or(0.0);
-                            entries[i].barycenter =
-                                Some((i_bc * i_weight + j_bc.unwrap_or(0.0) * j_weight) / total_w);
-                            entries[i].weight = total_w;
-                        }
-
-                        merged[j] = true;
-                    }
-                }
-            }
+    node: NodeIndex,
+    direction: petgraph::Direction,
+    fixed_order: &HashMap<NodeIndex, usize>,
+) -> Option<f64> {
+    for neighbor in graph.neighbors_directed(node, direction) {
+        if let Some(&order) = fixed_order.get(&neighbor) {
+            return Some(order as f64);
         }
     }
-
-    // Remove merged entries.
-    let mut result = Vec::new();
-    for (i, entry) in entries.drain(..).enumerate() {
-        if !merged[i] {
-            result.push(entry);
-        }
-    }
-    *entries = result;
+    None
 }
 
 // ---------------------------------------------------------------------------
-// Sorting
+// Conflict resolution — matches dagre's `resolve-conflicts.js`
 // ---------------------------------------------------------------------------
 
-/// Sort entries by barycenter, interleaving unsortable entries.
-fn sort_entries(entries: &mut Vec<SortEntry>, bias_right: bool) {
-    // Separate into sortable (has barycenter) and unsortable.
-    let old_entries: Vec<SortEntry> = entries.drain(..).collect();
+/// Resolve conflicts between entries and the constraint graph using
+/// Forster's algorithm. Returns a new list of (possibly merged) entries.
+///
+/// If the constraint graph says "A must come before B" but B has a
+/// barycenter <= A's barycenter, merge them into a single entry.
+fn resolve_conflicts(entries: &[SortEntry], constraint_graph: &ConstraintGraph) -> Vec<SortEntry> {
+    if entries.is_empty() {
+        return Vec::new();
+    }
 
-    let mut sortable_owned: Vec<SortEntry> = Vec::new();
-    let mut unsortable_owned: Vec<(usize, SortEntry)> = Vec::new();
+    // Build a map from entry v_id to index.
+    let mut id_to_idx: HashMap<&str, usize> = HashMap::new();
+    for (i, entry) in entries.iter().enumerate() {
+        id_to_idx.insert(&entry.v_id, i);
+    }
 
-    for (i, entry) in old_entries.into_iter().enumerate() {
-        if entry.barycenter.is_some() {
-            sortable_owned.push(entry);
-        } else {
-            unsortable_owned.push((i, entry));
+    // Build the constraint sub-graph over these entries.
+    // indegree, in-list, out-list for each entry.
+    let n = entries.len();
+    let mut indegree = vec![0usize; n];
+    let mut in_edges: Vec<Vec<usize>> = vec![Vec::new(); n]; // predecessors
+    let mut out_edges: Vec<Vec<usize>> = vec![Vec::new(); n]; // successors
+
+    for (from, to) in constraint_graph.all_edges() {
+        if let (Some(&from_idx), Some(&to_idx)) =
+            (id_to_idx.get(from.as_str()), id_to_idx.get(to.as_str()))
+        {
+            indegree[to_idx] += 1;
+            out_edges[from_idx].push(to_idx);
+            in_edges[to_idx].push(from_idx);
         }
     }
 
-    // Sort sortable by barycenter with biased tie-breaking.
-    sortable_owned.sort_by(|a, b| {
-        let ba = a.barycenter.unwrap_or(0.0);
-        let bb = b.barycenter.unwrap_or(0.0);
-        let cmp = ba.partial_cmp(&bb).unwrap_or(std::cmp::Ordering::Equal);
-        if cmp != std::cmp::Ordering::Equal {
-            return cmp;
+    // Topological sort using source set (matching dagre's doResolveConflicts).
+    let mut source_set: Vec<usize> = (0..n).filter(|&i| indegree[i] == 0).collect();
+
+    // Clone entries into mutable working copies.
+    let mut work: Vec<SortEntry> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| SortEntry {
+            vs: e.vs.clone(),
+            v_id: e.v_id.clone(),
+            barycenter: e.barycenter,
+            weight: e.weight,
+            i,
+            merged: false,
+        })
+        .collect();
+
+    let mut result_order: Vec<usize> = Vec::new();
+
+    while let Some(v_idx) = source_set.pop() {
+        result_order.push(v_idx);
+
+        // Handle "in" predecessors (constraint predecessors).
+        // dagre: `entry["in"].reverse().forEach(handleIn(entry))`
+        let in_list: Vec<usize> = in_edges[v_idx].clone();
+        for &u_idx in in_list.iter().rev() {
+            if work[u_idx].merged {
+                continue;
+            }
+            // Merge condition: if u has no barycenter, or v has no barycenter,
+            // or u's barycenter >= v's barycenter.
+            let should_merge = work[u_idx].barycenter.is_none()
+                || work[v_idx].barycenter.is_none()
+                || work[u_idx].barycenter.unwrap() >= work[v_idx].barycenter.unwrap();
+
+            if should_merge {
+                merge_entries(&mut work, v_idx, u_idx);
+            }
         }
-        if bias_right {
-            b.i.cmp(&a.i)
+
+        // Handle "out" successors: decrement indegree, add to source set if 0.
+        // dagre: `entry.out.forEach(handleOut(entry))`
+        let out_list: Vec<usize> = out_edges[v_idx].clone();
+        for &w_idx in &out_list {
+            in_edges[w_idx].push(v_idx);
+            indegree[w_idx] -= 1;
+            if indegree[w_idx] == 0 {
+                source_set.push(w_idx);
+            }
+        }
+    }
+
+    // Filter out merged entries and return in processing order.
+    let indices: Vec<usize> = result_order
+        .into_iter()
+        .filter(|&i| !work[i].merged)
+        .collect();
+
+    indices
+        .into_iter()
+        .map(|i| SortEntry {
+            vs: std::mem::take(&mut work[i].vs),
+            v_id: work[i].v_id.clone(),
+            barycenter: work[i].barycenter,
+            weight: work[i].weight,
+            i: work[i].i,
+            merged: false,
+        })
+        .collect()
+}
+
+/// Merge source entry into target entry.
+/// dagre's `mergeEntries(target, source)`.
+fn merge_entries(work: &mut [SortEntry], target_idx: usize, source_idx: usize) {
+    let mut sum = 0.0f64;
+    let mut weight = 0.0f64;
+
+    if work[target_idx].weight > 0.0 {
+        sum += work[target_idx].barycenter.unwrap_or(0.0) * work[target_idx].weight;
+        weight += work[target_idx].weight;
+    }
+    if work[source_idx].weight > 0.0 {
+        sum += work[source_idx].barycenter.unwrap_or(0.0) * work[source_idx].weight;
+        weight += work[source_idx].weight;
+    }
+
+    // dagre: `target.vs = source.vs.concat(target.vs)` — prepend source
+    let source_vs: Vec<NodeIndex> = std::mem::take(&mut work[source_idx].vs);
+    let target_vs = std::mem::take(&mut work[target_idx].vs);
+    let mut new_vs = source_vs;
+    new_vs.extend(target_vs);
+    work[target_idx].vs = new_vs;
+
+    if weight > 0.0 {
+        work[target_idx].barycenter = Some(sum / weight);
+        work[target_idx].weight = weight;
+    }
+    work[target_idx].i = work[target_idx].i.min(work[source_idx].i);
+    work[source_idx].merged = true;
+}
+
+// ---------------------------------------------------------------------------
+// Expand subgraphs — matches dagre's expandSubgraphs
+// ---------------------------------------------------------------------------
+
+/// Replace subgraph placeholder entries with their recursively sorted children.
+///
+/// Matches dagre's `expandSubgraphs(entries, subgraphs)`:
+/// ```js
+/// entry.vs = entry.vs.flatMap(v => subgraphs[v] ? subgraphs[v].vs : v);
+/// ```
+///
+/// In dagre, entry.vs contains string node IDs. Each element is either a base
+/// node ID or a subgraph ID. If it's a subgraph ID found in the subgraphs map,
+/// it gets replaced with that subgraph's sorted children (NodeIndex values).
+///
+/// In our implementation, subgraph entries use sentinel NodeIndex values
+/// (stored in sentinel_map) that can be resolved to subgraph IDs.
+fn expand_subgraphs(
+    entries: &mut [SortEntry],
+    subgraph_results: &HashMap<String, SortResult>,
+    sentinel_map: &HashMap<NodeIndex, String>,
+) {
+    for entry in entries.iter_mut() {
+        let needs_expansion = entry.vs.iter().any(|ni| sentinel_map.contains_key(ni));
+        if !needs_expansion {
+            continue;
+        }
+        let mut new_vs = Vec::new();
+        for &ni in &entry.vs {
+            if let Some(sg_id) = sentinel_map.get(&ni) {
+                if let Some(result) = subgraph_results.get(sg_id) {
+                    new_vs.extend_from_slice(&result.vs);
+                }
+                // If no result (empty subgraph), just skip the sentinel
+            } else {
+                new_vs.push(ni);
+            }
+        }
+        entry.vs = new_vs;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Sort entries — matches dagre's `sort.js`
+// ---------------------------------------------------------------------------
+
+/// Sort resolved entries by barycenter, interleaving unsortable entries.
+fn sort_resolved_entries(entries: Vec<SortEntry>, bias_right: bool) -> SortResult {
+    // Partition into sortable (has barycenter) and unsortable.
+    let mut sortable: Vec<SortEntry> = Vec::new();
+    let mut unsortable: Vec<SortEntry> = Vec::new();
+
+    for entry in entries {
+        if entry.barycenter.is_some() {
+            sortable.push(entry);
         } else {
-            a.i.cmp(&b.i)
+            unsortable.push(entry);
+        }
+    }
+
+    // Sort unsortable by descending i (so pop() yields smallest i first).
+    // dagre: `unsortable = parts.rhs.sort((a, b) => b.i - a.i)`
+    unsortable.sort_by(|a, b| b.i.cmp(&a.i));
+
+    // Sort sortable by barycenter with biased tie-breaking.
+    // dagre: `sortable.sort(compareWithBias(!!biasRight))`
+    sortable.sort_by(|a, b| {
+        let ba = a.barycenter.unwrap();
+        let bb = b.barycenter.unwrap();
+        match ba.partial_cmp(&bb) {
+            Some(std::cmp::Ordering::Equal) | None => {
+                if bias_right {
+                    b.i.cmp(&a.i)
+                } else {
+                    a.i.cmp(&b.i)
+                }
+            }
+            Some(ord) => ord,
         }
     });
 
-    // Interleave unsortable entries at their original positions.
-    unsortable_owned.sort_by(|a, b| b.0.cmp(&a.0)); // reverse for pop
-    let mut vs_idx = 0;
-    for s in sortable_owned {
-        while let Some(&(orig_i, _)) = unsortable_owned.last() {
-            if orig_i <= vs_idx {
-                entries.push(unsortable_owned.pop().unwrap().1);
+    // Interleave: consume unsortable entries at their original positions.
+    // dagre: consumeUnsortable between each sortable entry.
+    let mut vs: Vec<NodeIndex> = Vec::new();
+    let mut sum = 0.0f64;
+    let mut weight = 0.0f64;
+    let mut vs_index = 0usize;
+
+    // consume unsortable entries whose original index <= current position.
+    // dagre: index++ (increment by 1 per consumed entry, NOT by vs.len()).
+    fn consume_unsortable(
+        vs: &mut Vec<NodeIndex>,
+        unsortable: &mut Vec<SortEntry>,
+        vs_index: &mut usize,
+    ) {
+        while let Some(last) = unsortable.last() {
+            if last.i <= *vs_index {
+                let entry = unsortable.pop().unwrap();
+                *vs_index += 1; // dagre: index++
+                vs.extend(entry.vs);
             } else {
                 break;
             }
         }
-        vs_idx += s.vs.len();
-        entries.push(s);
     }
-    // Remaining unsortable.
-    while let Some((_, entry)) = unsortable_owned.pop() {
-        entries.push(entry);
+
+    consume_unsortable(&mut vs, &mut unsortable, &mut vs_index);
+
+    for entry in sortable {
+        vs_index += entry.vs.len();
+        sum += entry.barycenter.unwrap() * entry.weight;
+        weight += entry.weight;
+        vs.extend(entry.vs);
+        consume_unsortable(&mut vs, &mut unsortable, &mut vs_index);
+    }
+
+    // Any remaining unsortable
+    while let Some(entry) = unsortable.pop() {
+        vs.extend(entry.vs);
+    }
+
+    SortResult {
+        vs,
+        barycenter: if weight > 0.0 {
+            Some(sum / weight)
+        } else {
+            None
+        },
+        weight,
     }
 }
 
 // ---------------------------------------------------------------------------
-// Subgraph constraint recording
+// Subgraph constraint recording — matches dagre's `addSubgraphConstraints`
 // ---------------------------------------------------------------------------
 
 /// Record the relative order of subgraphs as constraints for subsequent layers.
+///
+/// Matches dagre's `add-subgraph-constraints.js` exactly: walks each node's
+/// ancestry chain, tracking the previous child at each parent level. When two
+/// different children are found at the same level, adds a constraint and stops.
 fn add_subgraph_constraints(
-    graph: &DiGraph<NodeData, EdgeData>,
     parent_map: &HashMap<NodeIndex, Option<String>>,
+    sg_parent_map: &HashMap<String, Option<String>>,
     sorted_layer: &[NodeIndex],
     constraint_graph: &mut ConstraintGraph,
 ) {
     // Track the previous child seen at each parent level.
+    // Key: parent (None = root). Value: child ID at that level.
     let mut prev_at_parent: HashMap<Option<String>, String> = HashMap::new();
 
     for &ni in sorted_layer {
-        let node_id = &graph[ni].id;
+        // Get this node's immediate parent.
+        let child_parent = parent_map.get(&ni).cloned().flatten();
 
-        // Walk up the parent chain.
-        let mut child_id = node_id.clone();
-        let mut parent = parent_map.get(&ni).and_then(|p| p.clone());
+        // child = the node's immediate parent subgraph (or None for root-level nodes).
+        // We walk up from the node's parent, tracking "child" at each level.
+        // dagre walks: let child = g.parent(v), parent, prevChild;
+        //              while (child) { parent = g.parent(child); ... child = parent; }
+        //
+        // But for root-level nodes (parent = None), there's nothing to walk.
+        // For subgraph members, child starts as the node's immediate parent.
+
+        let mut child: Option<String> = child_parent.clone();
 
         loop {
-            let key = parent.clone();
-            if let Some(prev_child) = prev_at_parent.get(&key) {
-                if *prev_child != child_id {
-                    // Different child at this level — record constraint.
-                    constraint_graph.add_edge(prev_child, &child_id);
-                    // Only record the first difference in the hierarchy.
+            match &child {
+                None => {
+                    // We've reached the root level. Nothing to constrain.
                     break;
                 }
-            }
-            prev_at_parent.insert(key.clone(), child_id.clone());
+                Some(child_id) => {
+                    // parent = g.parent(child)
+                    let parent = sg_parent_map.get(child_id).cloned().flatten();
 
-            // Walk up.
-            match &parent {
-                Some(p) => {
-                    child_id = p.clone();
-                    // Find parent of this subgraph.
-                    // We need a subgraph parent map. For now, use a simplified
-                    // approach — stop at root.
-                    parent = None; // TODO: walk subgraph hierarchy properly
+                    let prev_child = prev_at_parent.get(&parent).cloned();
+                    prev_at_parent.insert(parent.clone(), child_id.clone());
+
+                    if let Some(prev) = prev_child {
+                        if prev != *child_id {
+                            // Different child at this level — record constraint and return.
+                            constraint_graph.add_edge(&prev, child_id);
+                            break;
+                        }
+                    }
+
+                    // Walk up.
+                    child = parent;
                 }
-                None => break,
             }
         }
     }
@@ -609,21 +849,64 @@ fn add_subgraph_constraints(
 // ---------------------------------------------------------------------------
 
 /// Build a map from NodeIndex to its immediate parent subgraph ID.
+/// Matches dagre's `g.parent(v)` for compound graphs.
+///
+/// In dagre, border nodes are children of their subgraph in the compound graph.
+/// Since our border nodes aren't in the membership map, we derive their parent
+/// from the BorderSegments data structure.
 fn build_parent_map(
     graph: &DiGraph<NodeData, EdgeData>,
     membership: &SubgraphMembership,
+    border_segments: &BorderSegments,
 ) -> HashMap<NodeIndex, Option<String>> {
+    // Build reverse map: NodeIndex → subgraph ID for all border nodes.
+    let mut border_parent: HashMap<NodeIndex, String> = HashMap::new();
+    for (sg_id, borders) in &border_segments.subgraphs {
+        for &ni in borders.border_left.values() {
+            border_parent.insert(ni, sg_id.clone());
+        }
+        for &ni in borders.border_right.values() {
+            border_parent.insert(ni, sg_id.clone());
+        }
+    }
+
     let mut result = HashMap::new();
     for ni in graph.node_indices() {
         let id = &graph[ni].id;
-        let parent = membership.get(id).and_then(|path| path.last().cloned());
-        result.insert(ni, parent);
+        if let Some(sg_id) = border_parent.get(&ni) {
+            result.insert(ni, Some(sg_id.clone()));
+        } else {
+            let parent = membership.get(id).and_then(|path| path.last().cloned());
+            result.insert(ni, parent);
+        }
     }
     result
 }
 
-/// Build a map from NodeIndex to its position within the layer.
-fn build_position_map(layer: &[NodeIndex]) -> HashMap<NodeIndex, usize> {
+/// Build a map from subgraph ID to its parent subgraph ID.
+/// E.g., if a node has membership path ["A", "B", "C"], then:
+///   "C" -> Some("B"), "B" -> Some("A"), "A" -> None
+fn build_sg_parent_map(membership: &SubgraphMembership) -> HashMap<String, Option<String>> {
+    let mut result: HashMap<String, Option<String>> = HashMap::new();
+
+    for (_node_id, path) in membership.iter() {
+        for (i, sg_id) in path.iter().enumerate() {
+            if !result.contains_key(sg_id) {
+                let parent = if i > 0 {
+                    Some(path[i - 1].clone())
+                } else {
+                    None
+                };
+                result.insert(sg_id.clone(), parent);
+            }
+        }
+    }
+
+    result
+}
+
+/// Build a map from NodeIndex to its position (order) within the layer.
+fn build_order_map(layer: &[NodeIndex]) -> HashMap<NodeIndex, usize> {
     layer
         .iter()
         .enumerate()
@@ -631,62 +914,117 @@ fn build_position_map(layer: &[NodeIndex]) -> HashMap<NodeIndex, usize> {
         .collect()
 }
 
+/// Get border nodes for a subgraph at a specific layer (rank).
+/// Returns (border_left, border_right) if they exist in the layer.
+fn get_border_nodes_for_layer(
+    sg_id: Option<&str>,
+    layer: &[NodeIndex],
+    border_segments: &BorderSegments,
+) -> (Option<NodeIndex>, Option<NodeIndex>) {
+    let sg = match sg_id {
+        Some(sg) => sg,
+        None => return (None, None),
+    };
+
+    let borders = match border_segments.subgraphs.get(sg) {
+        Some(b) => b,
+        None => return (None, None),
+    };
+
+    let layer_set: HashSet<NodeIndex> = layer.iter().copied().collect();
+
+    let bl = borders
+        .border_left
+        .values()
+        .find(|&&ni| layer_set.contains(&ni))
+        .copied();
+    let br = borders
+        .border_right
+        .values()
+        .find(|&&ni| layer_set.contains(&ni))
+        .copied();
+
+    (bl, br)
+}
+
 /// Find child subgraph IDs that have members in this layer and whose
 /// parent is the given sg_id.
+///
+/// A child subgraph is one where:
+/// - Its parent in the subgraph hierarchy is sg_id (or root if sg_id is None)
+/// - It has at least one member node (or border node) in this layer
 fn find_child_subgraphs_in_layer(
     layer: &[NodeIndex],
     parent_sg_id: Option<&str>,
-    membership: &SubgraphMembership,
     parent_map: &HashMap<NodeIndex, Option<String>>,
-    graph: &DiGraph<NodeData, EdgeData>,
+    sg_parent_map: &HashMap<String, Option<String>>,
     border_segments: &BorderSegments,
 ) -> Vec<String> {
-    // A child subgraph of `parent_sg_id` is a subgraph whose immediate parent
-    // in the hierarchy is `parent_sg_id`, and which has at least one member
-    // in this layer (either a direct member or a border node).
-    let mut child_sgs: HashSet<String> = HashSet::new();
+    // Find all subgraph IDs whose parent is parent_sg_id.
+    let child_sg_ids: HashSet<&String> = sg_parent_map
+        .iter()
+        .filter(|(_sg_id, parent)| parent.as_deref() == parent_sg_id)
+        .map(|(sg_id, _)| sg_id)
+        .collect();
+
+    // Check which of these have members in this layer.
+    let mut result: HashSet<String> = HashSet::new();
 
     for &ni in layer {
-        let id = &graph[ni].id;
-        if let Some(path) = membership.get(id) {
-            // Find the subgraph at the level just below parent_sg_id.
-            let parent_idx = match parent_sg_id {
-                Some(pid) => path.iter().position(|p| p == pid).map(|i| i + 1),
-                None => Some(0),
-            };
+        let node_parent = parent_map.get(&ni).and_then(|p| p.as_deref());
 
-            if let Some(idx) = parent_idx {
-                if idx < path.len() {
-                    let child_sg = &path[idx];
-                    // Only include if there are actual child nodes in this layer
-                    // that belong to this child subgraph (not the node itself).
-                    if parent_map.get(&ni).and_then(|p| p.as_deref()) != parent_sg_id {
-                        // This node's parent is NOT the current sg_id, meaning
-                        // it's deeper in the hierarchy. Its immediate parent's
-                        // immediate parent might be sg_id.
-                        // For simplicity, just collect unique child subgraph IDs.
-                    }
-                    child_sgs.insert(child_sg.clone());
+        // If the node's immediate parent is one of our child subgraphs,
+        // that child subgraph is present in this layer.
+        if let Some(np) = node_parent {
+            if child_sg_ids.contains(&np.to_string()) {
+                result.insert(np.to_string());
+                continue;
+            }
+            // Check if the node's parent is a descendant of one of our child subgraphs.
+            // Walk up until we find one of our child_sg_ids or reach parent_sg_id.
+            let mut sg = Some(np.to_string());
+            while let Some(ref sg_id) = sg {
+                if child_sg_ids.contains(sg_id) {
+                    result.insert(sg_id.clone());
+                    break;
+                }
+                sg = sg_parent_map.get(sg_id).cloned().flatten();
+                if sg.as_deref() == parent_sg_id {
+                    break;
                 }
             }
         }
     }
 
-    // Filter to only subgraphs that have border segments (i.e., they actually
-    // span this layer's rank range).
-    child_sgs
-        .into_iter()
-        .filter(|sg| border_segments.subgraphs.contains_key(sg))
-        .collect()
+    // Also check border segments — subgraphs with border nodes in this layer.
+    let layer_set: HashSet<NodeIndex> = layer.iter().copied().collect();
+    for sg_id in &child_sg_ids {
+        if result.contains(sg_id.as_str()) {
+            continue;
+        }
+        if let Some(borders) = border_segments.subgraphs.get(sg_id.as_str()) {
+            let has_border_in_layer = borders
+                .border_left
+                .values()
+                .chain(borders.border_right.values())
+                .any(|ni| layer_set.contains(ni));
+            if has_border_in_layer {
+                result.insert((*sg_id).clone());
+            }
+        }
+    }
+
+    result.into_iter().collect()
 }
 
 // ---------------------------------------------------------------------------
-// Crossing count (shared with ordering.rs)
+// Crossing count
 // ---------------------------------------------------------------------------
 
 /// Fenwick tree (Binary Indexed Tree) for O(log n) prefix-sum queries.
+/// Stores weighted sums instead of counts.
 struct FenwickTree {
-    tree: Vec<usize>,
+    tree: Vec<u64>,
 }
 
 impl FenwickTree {
@@ -696,17 +1034,17 @@ impl FenwickTree {
         }
     }
 
-    fn update(&mut self, mut i: usize) {
+    fn update(&mut self, mut i: usize, weight: u64) {
         i += 1;
         while i < self.tree.len() {
-            self.tree[i] += 1;
+            self.tree[i] += weight;
             i += i & i.wrapping_neg();
         }
     }
 
-    fn prefix_sum(&self, mut i: usize) -> usize {
+    fn prefix_sum(&self, mut i: usize) -> u64 {
         i += 1;
-        let mut sum = 0;
+        let mut sum = 0u64;
         while i > 0 {
             sum += self.tree[i];
             i -= i & i.wrapping_neg();
@@ -715,25 +1053,34 @@ impl FenwickTree {
     }
 }
 
+/// Count weighted edge crossings between two adjacent layers.
+/// Matches dagre's `twoLayerCrossCount` which uses `entry.weight * weightSum`.
 fn count_bilayer_crossings(
     graph: &DiGraph<NodeData, EdgeData>,
     north_layer: &[NodeIndex],
     south_layer: &[NodeIndex],
-) -> usize {
+) -> u64 {
     let south_pos: HashMap<NodeIndex, usize> = south_layer
         .iter()
         .enumerate()
         .map(|(pos, &node)| (node, pos))
         .collect();
 
-    let mut south_endpoints: Vec<usize> = Vec::new();
+    // Collect (south_position, edge_weight) for each edge, ordered by north position
+    // then south position (ascending).
+    let mut south_entries: Vec<(usize, u64)> = Vec::new();
     for &north_node in north_layer {
-        let mut targets: Vec<usize> = graph
-            .neighbors_directed(north_node, petgraph::Direction::Outgoing)
-            .filter_map(|n| south_pos.get(&n).copied())
+        let mut targets: Vec<(usize, u64)> = graph
+            .edges_directed(north_node, petgraph::Direction::Outgoing)
+            .filter_map(|edge_ref| {
+                south_pos.get(&edge_ref.target()).map(|&pos| {
+                    let weight = edge_ref.weight().weight.max(1) as u64;
+                    (pos, weight)
+                })
+            })
             .collect();
-        targets.sort_unstable();
-        south_endpoints.extend(targets);
+        targets.sort_by_key(|&(pos, _)| pos);
+        south_entries.extend(targets);
     }
 
     let south_size = south_layer.len();
@@ -741,19 +1088,20 @@ fn count_bilayer_crossings(
         return 0;
     }
     let mut tree = FenwickTree::new(south_size);
-    let mut crossings: usize = 0;
-    let mut inserted: usize = 0;
+    let mut crossings: u64 = 0;
+    let mut total_weight: u64 = 0;
 
-    for &pos in &south_endpoints {
-        crossings += inserted - tree.prefix_sum(pos);
-        tree.update(pos);
-        inserted += 1;
+    for &(pos, weight) in &south_entries {
+        // Weighted crossings: weight * (total weight inserted so far - prefix sum up to pos)
+        crossings += weight * (total_weight - tree.prefix_sum(pos));
+        tree.update(pos, weight);
+        total_weight += weight;
     }
 
     crossings
 }
 
-fn count_total_crossings(graph: &DiGraph<NodeData, EdgeData>, layers: &[Vec<NodeIndex>]) -> usize {
+fn count_total_crossings(graph: &DiGraph<NodeData, EdgeData>, layers: &[Vec<NodeIndex>]) -> u64 {
     (0..layers.len().saturating_sub(1))
         .map(|i| count_bilayer_crossings(graph, &layers[i], &layers[i + 1]))
         .sum()
@@ -792,7 +1140,6 @@ mod tests {
     fn test_recursive_ordering_basic() {
         // Simple 2-layer graph with crossing.
         // A->D, B->C: initial order [C, D] has 1 crossing.
-        // Should reorder to [D, C] or [C, D] -> 0 crossings.
         let mut g = DiGraph::new();
         let a = g.add_node(make_node("A"));
         let b = g.add_node(make_node("B"));
