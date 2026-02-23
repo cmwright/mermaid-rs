@@ -78,7 +78,23 @@ pub fn layout(
     rank_assignment::align_sibling_subgraph_ranks(graph, &mut ranks, ast, membership);
     rank_assignment::align_within_subgraph_peers(graph, &mut ranks, membership, ast);
 
-    // Phase 4c: Add border segments — left/right border dummy nodes at every
+    // Phase 4c: Compact ranks — close any empty gaps introduced by alignment.
+    // Renumber all ranks contiguously so there are no wasted vertical levels.
+    {
+        let mut unique_ranks: Vec<usize> = ranks.values().copied().collect();
+        unique_ranks.sort_unstable();
+        unique_ranks.dedup();
+        let rank_map: HashMap<usize, usize> = unique_ranks
+            .into_iter()
+            .enumerate()
+            .map(|(new, old)| (old, new))
+            .collect();
+        for rank in ranks.values_mut() {
+            *rank = rank_map[rank];
+        }
+    }
+
+    // Phase 4d: Add border segments — left/right border dummy nodes at every
     // rank within each subgraph's range, connected vertically by edges.
     // These are used by the ordering algorithm to enforce subgraph contiguity.
     let border_segments = border_segments::add_border_segments(graph, &mut ranks, ast, membership);
@@ -149,8 +165,10 @@ pub fn layout(
             RANK_SEP / 2.0,
         );
 
-        // Phase 8: Remove border segment nodes from the graph.
-        border_segments::remove_border_segments(graph, &mut ranks, &border_segments);
+        // Phase 8: Border segment nodes remain in the graph but are filtered
+        // out by build_positioned_nodes (which skips __dummy_ and __border_ prefixed
+        // nodes). We do NOT remove them to avoid invalidating NodeIndex values
+        // stored in DummyChains and the positions map.
 
         // Restore reversed edges (doesn't affect positions)
         cycle_removal::restore_cycles(graph, &reversed);

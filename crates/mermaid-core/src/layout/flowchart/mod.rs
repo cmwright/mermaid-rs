@@ -101,8 +101,8 @@ pub(crate) fn build_positioned_nodes(
         .node_indices()
         .filter_map(|idx| {
             let node = &graph[idx];
-            // Skip dummy nodes
-            if node.id.starts_with("__dummy_") {
+            // Skip dummy and border segment nodes
+            if node.id.starts_with("__dummy_") || node.id.starts_with("__border_") {
                 return None;
             }
             let &(x, y) = positions.get(&idx)?;
@@ -1782,6 +1782,65 @@ mod tests {
             "Production Frontend->Backend gap is {prod_gap:.0}px (max {max_gap:.0}). \
             ProdFE bottom={prod_fe_bottom:.0}, ProdBE top={:.0}",
             prod_be.y,
+        );
+    }
+
+    /// In the org flowchart, sibling nodes that play equivalent structural
+    /// roles should be horizontally aligned (same y in TD layout), matching
+    /// mermaid.js behavior.
+    ///
+    /// Specifically:
+    /// - The three legal entity nodes (LE1, LE2, LE3) should share the same rank.
+    /// - The three organization nodes (OO1, OO2, OO3) should share the same rank.
+    #[test]
+    fn test_org_flowchart_sibling_rank_alignment() {
+        let source = include_str!("../../../../../tests/test_loop/input_mermaid.mmd");
+        let result = layout_from_source(source);
+
+        let node = |id: &str| -> &PositionedNode {
+            result
+                .nodes
+                .iter()
+                .find(|n| n.id == id)
+                .unwrap_or_else(|| panic!("node '{id}' not found"))
+        };
+
+        // In a TD layout, "same rank" means same y-coordinate (within tolerance
+        // for minor rounding from coordinate assignment).
+        let tolerance = 1.0;
+
+        // Legal entities: LE1, LE2, LE3 should be at the same y
+        let le1 = node("LE1");
+        let le2 = node("LE2");
+        let le3 = node("LE3");
+        assert!(
+            (le1.y - le2.y).abs() < tolerance,
+            "LE1 and LE2 should be at the same rank (LE1.y={:.1}, LE2.y={:.1})",
+            le1.y,
+            le2.y,
+        );
+        assert!(
+            (le1.y - le3.y).abs() < tolerance,
+            "LE1 and LE3 should be at the same rank (LE1.y={:.1}, LE3.y={:.1})",
+            le1.y,
+            le3.y,
+        );
+
+        // Organization nodes: OO1, OO2, OO3 should be at the same y
+        let oo1 = node("OO1");
+        let oo2 = node("OO2");
+        let oo3 = node("OO3");
+        assert!(
+            (oo1.y - oo2.y).abs() < tolerance,
+            "OO1 and OO2 should be at the same rank (OO1.y={:.1}, OO2.y={:.1})",
+            oo1.y,
+            oo2.y,
+        );
+        assert!(
+            (oo1.y - oo3.y).abs() < tolerance,
+            "OO1 and OO3 should be at the same rank (OO1.y={:.1}, OO3.y={:.1})",
+            oo1.y,
+            oo3.y,
         );
     }
 }
