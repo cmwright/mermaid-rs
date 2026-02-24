@@ -582,7 +582,10 @@ mod tests {
         // abs_dy*hw > abs_dx*hh, dy > 0 -> exit bottom (sy = hh)
         let node = make_rect_node("R", 100.0, 100.0);
         let (_ix, iy) = intersect_shape(&node, 100.0, 200.0);
-        assert!((iy - 120.0).abs() < 1.0, "should exit bottom, y ~120, got {iy}");
+        assert!(
+            (iy - 120.0).abs() < 1.0,
+            "should exit bottom, y ~120, got {iy}"
+        );
     }
 
     #[test]
@@ -719,7 +722,7 @@ mod tests {
             id: "sg1".into(),
             label: Some("SG".into()),
             x: 50.0,
-            y: 100.0,   // top border at y=100
+            y: 100.0, // top border at y=100
             width: 200.0,
             height: 200.0,
             style: Default::default(),
@@ -732,8 +735,8 @@ mod tests {
             arrow_start: ArrowEnd::None,
             arrow_end: ArrowEnd::Arrow,
             label: Some("test".into()),
-            label_x: Some(150.0),  // horizontally inside subgraph
-            label_y: Some(105.0),  // center below border, but label_top = 105 - 10 = 95 < 100
+            label_x: Some(150.0), // horizontally inside subgraph
+            label_y: Some(105.0), // center below border, but label_top = 105 - 10 = 95 < 100
             label_width: Some(40.0),
             label_height: Some(20.0),
             points: vec![(50.0, 50.0), (250.0, 150.0)],
@@ -757,7 +760,7 @@ mod tests {
             x: 50.0,
             y: 100.0,
             width: 200.0,
-            height: 200.0,  // bottom border at y=300
+            height: 200.0, // bottom border at y=300
             style: Default::default(),
         };
 
@@ -769,7 +772,7 @@ mod tests {
             arrow_end: ArrowEnd::Arrow,
             label: Some("test".into()),
             label_x: Some(150.0),
-            label_y: Some(305.0),  // center below border; label_top=295 < 300, label_bottom=315 > 300
+            label_y: Some(305.0), // center below border; label_top=295 < 300, label_bottom=315 > 300
             label_width: Some(40.0),
             label_height: Some(20.0),
             points: vec![(50.0, 50.0), (250.0, 350.0)],
@@ -793,7 +796,7 @@ mod tests {
             x: 50.0,
             y: 100.0,
             width: 200.0,
-            height: 200.0,  // bottom border at y=300
+            height: 200.0, // bottom border at y=300
             style: Default::default(),
         };
 
@@ -805,7 +808,7 @@ mod tests {
             arrow_end: ArrowEnd::Arrow,
             label: Some("test".into()),
             label_x: Some(150.0),
-            label_y: Some(295.0),  // center above border; label_bottom=305 > 300
+            label_y: Some(295.0), // center above border; label_bottom=305 > 300
             label_width: Some(40.0),
             label_height: Some(20.0),
             points: vec![(150.0, 250.0), (150.0, 350.0)],
@@ -840,7 +843,7 @@ mod tests {
             arrow_start: ArrowEnd::None,
             arrow_end: ArrowEnd::Arrow,
             label: Some("test".into()),
-            label_x: Some(95.0),   // center left of border; label_right=115 > 100
+            label_x: Some(95.0), // center left of border; label_right=115 > 100
             label_y: Some(150.0),
             label_width: Some(40.0),
             label_height: Some(20.0),
@@ -863,7 +866,7 @@ mod tests {
             label: Some("SG".into()),
             x: 100.0,
             y: 50.0,
-            width: 200.0,  // right border at x=300
+            width: 200.0, // right border at x=300
             height: 200.0,
             style: Default::default(),
         };
@@ -875,7 +878,7 @@ mod tests {
             arrow_start: ArrowEnd::None,
             arrow_end: ArrowEnd::Arrow,
             label: Some("test".into()),
-            label_x: Some(305.0),  // center right of border; label_left=285 < 300
+            label_x: Some(305.0), // center right of border; label_left=285 < 300
             label_y: Some(150.0),
             label_width: Some(40.0),
             label_height: Some(20.0),
@@ -895,7 +898,7 @@ mod tests {
         let sg = PositionedSubgraph {
             id: "sg1".into(),
             label: Some("SG".into()),
-            x: 100.0,  // left border at x=100
+            x: 100.0, // left border at x=100
             y: 50.0,
             width: 200.0,
             height: 200.0,
@@ -909,8 +912,8 @@ mod tests {
             arrow_start: ArrowEnd::None,
             arrow_end: ArrowEnd::Arrow,
             label: Some("test".into()),
-            label_x: Some(105.0),  // center right of border; label_left=85 < 100, label_right=125 > 100
-            label_y: Some(150.0),  // vertically inside subgraph
+            label_x: Some(105.0), // center right of border; label_left=85 < 100, label_right=125 > 100
+            label_y: Some(150.0), // vertically inside subgraph
             label_width: Some(40.0),
             label_height: Some(20.0),
             points: vec![(50.0, 150.0), (200.0, 150.0)],
@@ -932,7 +935,7 @@ mod tests {
             label: Some("SG".into()),
             x: 100.0,
             y: 50.0,
-            width: 200.0,  // right border at x=300
+            width: 200.0, // right border at x=300
             height: 200.0,
             style: Default::default(),
         };
@@ -944,7 +947,7 @@ mod tests {
             arrow_start: ArrowEnd::None,
             arrow_end: ArrowEnd::Arrow,
             label: Some("test".into()),
-            label_x: Some(295.0),  // label_left=275 < 300, label_right=315 > 300
+            label_x: Some(295.0), // label_left=275 < 300, label_right=315 > 300
             label_y: Some(150.0),
             label_width: Some(40.0),
             label_height: Some(20.0),
@@ -982,7 +985,7 @@ mod tests {
             arrow_end: ArrowEnd::Arrow,
             label: Some("test".into()),
             label_x: Some(150.0),
-            label_y: Some(title_bottom - 5.0),  // label_top inside title area
+            label_y: Some(title_bottom - 5.0), // label_top inside title area
             label_width: Some(40.0),
             label_height: Some(20.0),
             points: vec![(50.0, 50.0), (250.0, 250.0)],
@@ -1050,7 +1053,7 @@ mod tests {
             label: Some("tiny".into()),
             label_x: Some(150.0),
             label_y: Some(100.0),
-            label_width: Some(0.5),  // < 1.0
+            label_width: Some(0.5), // < 1.0
             label_height: Some(0.5),
             points: vec![(50.0, 50.0), (250.0, 250.0)],
         }];
@@ -1083,10 +1086,7 @@ mod tests {
         );
         // Last point should be near the edge of to
         let last = points.last().unwrap();
-        assert!(
-            (last.0 - 100.0).abs() < 5.0,
-            "end x should be near to.x"
-        );
+        assert!((last.0 - 100.0).abs() < 5.0, "end x should be near to.x");
     }
 
     // -----------------------------------------------------------------------
@@ -1113,7 +1113,14 @@ mod tests {
         let mut label_dimensions = HashMap::new();
         label_dimensions.insert(("A".to_string(), "B".to_string()), (30.0, 15.0));
 
-        let result = route_edges(&nodes, &edges, false, &HashMap::new(), &label_positions, &label_dimensions);
+        let result = route_edges(
+            &nodes,
+            &edges,
+            false,
+            &HashMap::new(),
+            &label_positions,
+            &label_dimensions,
+        );
         assert_eq!(result.len(), 1);
         assert!(result[0].label_x.is_some());
         assert!(result[0].label_y.is_some());
@@ -1139,7 +1146,14 @@ mod tests {
         }];
 
         // No label_positions provided -> should fall back to edge_label_anchor
-        let result = route_edges(&nodes, &edges, false, &HashMap::new(), &HashMap::new(), &HashMap::new());
+        let result = route_edges(
+            &nodes,
+            &edges,
+            false,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        );
         assert_eq!(result.len(), 1);
         assert!(result[0].label_x.is_some());
         assert!(result[0].label_y.is_some());
@@ -1163,7 +1177,14 @@ mod tests {
             label: None,
         }];
 
-        let result = route_edges(&nodes, &edges, false, &HashMap::new(), &HashMap::new(), &HashMap::new());
+        let result = route_edges(
+            &nodes,
+            &edges,
+            false,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        );
         assert_eq!(result.len(), 1);
         assert!(result[0].label_x.is_none());
         assert!(result[0].label_y.is_none());
@@ -1184,8 +1205,19 @@ mod tests {
             label: None,
         }];
 
-        let result = route_edges(&nodes, &edges, false, &HashMap::new(), &HashMap::new(), &HashMap::new());
-        assert_eq!(result.len(), 0, "edge with missing node should be filtered out");
+        let result = route_edges(
+            &nodes,
+            &edges,
+            false,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        assert_eq!(
+            result.len(),
+            0,
+            "edge with missing node should be filtered out"
+        );
     }
 
     // -----------------------------------------------------------------------
@@ -1249,31 +1281,73 @@ mod tests {
 
     #[test]
     fn test_segment_intersects_rect_horizontal_hit() {
-        assert!(segment_intersects_rect((0.0, 5.0), (10.0, 5.0), 3.0, 0.0, 7.0, 10.0));
+        assert!(segment_intersects_rect(
+            (0.0, 5.0),
+            (10.0, 5.0),
+            3.0,
+            0.0,
+            7.0,
+            10.0
+        ));
     }
 
     #[test]
     fn test_segment_intersects_rect_horizontal_miss() {
-        assert!(!segment_intersects_rect((0.0, 15.0), (10.0, 15.0), 3.0, 0.0, 7.0, 10.0));
+        assert!(!segment_intersects_rect(
+            (0.0, 15.0),
+            (10.0, 15.0),
+            3.0,
+            0.0,
+            7.0,
+            10.0
+        ));
     }
 
     #[test]
     fn test_segment_intersects_rect_vertical_hit() {
-        assert!(segment_intersects_rect((5.0, 0.0), (5.0, 10.0), 3.0, 3.0, 7.0, 7.0));
+        assert!(segment_intersects_rect(
+            (5.0, 0.0),
+            (5.0, 10.0),
+            3.0,
+            3.0,
+            7.0,
+            7.0
+        ));
     }
 
     #[test]
     fn test_segment_intersects_rect_vertical_miss() {
-        assert!(!segment_intersects_rect((1.0, 0.0), (1.0, 10.0), 3.0, 3.0, 7.0, 7.0));
+        assert!(!segment_intersects_rect(
+            (1.0, 0.0),
+            (1.0, 10.0),
+            3.0,
+            3.0,
+            7.0,
+            7.0
+        ));
     }
 
     #[test]
     fn test_segment_intersects_rect_diagonal_hit() {
-        assert!(segment_intersects_rect((0.0, 0.0), (10.0, 10.0), 3.0, 3.0, 7.0, 7.0));
+        assert!(segment_intersects_rect(
+            (0.0, 0.0),
+            (10.0, 10.0),
+            3.0,
+            3.0,
+            7.0,
+            7.0
+        ));
     }
 
     #[test]
     fn test_segment_intersects_rect_diagonal_miss() {
-        assert!(!segment_intersects_rect((0.0, 0.0), (2.0, 2.0), 5.0, 5.0, 10.0, 10.0));
+        assert!(!segment_intersects_rect(
+            (0.0, 0.0),
+            (2.0, 2.0),
+            5.0,
+            5.0,
+            10.0,
+            10.0
+        ));
     }
 }

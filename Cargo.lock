@@ -418,6 +418,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dagre-rust"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "data-url"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -852,6 +861,7 @@ dependencies = [
  "ab_glyph",
  "chrono",
  "criterion",
+ "dagre-rust",
  "log",
  "pest",
  "pest_derive",

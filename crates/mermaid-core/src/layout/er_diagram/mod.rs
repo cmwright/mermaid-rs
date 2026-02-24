@@ -8,7 +8,6 @@ use crate::ast::flowchart::{
 };
 use crate::error::Result;
 use crate::layout::flowchart;
-use crate::layout::flowchart::types::NodeData;
 use crate::layout::text_measure::TextMeasurer;
 
 use self::types::*;
@@ -38,28 +37,33 @@ pub fn layout_er_diagram(
     let fc_ast = convert_to_flowchart_ast(ast);
 
     // 2. Replicate the flowchart layout pipeline with pre-layout size override
-    use crate::layout::flowchart::{edge_routing, graph_builder, normalize, sugiyama};
+    use crate::layout::flowchart::{edge_routing, graph_builder, normalize};
 
     let class_defs = graph_builder::build_class_map(&fc_ast.class_defs);
     let all_nodes = graph_builder::collect_all_nodes(&fc_ast, &class_defs);
     let all_edges = graph_builder::collect_all_edges(&fc_ast);
-    let (mut graph, _index_map) =
-        graph_builder::build_petgraph(&all_nodes, &all_edges, measurer)?;
 
-    // Override entity sizes in the petgraph BEFORE Sugiyama
-    override_entity_sizes(&mut graph, &entity_sizes);
+    // Build dagre graph
+    let (mut dagre_graph, mut node_data_map) = graph_builder::build_dagre_graph(
+        &all_nodes,
+        &all_edges,
+        measurer,
+        fc_ast.direction,
+        &fc_ast,
+    )?;
 
-    let membership = graph_builder::build_subgraph_membership(&fc_ast);
+    // Override entity sizes in the dagre graph BEFORE layout
+    override_entity_sizes_dagre(&mut dagre_graph, &mut node_data_map, &entity_sizes);
 
-    // Run Sugiyama with correct node sizes
-    let result = sugiyama::layout(&mut graph, fc_ast.direction, &membership, &fc_ast);
+    // Run dagre layout
+    dagre_rust::layout(&mut dagre_graph);
 
     // Build positioned nodes
-    let mut positioned_nodes = flowchart::build_positioned_nodes(&graph, &result.positions);
+    let mut positioned_nodes =
+        flowchart::build_positioned_nodes_from_dagre(&dagre_graph, &node_data_map);
 
-    // Extract bend points and route edges
-    let extraction =
-        flowchart::build_edge_bend_points(&graph, &result.dummy_chains, &result.positions);
+    // Extract bend points and route edges from dagre results
+    let extraction = flowchart::extract_edge_data_from_dagre(&dagre_graph);
 
     let is_horizontal = matches!(
         fc_ast.direction,
@@ -83,7 +87,14 @@ pub fn layout_er_diagram(
     );
 
     // 3. Convert back to ER positioned types
-    convert_from_flowchart_result(ast, positioned_nodes, positioned_edges, &entity_sizes, width, height)
+    convert_from_flowchart_result(
+        ast,
+        positioned_nodes,
+        positioned_edges,
+        &entity_sizes,
+        width,
+        height,
+    )
 }
 
 /// Pre-computed entity dimensions.
@@ -165,15 +176,19 @@ fn compute_entity_sizes(
 }
 
 /// Override node sizes in the petgraph to match pre-computed entity sizes.
-fn override_entity_sizes(
-    graph: &mut petgraph::graph::DiGraph<NodeData, crate::layout::flowchart::types::EdgeData>,
+fn override_entity_sizes_dagre(
+    g: &mut dagre_rust::LayoutGraph,
+    node_data_map: &mut HashMap<String, crate::layout::flowchart::types::NodeData>,
     entity_sizes: &HashMap<String, EntitySize>,
 ) {
-    for idx in graph.node_indices() {
-        if let Some(size) = entity_sizes.get(&graph[idx].id) {
-            let node = &mut graph[idx];
-            node.width = size.width;
-            node.height = size.height;
+    for (id, size) in entity_sizes {
+        if let Some(nl) = g.node_mut(id) {
+            nl.width = size.width;
+            nl.height = size.height;
+        }
+        if let Some(nd) = node_data_map.get_mut(id) {
+            nd.width = size.width;
+            nd.height = size.height;
         }
     }
 }
@@ -231,11 +246,8 @@ fn convert_from_flowchart_result(
     height: f64,
 ) -> Result<PositionedErDiagram> {
     // Build entity lookup from AST
-    let entity_map: HashMap<&str, &EntityDef> = ast
-        .entities
-        .iter()
-        .map(|e| (e.id.as_str(), e))
-        .collect();
+    let entity_map: HashMap<&str, &EntityDef> =
+        ast.entities.iter().map(|e| (e.id.as_str(), e)).collect();
 
     // Build relationship lookup by (from, to) for cardinality info
     let rel_map: HashMap<(&str, &str), &RelationshipDef> = ast
@@ -252,9 +264,7 @@ fn convert_from_flowchart_result(
         entities.push(PositionedEntity {
             id: node.id.clone(),
             alias: ast_entity.and_then(|e| e.alias.clone()),
-            attributes: ast_entity
-                .map(|e| e.attributes.clone())
-                .unwrap_or_default(),
+            attributes: ast_entity.map(|e| e.attributes.clone()).unwrap_or_default(),
             x: node.x,
             y: node.y,
             width: node.width,
@@ -271,12 +281,8 @@ fn convert_from_flowchart_result(
         relationships.push(PositionedRelationship {
             from_id: edge.from_id.clone(),
             to_id: edge.to_id.clone(),
-            cardinality_from: rel
-                .map(|r| r.cardinality_a)
-                .unwrap_or(Cardinality::OnlyOne),
-            cardinality_to: rel
-                .map(|r| r.cardinality_b)
-                .unwrap_or(Cardinality::OnlyOne),
+            cardinality_from: rel.map(|r| r.cardinality_a).unwrap_or(Cardinality::OnlyOne),
+            cardinality_to: rel.map(|r| r.cardinality_b).unwrap_or(Cardinality::OnlyOne),
             relation_type: rel
                 .map(|r| r.relation_type)
                 .unwrap_or(RelationType::Identifying),

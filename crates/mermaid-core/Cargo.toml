@@ -12,6 +12,7 @@ png = ["dep:resvg", "dep:png"]
 pest = "2.7"
 pest_derive = "2.7"
 petgraph = "0.8"
+dagre-rust = { path = "../dagre-rust" }
 ab_glyph = "0.2"
 chrono = "0.4"
 thiserror.workspace = true

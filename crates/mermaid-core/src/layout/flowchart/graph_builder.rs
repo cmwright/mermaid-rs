@@ -4,7 +4,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 
 use crate::ast::common::StyleProperties;
 use crate::ast::flowchart::{
-    ClassAssignment, ClassDef, EdgeDef, FlowchartAst, NodeDef, NodeShape, StyleOverride,
+    ClassAssignment, ClassDef, Direction, EdgeDef, FlowchartAst, NodeDef, NodeShape, StyleOverride,
     SubgraphDef,
 };
 use crate::error::{MermaidError, Result};
@@ -80,7 +80,9 @@ fn collect_subgraph_nodes(
             } else {
                 // Bare reference (from cross-subgraph link chain) — don't overwrite
                 // a labeled definition that was already inserted.
-                all_nodes.entry(node.id.clone()).or_insert((node.clone(), style));
+                all_nodes
+                    .entry(node.id.clone())
+                    .or_insert((node.clone(), style));
             }
         }
         for edge in &sg.edges {
@@ -191,7 +193,9 @@ fn collect_membership(
             } else {
                 // Implicit reference (bare node from a link-chain target) —
                 // only claim it if no other subgraph has claimed it yet.
-                membership.entry(node.id.clone()).or_insert_with(|| path.clone());
+                membership
+                    .entry(node.id.clone())
+                    .or_insert_with(|| path.clone());
             }
         }
         for edge in &sg.edges {
@@ -292,6 +296,183 @@ pub fn build_petgraph(
     Ok((graph, index_map))
 }
 
+// ── Dagre graph construction ────────────────────────────────
+
+/// Convert a mermaid Direction to a dagre RankDir.
+pub fn direction_to_rankdir(dir: Direction) -> dagre_rust::RankDir {
+    match dir {
+        Direction::TopToBottom => dagre_rust::RankDir::TB,
+        Direction::BottomToTop => dagre_rust::RankDir::BT,
+        Direction::LeftToRight => dagre_rust::RankDir::LR,
+        Direction::RightToLeft => dagre_rust::RankDir::RL,
+    }
+}
+
+/// Build a dagre LayoutGraph from collected nodes and edges.
+///
+/// Returns the LayoutGraph and a parallel list of NodeData (keyed by node ID)
+/// so callers can reconstruct PositionedNodes with shape/style info after layout.
+pub fn build_dagre_graph(
+    all_nodes: &HashMap<String, (NodeDef, StyleProperties)>,
+    edges: &[EdgeDef],
+    measurer: &TextMeasurer<'_>,
+    direction: Direction,
+    ast: &FlowchartAst,
+) -> Result<(dagre_rust::LayoutGraph, HashMap<String, NodeData>)> {
+    let mut g = dagre_rust::Graph::with_options(&dagre_rust::GraphOptions {
+        directed: true,
+        multigraph: true,
+        compound: true,
+    });
+
+    // Configure graph label — match mermaid.js settings
+    let mut gl = dagre_rust::GraphLabel::default();
+    gl.rankdir = direction_to_rankdir(direction);
+    gl.nodesep = NODE_SEP;
+    gl.edgesep = EDGE_SEP;
+    gl.ranksep = RANK_SEP;
+    gl.marginx = 8.0;
+    gl.marginy = 8.0;
+    g.set_graph(gl);
+
+    let mut node_data_map: HashMap<String, NodeData> = HashMap::new();
+
+    // Sort nodes by ID for deterministic ordering
+    let mut sorted_nodes: Vec<_> = all_nodes.iter().collect();
+    sorted_nodes.sort_by_key(|(id, _)| id.as_str());
+
+    for (id, (node_def, style)) in &sorted_nodes {
+        let label = node_def.label.clone().unwrap_or_else(|| (*id).clone());
+
+        let clean_text = crate::render::html_util::strip_html_tags(
+            &crate::render::html_util::normalize_br(&label),
+        );
+
+        let wrapped_text = measurer.wrap_text(&clean_text, MAX_NODE_TEXT_WIDTH);
+        let label = if wrapped_text != clean_text {
+            wrapped_text.clone()
+        } else {
+            label
+        };
+
+        let measure_text = &wrapped_text;
+        let text_metrics = if measure_text.contains('\n') {
+            measurer.measure_multiline(measure_text, 4.0)
+        } else {
+            measurer.measure(measure_text)
+        };
+        let (width, height) = compute_node_size(&node_def.shape, &text_metrics);
+
+        let mut nl = dagre_rust::NodeLabel::default();
+        nl.width = width;
+        nl.height = height;
+        g.set_node(id, Some(nl));
+
+        node_data_map.insert(
+            (*id).clone(),
+            NodeData {
+                id: (*id).clone(),
+                label,
+                shape: node_def.shape,
+                style: (*style).clone(),
+                width,
+                height,
+            },
+        );
+    }
+
+    for edge in edges {
+        if !all_nodes.contains_key(&edge.from) {
+            return Err(MermaidError::Layout(format!(
+                "Unknown source node: {}",
+                edge.from
+            )));
+        }
+        if !all_nodes.contains_key(&edge.to) {
+            return Err(MermaidError::Layout(format!(
+                "Unknown target node: {}",
+                edge.to
+            )));
+        }
+
+        let (label_width, label_height) = if let Some(ref label_text) = edge.label {
+            let clean = crate::render::html_util::normalize_br(label_text);
+            let clean = crate::render::html_util::strip_html_tags(&clean);
+            let metrics = if clean.contains('\n') {
+                measurer.measure_multiline(&clean, 4.0)
+            } else {
+                measurer.measure(&clean)
+            };
+            (metrics.width + 10.0, metrics.height + 6.0)
+        } else {
+            (0.0, 0.0)
+        };
+
+        let mut el = dagre_rust::EdgeLabel::default();
+        el.width = label_width;
+        el.height = label_height;
+        el.labelpos = dagre_rust::LabelPos::Center;
+        g.set_edge(&edge.from, &edge.to, Some(el), None);
+    }
+
+    // Register subgraph nodes in dagre and set parent relationships
+    // so dagre's compound layout can handle subgraph containment.
+    let membership = build_subgraph_membership(ast);
+    register_subgraph_hierarchy(&mut g, &ast.subgraphs, &membership);
+
+    Ok((g, node_data_map))
+}
+
+/// Register subgraph nodes in dagre and set parent relationships for compound layout.
+fn register_subgraph_hierarchy(
+    g: &mut dagre_rust::LayoutGraph,
+    subgraphs: &[SubgraphDef],
+    membership: &SubgraphMembership,
+) {
+    let sg_ids = subgraph_ids_recursive(subgraphs);
+
+    // First, register all subgraph nodes and set their parent relationships
+    register_subgraphs_recursive(g, subgraphs, None);
+
+    // Then set parent for all leaf nodes based on membership
+    for (node_id, path) in membership {
+        if !path.is_empty() && !sg_ids.contains(node_id) {
+            let parent = &path[path.len() - 1];
+            if g.node(node_id).is_some() {
+                g.set_parent(node_id, Some(parent));
+            }
+        }
+    }
+}
+
+fn register_subgraphs_recursive(
+    g: &mut dagre_rust::LayoutGraph,
+    subgraphs: &[SubgraphDef],
+    parent_id: Option<&str>,
+) {
+    for sg in subgraphs {
+        // Ensure the subgraph node exists in dagre (as a compound parent)
+        if g.node(&sg.id).is_none() {
+            g.set_node(&sg.id, Some(dagre_rust::NodeLabel::default()));
+        }
+        // Set subgraph's parent (if nested)
+        if let Some(pid) = parent_id {
+            g.set_parent(&sg.id, Some(pid));
+        }
+        // Recursively handle nested subgraphs
+        register_subgraphs_recursive(g, &sg.subgraphs, Some(&sg.id));
+    }
+}
+
+fn subgraph_ids_recursive(subgraphs: &[SubgraphDef]) -> std::collections::HashSet<String> {
+    let mut ids = std::collections::HashSet::new();
+    for sg in subgraphs {
+        ids.insert(sg.id.clone());
+        ids.extend(subgraph_ids_recursive(&sg.subgraphs));
+    }
+    ids
+}
+
 fn compute_node_size(shape: &NodeShape, text: &TextMetrics) -> (f64, f64) {
     let base_w = (text.width + 2.0 * NODE_PADDING_H).max(MIN_NODE_WIDTH);
     let base_h = (text.height + 2.0 * NODE_PADDING_V).max(MIN_NODE_HEIGHT);
@@ -339,33 +520,31 @@ mod tests {
     #[test]
     fn test_collect_subgraph_nodes_nested() {
         let ast = FlowchartAst {
-            subgraphs: vec![
-                SubgraphDef {
-                    id: "Outer".to_string(),
+            subgraphs: vec![SubgraphDef {
+                id: "Outer".to_string(),
+                label: None,
+                direction: None,
+                nodes: vec![NodeDef {
+                    id: "A".into(),
+                    label: None,
+                    shape: NodeShape::Rectangle,
+                    class_shorthand: None,
+                }],
+                edges: vec![],
+                subgraphs: vec![SubgraphDef {
+                    id: "Inner".to_string(),
                     label: None,
                     direction: None,
                     nodes: vec![NodeDef {
-                        id: "A".into(),
+                        id: "B".into(),
                         label: None,
                         shape: NodeShape::Rectangle,
                         class_shorthand: None,
                     }],
                     edges: vec![],
-                    subgraphs: vec![SubgraphDef {
-                        id: "Inner".to_string(),
-                        label: None,
-                        direction: None,
-                        nodes: vec![NodeDef {
-                            id: "B".into(),
-                            label: None,
-                            shape: NodeShape::Rectangle,
-                            class_shorthand: None,
-                        }],
-                        edges: vec![],
-                        subgraphs: vec![],
-                    }],
-                },
-            ],
+                    subgraphs: vec![],
+                }],
+            }],
             ..Default::default()
         };
         let class_defs = build_class_map(&ast.class_defs);
@@ -426,37 +605,35 @@ mod tests {
     #[test]
     fn test_collect_subgraph_edges_recursive() {
         let ast = FlowchartAst {
-            subgraphs: vec![
-                SubgraphDef {
-                    id: "Outer".to_string(),
+            subgraphs: vec![SubgraphDef {
+                id: "Outer".to_string(),
+                label: None,
+                direction: None,
+                nodes: vec![],
+                edges: vec![EdgeDef {
+                    from: "A".into(),
+                    to: "B".into(),
+                    line_style: crate::ast::flowchart::LineStyle::Solid,
+                    arrow_start: crate::ast::flowchart::ArrowEnd::None,
+                    arrow_end: crate::ast::flowchart::ArrowEnd::Arrow,
+                    label: None,
+                }],
+                subgraphs: vec![SubgraphDef {
+                    id: "Inner".to_string(),
                     label: None,
                     direction: None,
                     nodes: vec![],
                     edges: vec![EdgeDef {
-                        from: "A".into(),
-                        to: "B".into(),
+                        from: "C".into(),
+                        to: "D".into(),
                         line_style: crate::ast::flowchart::LineStyle::Solid,
                         arrow_start: crate::ast::flowchart::ArrowEnd::None,
                         arrow_end: crate::ast::flowchart::ArrowEnd::Arrow,
                         label: None,
                     }],
-                    subgraphs: vec![SubgraphDef {
-                        id: "Inner".to_string(),
-                        label: None,
-                        direction: None,
-                        nodes: vec![],
-                        edges: vec![EdgeDef {
-                            from: "C".into(),
-                            to: "D".into(),
-                            line_style: crate::ast::flowchart::LineStyle::Solid,
-                            arrow_start: crate::ast::flowchart::ArrowEnd::None,
-                            arrow_end: crate::ast::flowchart::ArrowEnd::Arrow,
-                            label: None,
-                        }],
-                        subgraphs: vec![],
-                    }],
-                },
-            ],
+                    subgraphs: vec![],
+                }],
+            }],
             ..Default::default()
         };
         let all_edges = collect_all_edges(&ast);
@@ -467,33 +644,31 @@ mod tests {
     #[test]
     fn test_collect_membership_nested() {
         let ast = FlowchartAst {
-            subgraphs: vec![
-                SubgraphDef {
-                    id: "Outer".to_string(),
+            subgraphs: vec![SubgraphDef {
+                id: "Outer".to_string(),
+                label: None,
+                direction: None,
+                nodes: vec![NodeDef {
+                    id: "A".into(),
+                    label: None,
+                    shape: NodeShape::Rectangle,
+                    class_shorthand: None,
+                }],
+                edges: vec![],
+                subgraphs: vec![SubgraphDef {
+                    id: "Inner".to_string(),
                     label: None,
                     direction: None,
                     nodes: vec![NodeDef {
-                        id: "A".into(),
+                        id: "B".into(),
                         label: None,
                         shape: NodeShape::Rectangle,
                         class_shorthand: None,
                     }],
                     edges: vec![],
-                    subgraphs: vec![SubgraphDef {
-                        id: "Inner".to_string(),
-                        label: None,
-                        direction: None,
-                        nodes: vec![NodeDef {
-                            id: "B".into(),
-                            label: None,
-                            shape: NodeShape::Rectangle,
-                            class_shorthand: None,
-                        }],
-                        edges: vec![],
-                        subgraphs: vec![],
-                    }],
-                },
-            ],
+                    subgraphs: vec![],
+                }],
+            }],
             ..Default::default()
         };
         let membership = build_subgraph_membership(&ast);
@@ -509,16 +684,14 @@ mod tests {
         // Edge references nodes not in ast.nodes -> or_insert_with (lines 53-60)
         let ast = FlowchartAst {
             nodes: vec![],
-            edges: vec![
-                EdgeDef {
-                    from: "A".into(),
-                    to: "B".into(),
-                    line_style: crate::ast::flowchart::LineStyle::Solid,
-                    arrow_start: crate::ast::flowchart::ArrowEnd::None,
-                    arrow_end: crate::ast::flowchart::ArrowEnd::Arrow,
-                    label: None,
-                },
-            ],
+            edges: vec![EdgeDef {
+                from: "A".into(),
+                to: "B".into(),
+                line_style: crate::ast::flowchart::LineStyle::Solid,
+                arrow_start: crate::ast::flowchart::ArrowEnd::None,
+                arrow_end: crate::ast::flowchart::ArrowEnd::Arrow,
+                label: None,
+            }],
             ..Default::default()
         };
         let class_defs = build_class_map(&ast.class_defs);
@@ -540,16 +713,14 @@ mod tests {
                 label: None,
                 direction: None,
                 nodes: vec![],
-                edges: vec![
-                    EdgeDef {
-                        from: "X".into(),
-                        to: "Y".into(),
-                        line_style: crate::ast::flowchart::LineStyle::Solid,
-                        arrow_start: crate::ast::flowchart::ArrowEnd::None,
-                        arrow_end: crate::ast::flowchart::ArrowEnd::Arrow,
-                        label: None,
-                    },
-                ],
+                edges: vec![EdgeDef {
+                    from: "X".into(),
+                    to: "Y".into(),
+                    line_style: crate::ast::flowchart::LineStyle::Solid,
+                    arrow_start: crate::ast::flowchart::ArrowEnd::None,
+                    arrow_end: crate::ast::flowchart::ArrowEnd::Arrow,
+                    label: None,
+                }],
                 subgraphs: vec![],
             }],
             ..Default::default()

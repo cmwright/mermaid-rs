@@ -44,28 +44,35 @@ pub fn layout_statediagram(
     );
 
     // 2. Replicate the flowchart layout pipeline with pre-layout size override
-    use crate::layout::flowchart::{compound, edge_routing, graph_builder, normalize, sugiyama};
+    use crate::layout::flowchart::{compound, edge_routing, graph_builder, normalize};
 
     let class_defs = graph_builder::build_class_map(&fc_ast.class_defs);
     let all_nodes = graph_builder::collect_all_nodes(&fc_ast, &class_defs);
     let all_edges = graph_builder::collect_all_edges(&fc_ast);
-    let (mut graph, _index_map) = graph_builder::build_petgraph(&all_nodes, &all_edges, measurer)?;
 
-    // ** KEY FIX: Override special node sizes in the petgraph BEFORE Sugiyama **
-    override_graph_node_sizes(&mut graph, &kind_map);
+    // Build dagre graph
+    let (mut dagre_graph, mut node_data_map) = graph_builder::build_dagre_graph(
+        &all_nodes,
+        &all_edges,
+        measurer,
+        fc_ast.direction,
+        &fc_ast,
+    )?;
 
-    // For unlabeled bidirectional edges, inject phantom label dimensions so
-    // the Sugiyama layout creates properly-sized dummy nodes that push the
-    // edge paths apart (like having an invisible ~3-char label).
-    inject_bidi_phantom_widths(&mut graph);
+    // Override special node sizes in the dagre graph BEFORE layout
+    override_dagre_node_sizes(&mut dagre_graph, &mut node_data_map, &kind_map);
+
+    // For unlabeled bidirectional edges, inject phantom label dimensions
+    inject_bidi_phantom_widths_dagre(&mut dagre_graph);
+
+    // Run dagre layout
+    dagre_rust::layout(&mut dagre_graph);
 
     let membership = graph_builder::build_subgraph_membership(&fc_ast);
 
-    // Run Sugiyama with correct node sizes
-    let mut result = sugiyama::layout(&mut graph, fc_ast.direction, &membership, &fc_ast);
-
-    // Build positioned nodes
-    let mut positioned_nodes = flowchart::build_positioned_nodes(&graph, &result.positions);
+    // Build positioned nodes from dagre results
+    let mut positioned_nodes =
+        flowchart::build_positioned_nodes_from_dagre(&dagre_graph, &node_data_map);
 
     // Position subgraphs
     let mut positioned_subgraphs = compound::position_subgraphs(
@@ -93,18 +100,8 @@ pub fn layout_statediagram(
         &membership,
     );
 
-    // Sync dummy positions
-    flowchart::sync_dummy_positions(
-        &graph,
-        &result.dummy_chains,
-        &positioned_nodes,
-        &mut result.positions,
-        &positioned_subgraphs,
-    );
-
-    // Extract bend points and route edges
-    let extraction =
-        flowchart::build_edge_bend_points(&graph, &result.dummy_chains, &result.positions);
+    // Extract bend points and route edges from dagre results
+    let extraction = flowchart::extract_edge_data_from_dagre(&dagre_graph);
 
     let mut positioned_edges = edge_routing::route_edges(
         &positioned_nodes,
@@ -152,70 +149,60 @@ pub fn layout_statediagram(
     Ok(result)
 }
 
-/// Override node sizes in the petgraph BEFORE Sugiyama runs.
-/// This ensures rank assignment and edge routing use the correct small sizes.
-fn override_graph_node_sizes(
-    graph: &mut petgraph::graph::DiGraph<NodeData, crate::layout::flowchart::types::EdgeData>,
+/// Override node sizes in the dagre graph BEFORE layout runs.
+fn override_dagre_node_sizes(
+    g: &mut dagre_rust::LayoutGraph,
+    node_data_map: &mut HashMap<String, NodeData>,
     kind_map: &HashMap<String, StateKind>,
 ) {
-    for idx in graph.node_indices() {
-        let node = &graph[idx];
-        if let Some(kind) = kind_map.get(&node.id) {
-            let (w, h) = match kind {
-                StateKind::Start => (14.0, 14.0),
-                StateKind::End => (20.0, 20.0),
-                StateKind::Fork | StateKind::Join => (70.0, 6.0),
-                StateKind::Choice => (28.0, 28.0),
-                StateKind::Normal => continue,
-            };
-            let node_mut = &mut graph[idx];
-            node_mut.width = w;
-            node_mut.height = h;
+    for (id, kind) in kind_map {
+        let (w, h) = match kind {
+            StateKind::Start => (14.0, 14.0),
+            StateKind::End => (20.0, 20.0),
+            StateKind::Fork | StateKind::Join => (70.0, 6.0),
+            StateKind::Choice => (28.0, 28.0),
+            StateKind::Normal => continue,
+        };
+        if let Some(nl) = g.node_mut(id) {
+            nl.width = w;
+            nl.height = h;
+        }
+        if let Some(nd) = node_data_map.get_mut(id) {
+            nd.width = w;
+            nd.height = h;
         }
     }
 }
 
-/// For bidirectional edge pairs (A→B and B→A) without labels, inject phantom
-/// label dimensions so the Sugiyama layout creates dummy nodes with width.
-/// This forces the coordinate assignment to space the dummies apart, giving
-/// the edge routing room to create separated bowed curves.
-fn inject_bidi_phantom_widths(
-    graph: &mut petgraph::graph::DiGraph<NodeData, crate::layout::flowchart::types::EdgeData>,
-) {
-    use petgraph::visit::EdgeRef;
+/// For bidirectional edge pairs without labels, inject phantom label dimensions
+/// so dagre creates spacing between the edge paths.
+fn inject_bidi_phantom_widths_dagre(g: &mut dagre_rust::LayoutGraph) {
+    let phantom_width = 30.0;
+    let phantom_height = 20.0;
 
-    let phantom_width = 30.0; // ~3 characters of horizontal spacing
-    let phantom_height = 20.0; // Enough height to prevent pass-through compression
-
-    // Collect edge indices that are part of bidirectional pairs and have no label
-    let bidi_edges: Vec<petgraph::graph::EdgeIndex> = graph
-        .edge_indices()
-        .filter(|&ei| {
-            let (src, tgt) = graph.edge_endpoints(ei).unwrap();
-            let edge = &graph[ei];
-            // Has no label and there exists a reverse edge
-            edge.label.is_none()
-                && edge.label_width < 1.0
-                && graph
-                    .edges_directed(tgt, petgraph::Direction::Outgoing)
-                    .any(|e| e.target() == src)
+    // Collect edges that need phantom widths
+    let edges_to_update: Vec<dagre_rust::Edge> = g
+        .edges()
+        .iter()
+        .filter(|e| {
+            let has_no_label = g.edge_by_obj(e).map(|el| el.width < 1.0).unwrap_or(true);
+            let has_reverse = g.has_edge(&e.w, &e.v, None);
+            has_no_label && has_reverse
         })
+        .cloned()
         .collect();
 
-    for ei in bidi_edges {
-        let edge = &mut graph[ei];
-        edge.label_width = phantom_width;
-        edge.label_height = phantom_height;
+    for e in edges_to_update {
+        if let Some(el) = g.edge_mut_by_obj(&e) {
+            el.width = phantom_width;
+            el.height = phantom_height;
+        }
     }
 }
 
 /// Wrap note labels to a maximum pixel width so notes don't stretch too wide.
 /// Modifies the FlowchartAst node labels in-place for nodes identified as notes.
-fn wrap_note_labels(
-    fc_ast: &mut FlowchartAst,
-    note_ids: &[String],
-    measurer: &TextMeasurer<'_>,
-) {
+fn wrap_note_labels(fc_ast: &mut FlowchartAst, note_ids: &[String], measurer: &TextMeasurer<'_>) {
     let max_note_width = 200.0;
 
     fn wrap_in_nodes(
@@ -272,10 +259,7 @@ fn collect_kinds(
 }
 
 /// Convert a StateDiagramAst into a FlowchartAst.
-fn convert_to_flowchart_ast(
-    ast: &StateDiagramAst,
-    note_ids: &mut Vec<String>,
-) -> FlowchartAst {
+fn convert_to_flowchart_ast(ast: &StateDiagramAst, note_ids: &mut Vec<String>) -> FlowchartAst {
     let mut nodes = Vec::new();
     let mut edges = Vec::new();
     let mut subgraphs = Vec::new();
@@ -521,8 +505,7 @@ fn separate_bidirectional_edges(transitions: &mut [PositionedTransition]) {
         let bow = (len * 0.45).clamp(25.0, 60.0);
 
         // Edge i: bow in +perpendicular direction
-        transitions[i].raw_path_d =
-            Some(make_cubic_bezier_bow(sx, sy, ex, ey, px, py, bow));
+        transitions[i].raw_path_d = Some(make_cubic_bezier_bow(sx, sy, ex, ey, px, py, bow));
 
         // Edge j: bow in -perpendicular direction
         let (sx_j, sy_j) = pts_j[0];
@@ -559,15 +542,7 @@ fn separate_bidirectional_edges(transitions: &mut [PositionedTransition]) {
 /// Build an SVG cubic bezier path `d` attribute for a bowed edge.
 /// Uses a single `C` command with control points offset perpendicular to the
 /// edge direction, creating a smooth arc without B-spline smoothing.
-fn make_cubic_bezier_bow(
-    sx: f64,
-    sy: f64,
-    ex: f64,
-    ey: f64,
-    px: f64,
-    py: f64,
-    bow: f64,
-) -> String {
+fn make_cubic_bezier_bow(sx: f64, sy: f64, ex: f64, ey: f64, px: f64, py: f64, bow: f64) -> String {
     // Control points at 1/3 and 2/3 along the edge, both offset by bow
     let cx1 = sx + (ex - sx) * 0.33 + px * bow;
     let cy1 = sy + (ey - sy) * 0.33 + py * bow;
@@ -724,9 +699,8 @@ fn adjust_labels_for_nodes(
                     (push_up.abs(), 0.0, push_up),
                     (push_down.abs(), 0.0, push_down),
                 ];
-                if let Some(&(_, dx, dy)) = options
-                    .iter()
-                    .min_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
+                if let Some(&(_, dx, dy)) =
+                    options.iter().min_by(|a, b| a.0.partial_cmp(&b.0).unwrap())
                 {
                     cur_x += dx;
                     cur_y += dy;
@@ -759,10 +733,7 @@ fn convert_from_flowchart_result(
                 height: node.height,
             });
         } else {
-            let kind = kind_map
-                .get(&node.id)
-                .copied()
-                .unwrap_or(StateKind::Normal);
+            let kind = kind_map.get(&node.id).copied().unwrap_or(StateKind::Normal);
             states.push(PositionedState {
                 id: node.id.clone(),
                 label: node.label.clone(),

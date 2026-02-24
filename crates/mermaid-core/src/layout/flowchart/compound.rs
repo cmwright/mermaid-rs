@@ -23,7 +23,14 @@ pub fn position_subgraphs(
         .collect();
 
     let mut result = Vec::new();
-    position_subgraphs_recursive(subgraphs, &node_pos, style_overrides, measurer, &mut result, membership);
+    position_subgraphs_recursive(
+        subgraphs,
+        &node_pos,
+        style_overrides,
+        measurer,
+        &mut result,
+        membership,
+    );
     result
 }
 
@@ -36,7 +43,14 @@ fn position_subgraphs_recursive(
     membership: &SubgraphMembership,
 ) {
     for sg in subgraphs {
-        position_subgraphs_recursive(&sg.subgraphs, node_pos, style_overrides, measurer, result, membership);
+        position_subgraphs_recursive(
+            &sg.subgraphs,
+            node_pos,
+            style_overrides,
+            measurer,
+            result,
+            membership,
+        );
 
         let mut min_x = f64::MAX;
         let mut min_y = f64::MAX;
@@ -523,7 +537,13 @@ mod tests {
         }];
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer, &SubgraphMembership::new());
+        let result = position_subgraphs(
+            &subgraphs,
+            &positioned_nodes,
+            &[],
+            &measurer,
+            &SubgraphMembership::new(),
+        );
         assert_eq!(result.len(), 1);
         assert!(result[0].width > 0.0);
         assert!(result[0].height > 0.0);
@@ -563,7 +583,13 @@ mod tests {
         }];
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer, &SubgraphMembership::new());
+        let result = position_subgraphs(
+            &subgraphs,
+            &positioned_nodes,
+            &[],
+            &measurer,
+            &SubgraphMembership::new(),
+        );
         assert_eq!(result.len(), 2);
     }
 
@@ -704,7 +730,10 @@ mod tests {
         );
         let y_after: Vec<f64> = nodes.iter().map(|n| n.y).collect();
         let x_after: Vec<f64> = nodes.iter().map(|n| n.x).collect();
-        assert!(y_before != y_after || x_before != x_after, "overlap resolution should shift nodes");
+        assert!(
+            y_before != y_after || x_before != x_after,
+            "overlap resolution should shift nodes"
+        );
     }
 
     #[test]
@@ -844,7 +873,13 @@ mod tests {
         }];
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer, &SubgraphMembership::new());
+        let result = position_subgraphs(
+            &subgraphs,
+            &positioned_nodes,
+            &[],
+            &measurer,
+            &SubgraphMembership::new(),
+        );
         assert_eq!(result.len(), 1);
         assert!(result[0].height > 0.0);
     }
@@ -968,9 +1003,19 @@ mod tests {
             },
         ];
         let y_before: Vec<f64> = nodes.iter().map(|n| n.y).collect();
-        separate_overlapping_sibling_subgraphs(&ast, &membership, &mut nodes, &subgraphs, &[], true);
+        separate_overlapping_sibling_subgraphs(
+            &ast,
+            &membership,
+            &mut nodes,
+            &subgraphs,
+            &[],
+            true,
+        );
         let y_after: Vec<f64> = nodes.iter().map(|n| n.y).collect();
-        assert!(y_before != y_after, "horizontal mode should shift nodes on y");
+        assert!(
+            y_before != y_after,
+            "horizontal mode should shift nodes on y"
+        );
     }
 
     #[test]
@@ -1102,7 +1147,13 @@ mod tests {
         }];
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer, &SubgraphMembership::new());
+        let result = position_subgraphs(
+            &subgraphs,
+            &positioned_nodes,
+            &[],
+            &measurer,
+            &SubgraphMembership::new(),
+        );
         assert_eq!(result.len(), 1);
         assert!(result[0].width >= 2.0 * SUBGRAPH_TITLE_SIDE_PADDING);
     }
@@ -1149,7 +1200,13 @@ mod tests {
         ];
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &[], &measurer, &SubgraphMembership::new());
+        let result = position_subgraphs(
+            &subgraphs,
+            &positioned_nodes,
+            &[],
+            &measurer,
+            &SubgraphMembership::new(),
+        );
         assert_eq!(result.len(), 1);
     }
 
@@ -1285,7 +1342,14 @@ mod tests {
                 style: Default::default(),
             },
         ];
-        separate_overlapping_sibling_subgraphs(&ast, &membership, &mut nodes, &subgraphs, &[], false);
+        separate_overlapping_sibling_subgraphs(
+            &ast,
+            &membership,
+            &mut nodes,
+            &subgraphs,
+            &[],
+            false,
+        );
         assert!(nodes.iter().all(|n| n.x.is_finite() && n.y.is_finite()));
     }
 
@@ -1408,7 +1472,14 @@ mod tests {
             },
         ];
         let x_before: Vec<f64> = nodes.iter().map(|n| n.x).collect();
-        separate_overlapping_sibling_subgraphs(&ast, &membership, &mut nodes, &subgraphs, &[], true);
+        separate_overlapping_sibling_subgraphs(
+            &ast,
+            &membership,
+            &mut nodes,
+            &subgraphs,
+            &[],
+            true,
+        );
         let x_after: Vec<f64> = nodes.iter().map(|n| n.x).collect();
         assert!(x_before != x_after || nodes.iter().all(|n| n.x.is_finite()));
     }
@@ -1482,7 +1553,13 @@ mod tests {
         }];
         let provider = FontProvider::default_font();
         let measurer = TextMeasurer::new(provider.font_ref().unwrap(), 14.0);
-        let result = position_subgraphs(&subgraphs, &positioned_nodes, &style_overrides, &measurer, &SubgraphMembership::new());
+        let result = position_subgraphs(
+            &subgraphs,
+            &positioned_nodes,
+            &style_overrides,
+            &measurer,
+            &SubgraphMembership::new(),
+        );
         assert_eq!(result.len(), 1);
         assert!(result[0].style.fill.is_some());
     }

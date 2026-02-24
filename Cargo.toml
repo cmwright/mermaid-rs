@@ -9,6 +9,7 @@ resolver = "2"
 members = [
     "crates/mermaid-core",
     "crates/mermaid-cli",
+    "crates/dagre-rust",
 ]
 exclude = ["crates/mermaid-wasm"]
 
