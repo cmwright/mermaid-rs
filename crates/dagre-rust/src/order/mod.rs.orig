@@ -48,6 +48,8 @@ pub fn order(g: &mut LayoutGraph, disable_optimal_order_heuristic: bool) {
             last_best = 0;
             best = Some(layering.clone());
             best_cc = cc;
+        } else if cc == best_cc {
+            best = Some(layering.clone());
         }
         i += 1;
         last_best += 1;
@@ -136,56 +138,5 @@ fn assign_order(g: &mut LayoutGraph, layering: &[Vec<String>]) {
                 node.order = Some(i as i64);
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{EdgeLabel, Graph, GraphLabel, GraphOptions, NodeLabel};
-
-    /// Regression test: when two nodes at the same rank have tied barycenters,
-    /// the ordering should preserve insertion order (matching dagre.js v0.8.5).
-    ///
-    /// Graph: A-->B, A-->C, B-->D, C-->D (diamond shape)
-    /// Expected rank 1 order: B before C (insertion order), not C before B.
-    #[test]
-    fn test_order_preserves_insertion_order_on_tie() {
-        let mut g = Graph::with_options(&GraphOptions {
-            directed: true,
-            multigraph: false,
-            compound: false,
-        });
-        g.set_graph(GraphLabel {
-            rankdir: crate::RankDir::LR,
-            ..GraphLabel::default()
-        });
-
-        // Insert B before C — B should be ordered first at rank 1
-        for id in &["A", "B", "C", "D"] {
-            let mut nl = NodeLabel::default();
-            nl.width = 50.0;
-            nl.height = 30.0;
-            g.set_node(id, Some(nl));
-        }
-        g.set_edge("A", "B", Some(EdgeLabel::default()), None);
-        g.set_edge("A", "C", Some(EdgeLabel::default()), None);
-        g.set_edge("B", "D", Some(EdgeLabel::default()), None);
-        g.set_edge("C", "D", Some(EdgeLabel::default()), None);
-
-        crate::layout(&mut g);
-
-        let b = g.node("B").unwrap();
-        let c = g.node("C").unwrap();
-
-        // B and C should be at the same rank
-        assert_eq!(b.rank, c.rank, "B and C should share a rank");
-
-        // B should be ordered before C (lower order = higher/left position)
-        assert!(
-            b.order.unwrap() < c.order.unwrap(),
-            "B (order={}) should be ordered before C (order={}); insertion order should be preserved on tie",
-            b.order.unwrap(),
-            c.order.unwrap(),
-        );
     }
 }
