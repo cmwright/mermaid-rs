@@ -52,6 +52,22 @@ pub fn add_border_segments(
     ast: &FlowchartAst,
     membership: &SubgraphMembership,
 ) -> BorderSegments {
+    add_border_segments_with_ranges(graph, ranks, ast, membership, None)
+}
+
+/// Add border segments using pre-computed rank ranges from the nesting state.
+///
+/// Matches dagre's `addBorderSegments` which reads `minRank/maxRank` from
+/// compound node properties (set by `assignRankMinMax` from bt/bb nodes),
+/// NOT from scanning member nodes. When `precomputed_ranges` is `Some`,
+/// those ranges are used instead of scanning membership.
+pub fn add_border_segments_with_ranges(
+    graph: &mut DiGraph<NodeData, EdgeData>,
+    ranks: &mut HashMap<NodeIndex, usize>,
+    ast: &FlowchartAst,
+    membership: &SubgraphMembership,
+    precomputed_ranges: Option<&BorderSegments>,
+) -> BorderSegments {
     let mut segments = BorderSegments {
         subgraphs: HashMap::new(),
     };
@@ -72,6 +88,7 @@ pub fn add_border_segments(
         membership,
         &id_to_idx,
         &mut segments,
+        precomputed_ranges,
     );
 
     segments
@@ -86,6 +103,7 @@ fn process_subgraphs_postorder(
     membership: &SubgraphMembership,
     id_to_idx: &HashMap<String, NodeIndex>,
     segments: &mut BorderSegments,
+    precomputed_ranges: Option<&BorderSegments>,
 ) {
     for sg in subgraphs {
         let mut path = parent_path.to_vec();
@@ -100,35 +118,46 @@ fn process_subgraphs_postorder(
             membership,
             id_to_idx,
             segments,
+            precomputed_ranges,
         );
 
-        // Compute the rank range for this subgraph.
-        // Include direct member nodes AND child subgraph border nodes.
-        let mut min_rank = usize::MAX;
-        let mut max_rank = 0usize;
-        let mut has_members = false;
+        // Determine the rank range for this subgraph.
+        let (min_rank, max_rank, has_members);
 
-        // Direct member nodes: those whose membership path ends with this subgraph
-        // OR whose path contains this subgraph (for nested members).
-        for (node_id, node_path) in membership.iter() {
-            if node_path.contains(&sg.id) {
-                if let Some(&ni) = id_to_idx.get(node_id.as_str()) {
-                    if let Some(&rank) = ranks.get(&ni) {
-                        min_rank = min_rank.min(rank);
-                        max_rank = max_rank.max(rank);
-                        has_members = true;
+        if let Some(pre) = precomputed_ranges.and_then(|p| p.subgraphs.get(&sg.id)) {
+            // Use nesting-derived ranges matching dagre's assignRankMinMax.
+            min_rank = pre.min_rank;
+            max_rank = pre.max_rank;
+            has_members = true;
+        } else {
+            // Fallback: compute from member nodes and child subgraph borders.
+            let mut mn = usize::MAX;
+            let mut mx = 0usize;
+            let mut found = false;
+
+            for (node_id, node_path) in membership.iter() {
+                if node_path.contains(&sg.id) {
+                    if let Some(&ni) = id_to_idx.get(node_id.as_str()) {
+                        if let Some(&rank) = ranks.get(&ni) {
+                            mn = mn.min(rank);
+                            mx = mx.max(rank);
+                            found = true;
+                        }
                     }
                 }
             }
-        }
 
-        // Also include child subgraph border nodes (they're already in the graph).
-        for child_sg in &sg.subgraphs {
-            if let Some(child_borders) = segments.subgraphs.get(&child_sg.id) {
-                min_rank = min_rank.min(child_borders.min_rank);
-                max_rank = max_rank.max(child_borders.max_rank);
-                has_members = true;
+            for child_sg in &sg.subgraphs {
+                if let Some(child_borders) = segments.subgraphs.get(&child_sg.id) {
+                    mn = mn.min(child_borders.min_rank);
+                    mx = mx.max(child_borders.max_rank);
+                    found = true;
+                }
             }
+
+            min_rank = mn;
+            max_rank = mx;
+            has_members = found;
         }
 
         if !has_members {

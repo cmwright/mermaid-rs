@@ -22,6 +22,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::EdgeRef;
 use std::collections::{HashMap, HashSet};
 
+use crate::ast::flowchart::{FlowchartAst, SubgraphDef};
 use crate::layout::flowchart::graph_builder::SubgraphMembership;
 use crate::layout::flowchart::sugiyama::border_segments::BorderSegments;
 use crate::layout::flowchart::types::*;
@@ -33,13 +34,33 @@ use crate::layout::flowchart::types::*;
 /// Maximum consecutive non-improving iterations before early stop.
 const MAX_NO_IMPROVEMENT: usize = 4;
 
+/// Build a subgraph order map from the AST, matching dagre's `g.nodes()` order.
+///
+/// In dagre, compound nodes (subgraph IDs) are created during parsing in
+/// source file order (pre-order DFS of the subgraph tree). This determines
+/// their position in `g.nodes()`, which determines `g.children(v)` ordering
+/// in the layer graph, which determines the `i` indices for the sort algorithm.
+fn build_subgraph_order(ast: &FlowchartAst) -> HashMap<String, usize> {
+    let mut order = HashMap::new();
+    let mut counter = 0usize;
+    fn walk(sgs: &[SubgraphDef], order: &mut HashMap<String, usize>, counter: &mut usize) {
+        for sg in sgs {
+            order.insert(sg.id.clone(), *counter);
+            *counter += 1;
+            walk(&sg.subgraphs, order, counter);
+        }
+    }
+    walk(&ast.subgraphs, &mut order, &mut counter);
+    order
+}
+
 /// Subgraph-recursive crossing minimization matching dagre's `order()`.
 pub fn minimize_crossings_recursive(
     graph: &DiGraph<NodeData, EdgeData>,
     layers: &mut [Vec<NodeIndex>],
     membership: &SubgraphMembership,
     border_segments: &BorderSegments,
-    num_iterations: usize,
+    ast: &FlowchartAst,
 ) {
     if layers.is_empty() {
         return;
@@ -51,11 +72,22 @@ pub fn minimize_crossings_recursive(
     // Build subgraph parent map: sg_id -> parent sg_id (for walking hierarchy).
     let sg_parent_map = build_sg_parent_map(membership);
 
-    let mut best_layers: Vec<Vec<NodeIndex>> = layers.to_vec();
-    let mut best_cc = count_total_crossings(graph, layers);
-    let mut no_improve = 0usize;
+    // Build subgraph ordering from AST (matches dagre's compound node creation order).
+    let sg_order = build_subgraph_order(ast);
 
-    for iteration in 0..num_iterations {
+    let mut best_layers: Vec<Vec<NodeIndex>> = layers.to_vec();
+    // dagre: `let bestCC = Number.POSITIVE_INFINITY` — the initial ordering
+    // is NOT evaluated. The first sweep result is always accepted.
+    let mut best_cc = u64::MAX;
+
+    // Match dagre's loop: `for (let i = 0, lastBest = 0; lastBest < 4; ++i, ++lastBest)`
+    // lastBest is ALWAYS incremented (by the for-loop update). On improvement,
+    // it's set to 0 first, so net effect is 1. This means after an improvement,
+    // only 3 more non-improving iterations are allowed (lastBest goes 1→2→3→4).
+    let mut last_best = 0usize;
+    let mut iteration = 0usize;
+
+    while last_best < MAX_NO_IMPROVEMENT {
         let bias_right = iteration % 4 >= 2;
 
         // Constraint graph accumulates ordering constraints during a sweep.
@@ -80,6 +112,7 @@ pub fn minimize_crossings_recursive(
                     border_segments,
                     bias_right,
                     &mut constraint_graph,
+                    &sg_order,
                 );
             }
         } else {
@@ -98,26 +131,24 @@ pub fn minimize_crossings_recursive(
                     border_segments,
                     bias_right,
                     &mut constraint_graph,
+                    &sg_order,
                 );
             }
         }
 
         let cc = count_total_crossings(graph, layers);
         if cc < best_cc {
+            // dagre: lastBest = 0 (then ++lastBest in for-update makes it 1)
+            last_best = 0;
+            best_layers = layers.to_vec();
             best_cc = cc;
-            best_layers = layers.to_vec();
-            no_improve = 0;
         } else if cc == best_cc {
-            // dagre: equal quality still saves (allows drifting through plateaus)
+            // dagre: equal quality saves layers but does NOT reset lastBest
             best_layers = layers.to_vec();
-            no_improve += 1;
-        } else {
-            no_improve += 1;
         }
-
-        if best_cc == 0 || no_improve >= MAX_NO_IMPROVEMENT {
-            break;
-        }
+        // dagre: ++lastBest always runs (part of the for-loop update)
+        last_best += 1;
+        iteration += 1;
     }
 
     // Restore best ordering.
@@ -181,6 +212,7 @@ fn sweep_layer(
     border_segments: &BorderSegments,
     bias_right: bool,
     constraint_graph: &mut ConstraintGraph,
+    sg_order: &HashMap<String, usize>,
 ) {
     if layer.len() <= 1 {
         return;
@@ -200,6 +232,7 @@ fn sweep_layer(
         border_segments,
         bias_right,
         constraint_graph,
+        sg_order,
     );
 
     *layer = result.vs;
@@ -258,6 +291,7 @@ fn sort_subgraph(
     border_segments: &BorderSegments,
     bias_right: bool,
     constraint_graph: &mut ConstraintGraph,
+    sg_order: &HashMap<String, usize>,
 ) -> SortResult {
     // Identify border nodes for this subgraph (if any).
     // dagre: `let bl = node ? node.borderLeft : undefined`
@@ -271,55 +305,61 @@ fn sort_subgraph(
             .collect();
 
     // Build the movable list matching dagre's `g.children(v)`.
-    // In dagre's layer graph, children of a compound node v include:
-    //   - Base nodes at this rank whose parent is v
-    //   - Subgraph nodes that span this rank whose parent is v
-    // We reconstruct this by walking the layer in order. For each node:
-    //   - If its parent == sg_id → it's a direct leaf child
-    //   - If its parent is a child subgraph of sg_id → the first time we see
-    //     that child subgraph, we add a subgraph placeholder entry
     //
-    // This interleaving ensures the `i` indices match dagre's ordering.
+    // In dagre's layer graph, `g.children(v)` returns children in the order
+    // they were set as children via `setParent`, which follows `g.nodes()`
+    // iteration order. This order is FIXED (determined by node insertion
+    // order, not the current layer ordering). Compound nodes (subgraphs)
+    // are created during graph parsing and have lower `g.nodes()` indices
+    // than base nodes created during normalization/border insertion.
+    //
+    // This is crucial for the sort algorithm: unsortable entries (no
+    // barycenter) are interleaved based on their `i` index. If the movable
+    // list order changes between sweeps, unsortable entries get different
+    // indices, causing different placements and preventing convergence.
+    //
+    // Our approach: build the movable list in a stable order matching dagre's
+    // `g.nodes()` order. Compound nodes (subgraphs) come first, in AST
+    // parse order. Then leaf nodes, in NodeIndex order (insertion order).
     enum MovableItem {
         Leaf(NodeIndex),
         Subgraph(String),
     }
 
-    let mut movable: Vec<MovableItem> = Vec::new();
-    let mut seen_child_sgs: HashSet<String> = HashSet::new();
+    // Collect child subgraphs present in this layer, in AST parse order.
+    // This matches dagre where compound nodes are created during parsing
+    // and have low g.nodes() indices.
+    let mut child_sg_list: Vec<String> = child_subgraphs.iter().cloned().collect();
+    child_sg_list.sort_by_key(|sg| sg_order.get(sg).copied().unwrap_or(usize::MAX));
 
+    // Collect direct leaf children of sg_id present in this layer, sorted by NodeIndex.
+    // This matches dagre where base nodes are created after compound nodes.
+    let mut leaf_children: Vec<NodeIndex> = Vec::new();
     for &ni in layer {
-        // Skip border nodes
         if Some(ni) == border_left || Some(ni) == border_right {
             continue;
         }
-
         let node_parent = parent_map.get(&ni).and_then(|p| p.as_deref());
-
         if node_parent == sg_id {
-            // Direct child of this subgraph — add as leaf
-            movable.push(MovableItem::Leaf(ni));
-        } else if let Some(np) = node_parent {
-            // Check if this node belongs to a child subgraph of sg_id.
-            // Walk up until we find one of our child_subgraphs or reach sg_id.
-            let mut sg = Some(np.to_string());
-            while let Some(ref sg_check) = sg {
-                if child_subgraphs.contains(sg_check) {
-                    if seen_child_sgs.insert(sg_check.clone()) {
-                        movable.push(MovableItem::Subgraph(sg_check.clone()));
-                    }
-                    break;
-                }
-                let next = sg_parent_map.get(sg_check).cloned().flatten();
-                if next.as_deref() == sg_id {
-                    break;
-                }
-                sg = next;
-            }
+            leaf_children.push(ni);
         }
     }
+    leaf_children.sort_by_key(|ni| ni.index());
 
-    if movable.is_empty() {
+    // Build movable list: subgraphs first (AST order), then leaves (NodeIndex order).
+    let mut movable: Vec<MovableItem> = Vec::new();
+    for sg in child_sg_list {
+        movable.push(MovableItem::Subgraph(sg));
+    }
+    for ni in leaf_children {
+        movable.push(MovableItem::Leaf(ni));
+    }
+
+    // dagre does NOT early-return when movable is empty. It continues
+    // processing so that border nodes are pinned to the result. When movable
+    // is empty but border nodes exist (e.g., a subgraph at a rank that only
+    // has border nodes), the result should be [bl, br].
+    if movable.is_empty() && border_left.is_none() {
         return SortResult {
             vs: Vec::new(),
             barycenter: None,
@@ -367,6 +407,7 @@ fn sort_subgraph(
                     border_segments,
                     bias_right,
                     constraint_graph,
+                    sg_order,
                 );
 
                 // The subgraph "node" in dagre's layer graph typically has no
@@ -1156,13 +1197,77 @@ mod tests {
         let mut layers = vec![vec![a, b], vec![d, c]]; // 1 crossing
         assert_eq!(count_total_crossings(&g, &layers), 1);
 
-        minimize_crossings_recursive(&g, &mut layers, &membership, &border_segments, 24);
+        minimize_crossings_recursive(&g, &mut layers, &membership, &border_segments, &FlowchartAst::default());
 
         assert_eq!(
             count_total_crossings(&g, &layers),
             0,
             "should eliminate crossing"
         );
+    }
+
+    #[test]
+    fn test_count_bilayer_crossings_empty_south() {
+        // south_size == 0 -> early return 0
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        g.add_edge(a, b, make_edge());
+
+        let north = vec![a, b];
+        let south: Vec<NodeIndex> = vec![];
+        assert_eq!(count_bilayer_crossings(&g, &north, &south), 0);
+    }
+
+    #[test]
+    fn test_count_bilayer_crossings_none() {
+        // A -> C, B -> D  (no crossing)
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        let c = g.add_node(make_node("C"));
+        let d = g.add_node(make_node("D"));
+        g.add_edge(a, c, make_edge());
+        g.add_edge(b, d, make_edge());
+
+        let north = vec![a, b];
+        let south = vec![c, d];
+        assert_eq!(count_bilayer_crossings(&g, &north, &south), 0);
+    }
+
+    #[test]
+    fn test_count_bilayer_crossings_one() {
+        // A -> D, B -> C  (one crossing)
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        let c = g.add_node(make_node("C"));
+        let d = g.add_node(make_node("D"));
+        g.add_edge(a, d, make_edge());
+        g.add_edge(b, c, make_edge());
+
+        let north = vec![a, b];
+        let south = vec![c, d];
+        assert_eq!(count_bilayer_crossings(&g, &north, &south), 1);
+    }
+
+    #[test]
+    fn test_count_bilayer_crossings_three() {
+        // A->Z, B->Y, C->X  fully reversed = 3 crossings
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        let c = g.add_node(make_node("C"));
+        let x = g.add_node(make_node("X"));
+        let y = g.add_node(make_node("Y"));
+        let z = g.add_node(make_node("Z"));
+        g.add_edge(a, z, make_edge());
+        g.add_edge(b, y, make_edge());
+        g.add_edge(c, x, make_edge());
+
+        let north = vec![a, b, c];
+        let south = vec![x, y, z];
+        assert_eq!(count_bilayer_crossings(&g, &north, &south), 3);
     }
 
     #[test]
@@ -1184,7 +1289,7 @@ mod tests {
         let mut layers = vec![vec![a, b], vec![c, d]];
         assert_eq!(count_total_crossings(&g, &layers), 0);
 
-        minimize_crossings_recursive(&g, &mut layers, &membership, &border_segments, 24);
+        minimize_crossings_recursive(&g, &mut layers, &membership, &border_segments, &FlowchartAst::default());
 
         assert_eq!(count_total_crossings(&g, &layers), 0);
     }

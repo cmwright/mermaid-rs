@@ -3,7 +3,6 @@ pub mod coordinate_assignment;
 pub mod cycle_removal;
 pub mod dummy_nodes;
 pub mod nesting_graph;
-pub mod ordering;
 pub mod parent_dummy_chains;
 pub mod rank_assignment;
 pub mod recursive_ordering;
@@ -127,9 +126,16 @@ pub fn layout(
     rank_assignment::align_sibling_subgraph_ranks(graph, &mut ranks, ast, membership);
     rank_assignment::align_within_subgraph_peers(graph, &mut ranks, membership, ast);
 
-    // Compact any gaps introduced by alignment.
+    // Compact gaps left by nesting cleanup and alignment (bt/bb removal
+    // can leave empty ranks). Map occupied ranks to consecutive integers
+    // so that rank doubling below doesn't amplify the gaps.
     {
         let mut unique_ranks: Vec<usize> = ranks.values().copied().collect();
+        // Include subgraph range endpoints so they map through compaction too.
+        for borders in subgraph_rank_ranges.subgraphs.values() {
+            unique_ranks.push(borders.min_rank);
+            unique_ranks.push(borders.max_rank);
+        }
         unique_ranks.sort_unstable();
         unique_ranks.dedup();
         let rank_map: HashMap<usize, usize> = unique_ranks
@@ -140,6 +146,10 @@ pub fn layout(
         for rank in ranks.values_mut() {
             *rank = rank_map[rank];
         }
+        for borders in subgraph_rank_ranges.subgraphs.values_mut() {
+            borders.min_rank = rank_map[&borders.min_rank];
+            borders.max_rank = rank_map[&borders.max_rank];
+        }
     }
 
     // Double all ranks to create interstitial ranks for edge labels and
@@ -149,6 +159,18 @@ pub fn layout(
     // space for subgraph title + padding.
     for rank in ranks.values_mut() {
         *rank *= 2;
+    }
+    // Apply the same doubling to subgraph rank ranges.
+    // Extend max_rank by +1 to cover the interstitial rank below the doubled
+    // max. Doubling creates odd "gap" ranks between even content ranks; without
+    // this extension, the gap rank between this subgraph's last rank and the
+    // next subgraph falls outside any border range, leaving dummy chains
+    // uncontained at root level during ordering. In dagre this isn't needed
+    // because ranks aren't doubled — nodeSep-based scaling already provides
+    // sufficient resolution.
+    for borders in subgraph_rank_ranges.subgraphs.values_mut() {
+        borders.min_rank *= 2;
+        borders.max_rank = borders.max_rank * 2 + 1;
     }
 
     // ── Step 11: removeEdgeLabelProxies ─────────────────────────────────
@@ -187,15 +209,19 @@ pub fn layout(
 
     // ── Step 14: addBorderSegments ──────────────────────────────────────
     // Create left/right border dummy nodes at every rank in each subgraph's
-    // range. This MUST come after dummy node insertion and parent assignment
-    // so that border rank ranges include any dummy nodes assigned to subgraphs.
-    let border_segments = border_segments::add_border_segments(graph, &mut ranks, ast, membership);
+    // range. Use the nesting-derived rank ranges (subgraph_rank_ranges) to
+    // match dagre's addBorderSegments, which reads minRank/maxRank from
+    // compound node properties set by assignRankMinMax, NOT from membership.
+    let border_segments = border_segments::add_border_segments_with_ranges(
+        graph,
+        &mut ranks,
+        ast,
+        membership,
+        Some(&subgraph_rank_ranges),
+    );
 
     // ── Step 15: order (crossing minimization) ──────────────────────────
     let mut layers = rank_assignment::ranks_to_layers(graph, &ranks);
-
-    // Flat barycenter ordering as initial pass.
-    ordering::minimize_crossings(graph, &mut layers, membership, 24);
 
     // Recursive subgraph-aware ordering matching dagre's order() module.
     recursive_ordering::minimize_crossings_recursive(
@@ -203,7 +229,7 @@ pub fn layout(
         &mut layers,
         membership,
         &border_segments,
-        24,
+        ast,
     );
 
     // Remove empty layers.
@@ -345,12 +371,6 @@ fn remove_empty_ranks(ranks: &mut HashMap<NodeIndex, usize>, node_rank_factor: u
     }
 }
 
-/// Compute subgraph rank ranges from nesting border nodes (bt/bb).
-///
-/// Matches dagre's `assignRankMinMax`: reads the borderTop and borderBottom
-/// nodes' ranks to determine each subgraph's min and max rank.
-/// Since we keep bt/bb nodes in the graph after cleanup, we can read their
-/// ranks directly.
 fn compute_subgraph_rank_ranges_from_nesting(
     nesting_state: &nesting_graph::NestingState,
     ranks: &HashMap<NodeIndex, usize>,

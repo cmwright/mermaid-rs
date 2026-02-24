@@ -764,31 +764,14 @@ pub fn ranks_to_layers(
     let max_rank = *ranks.values().max().unwrap();
     let mut layers = vec![Vec::new(); max_rank + 1];
 
-    // Sort all ranked nodes by rank (ascending). Within the same rank,
-    // put content nodes first, then dummies, then borders.
+    // Sort by rank ascending, then by NodeIndex (insertion order) as tiebreaker.
+    // Matches dagre's initOrder: `simpleNodes.sort((a, b) => g.node(a).rank - g.node(b).rank)`
+    // where within the same rank, JavaScript's stable sort preserves insertion order.
     let mut nodes_by_rank: Vec<NodeIndex> = ranks.keys().copied().collect();
     nodes_by_rank.sort_by(|&a, &b| {
-        let rank_a = ranks[&a];
-        let rank_b = ranks[&b];
-        rank_a.cmp(&rank_b).then_with(|| {
-            let id_a = &graph[a].id;
-            let id_b = &graph[b].id;
-            let kind_a = if id_a.starts_with("__border_") {
-                2
-            } else if id_a.starts_with("__dummy_") || id_a.starts_with("__nesting_") {
-                1
-            } else {
-                0
-            };
-            let kind_b = if id_b.starts_with("__border_") {
-                2
-            } else if id_b.starts_with("__dummy_") || id_b.starts_with("__nesting_") {
-                1
-            } else {
-                0
-            };
-            kind_a.cmp(&kind_b).then_with(|| a.cmp(&b))
-        })
+        ranks[&a]
+            .cmp(&ranks[&b])
+            .then_with(|| a.index().cmp(&b.index()))
     });
 
     let mut visited: HashSet<NodeIndex> = HashSet::new();
@@ -806,8 +789,15 @@ pub fn ranks_to_layers(
         if let Some(&rank) = ranks.get(&node) {
             layers[rank].push(node);
         }
-        // Follow outgoing edges (successors).
-        for neighbor in graph.neighbors_directed(node, petgraph::Direction::Outgoing) {
+        // Follow outgoing edges (successors) in insertion order.
+        // petgraph uses head-insertion (LIFO) for adjacency lists, so
+        // neighbors_directed returns in REVERSE insertion order. Dagre's
+        // g.successors(v) returns in insertion order (FIFO). Collect and
+        // reverse to match dagre's initOrder DFS traversal.
+        let mut successors: Vec<NodeIndex> =
+            graph.neighbors_directed(node, petgraph::Direction::Outgoing).collect();
+        successors.reverse();
+        for neighbor in successors {
             dfs(neighbor, graph, ranks, layers, visited);
         }
     }
@@ -874,6 +864,10 @@ fn collect_groups_recursive<'a>(
 }
 
 /// Align one group of sibling subgraphs within each dependency tier.
+///
+/// Pass 1 only: within each tier, align sibling subgraphs to the same max rank.
+/// This provides vertical compaction without enforcing strict tier separation,
+/// allowing dagre-like side-by-side layout where subgraphs can share rank ranges.
 fn align_one_sibling_group(
     siblings: &[SubgraphDef],
     graph: &DiGraph<NodeData, EdgeData>,
@@ -937,45 +931,6 @@ fn align_one_sibling_group(
                 }
                 changed = true;
             }
-        }
-    }
-
-    // Pass 2: Ensure separation between tiers — each tier's min rank must be
-    // strictly greater than the previous tier's max rank.  This prevents
-    // upstream subgraphs from sharing ranks with downstream subgraphs.
-    if tiers.len() > 1 {
-        let mut prev_tier_max: usize = 0;
-        for (tier_idx, tier) in tiers.iter().enumerate() {
-            // Collect all node indices in this tier
-            let tier_nodes: Vec<NodeIndex> = tier
-                .iter()
-                .flat_map(|&sg_idx| sg_nodes[sg_idx].iter().copied())
-                .collect();
-
-            if tier_idx > 0 {
-                let tier_min = tier_nodes
-                    .iter()
-                    .filter_map(|n| ranks.get(n).copied())
-                    .min()
-                    .unwrap_or(0);
-
-                if tier_min <= prev_tier_max {
-                    let delta = prev_tier_max + 1 - tier_min;
-                    for &node_idx in &tier_nodes {
-                        if let Some(r) = ranks.get_mut(&node_idx) {
-                            *r += delta;
-                        }
-                    }
-                    changed = true;
-                }
-            }
-
-            // Update prev_tier_max (re-read in case we shifted this tier)
-            prev_tier_max = tier_nodes
-                .iter()
-                .filter_map(|n| ranks.get(n).copied())
-                .max()
-                .unwrap_or(prev_tier_max);
         }
     }
 

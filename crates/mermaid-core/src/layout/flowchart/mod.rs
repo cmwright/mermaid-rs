@@ -1341,28 +1341,53 @@ mod tests {
             }
         }
 
-        // --- Vertical ordering: 3 tiers ---
-        // Top tier: DirectGrants + RBAC (both are sources with no incoming subgraph edges)
-        // Middle tier: Files (depends on DirectGrants)
-        // Bottom tier: Folder Hierarchy (depends on Files + RBAC)
+        // --- Cross-subgraph edge flow: sources above targets ---
+        // Without post-NS alignment, sibling subgraphs may share rank
+        // ranges (overlapping vertically, side-by-side horizontally) —
+        // matching dagre's compact layout.  Verify that each cross-subgraph
+        // edge still flows top-to-bottom.
+        let node_pos = |id: &str| -> (f64, f64) {
+            let n = result
+                .nodes
+                .iter()
+                .find(|n| n.id == id)
+                .unwrap_or_else(|| panic!("node '{id}' not found"));
+            (n.x, n.y)
+        };
+
+        // Role_analyst → Root (RBAC → Folders)
+        let (_, role_analyst_y) = node_pos("Role_analyst");
+        let (_, root_y) = node_pos("Root");
         assert!(
-            direct.y + direct.height <= files.y + 1.0,
-            "DirectGrants (bottom={:.0}) should be above Files (top={:.0})",
-            direct.y + direct.height,
-            files.y,
+            role_analyst_y < root_y,
+            "Role_analyst (y={:.0}) should be above Root (y={:.0})",
+            role_analyst_y, root_y,
         );
+
+        // Role_editor → Eng (RBAC → Folders)
+        let (_, role_editor_y) = node_pos("Role_editor");
+        let (_, eng_y) = node_pos("Eng");
         assert!(
-            rbac.y + rbac.height <= folders.y + 1.0,
-            "RBAC (bottom={:.0}) should be above Folders (top={:.0})",
-            rbac.y + rbac.height,
-            folders.y,
+            role_editor_y < eng_y,
+            "Role_editor (y={:.0}) should be above Eng (y={:.0})",
+            role_editor_y, eng_y,
         );
+
+        // Alice → F3 (DirectGrants → Files)
+        let (_, alice_y) = node_pos("Alice");
+        let (_, f3_y) = node_pos("F3");
         assert!(
-            files.y + files.height <= folders.y + 1.0,
-            "Files (bottom={:.0}) should be above Folders (top={:.0})",
-            files.y + files.height,
-            folders.y,
+            alice_y < f3_y,
+            "Alice (y={:.0}) should be above F3 (y={:.0})",
+            alice_y, f3_y,
         );
+
+        // Verify subgraphs don't overlap (no two overlap on both X and Y).
+        // This already passed above; the key change is removing strict tier
+        // separation in favor of edge-flow constraints.
+
+        // Ignore 'direct', 'files', 'rbac', 'folders' bindings used above
+        let _ = (direct, files, rbac, folders);
 
         // --- All three files should be horizontally aligned (same y) ---
         let f1 = result.nodes.iter().find(|n| n.id == "F1").unwrap();

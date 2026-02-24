@@ -195,6 +195,11 @@ fn has_conflict(conflicts: &ConflictSet, a: NodeIndex, b: NodeIndex) -> bool {
 /// Border nodes partition each layer into segments. An inner-segment edge
 /// (dummy→dummy) that crosses a border node's predecessor position creates
 /// a type-2 conflict. These edges should not be aligned vertically.
+///
+/// Matches dagre's `findType2Conflicts` exactly: border nodes without
+/// predecessors at the north layer are skipped (their boundaries are not
+/// used for conflict detection). This prevents false conflicts at subgraph
+/// boundaries where border chains start/end.
 fn find_type2_conflicts(
     graph: &DiGraph<NodeData, EdgeData>,
     layers: &[Vec<NodeIndex>],
@@ -208,65 +213,102 @@ fn find_type2_conflicts(
         .collect();
 
     // For each pair of adjacent layers (north, south), find type-2 conflicts.
-    // dagre scans the south layer looking for border nodes, and checks if
-    // inner-segment edges within each border-bounded segment cross the border.
+    // Structure matches dagre's visitLayer: scan border-bounded segments,
+    // skipping borders that have no predecessor at the north layer.
     for li in 1..layers.len() {
         let north = &layers[li - 1];
         let south = &layers[li];
         let north_pos = &pos_maps[li - 1];
 
-        let mut prev_north_border_pos: i64 = -1;
-        let mut prev_south_pos: usize = 0;
+        let mut prev_north_pos: i64 = -1;
+        // next_north_pos tracks the last border predecessor position found.
+        // None until we encounter a border with a predecessor (matches dagre's
+        // `nextNorthPos` starting as `undefined`).
+        let mut next_north_pos: Option<i64> = None;
+        let mut south_pos: usize = 0;
 
-        for (south_idx, &south_node) in south.iter().enumerate() {
-            // Check if this south node is a border node
-            let is_border = graph[south_node].id.starts_with("__border_");
-
-            if !is_border && south_idx < south.len() - 1 {
-                continue;
-            }
-
-            // Find the north predecessor position of this border node (or end of layer)
-            let north_border_pos = if is_border {
-                // Find the predecessor of this border node in the north layer
-                graph
+        for (south_lookahead, &south_node) in south.iter().enumerate() {
+            if graph[south_node].id.starts_with("__border_") {
+                // Border node: find its predecessor at the north layer.
+                let pred_order = graph
                     .neighbors_directed(south_node, petgraph::Direction::Incoming)
                     .filter_map(|n| north_pos.get(&n).copied())
-                    .next()
-                    .map(|p| p as i64)
-                    .unwrap_or(north.len() as i64)
-            } else {
-                north.len() as i64
-            };
+                    .next();
 
-            // Check inner-segment edges in the segment [prev_south_pos..south_idx]
-            // that cross the [prev_north_border_pos..north_border_pos] boundary.
-            for scan_idx in prev_south_pos..=south_idx {
-                let scan_node = south[scan_idx];
-                let scan_is_dummy = graph[scan_node].id.starts_with("__dummy_");
-
-                for pred in graph.neighbors_directed(scan_node, petgraph::Direction::Incoming) {
-                    if let Some(&pred_pos) = north_pos.get(&pred) {
-                        let pred_is_dummy = graph[pred].id.starts_with("__dummy_");
-
-                        // Only flag inner-segment (dummy-to-dummy) edges that cross
-                        // the border boundary.
-                        if scan_is_dummy && pred_is_dummy {
-                            let pp = pred_pos as i64;
-                            if pp < prev_north_border_pos || pp > north_border_pos {
-                                conflicts.insert(conflict_key(scan_node, pred));
-                            }
-                        }
-                    }
+                if let Some(npp) = pred_order {
+                    // Border has a predecessor — scan the segment up to this border.
+                    let npp = npp as i64;
+                    scan_type2_segment(
+                        south,
+                        south_pos,
+                        south_lookahead,
+                        prev_north_pos,
+                        npp,
+                        graph,
+                        north_pos,
+                        &mut conflicts,
+                    );
+                    south_pos = south_lookahead;
+                    prev_north_pos = npp;
+                    next_north_pos = Some(npp);
                 }
+                // If no predecessor, skip this border entirely (dagre behavior:
+                // the `if (predecessors.length)` block is not entered).
             }
 
-            prev_south_pos = south_idx;
-            prev_north_border_pos = north_border_pos;
+            // Unconditional scan for remaining segment after the last processed
+            // border. dagre: scan(south, southPos, south.length, nextNorthPos,
+            // north.length). When next_north_pos is None (dagre: undefined),
+            // the scan is a no-op since `x < undefined` is false in JS.
+            if let Some(nnp) = next_north_pos {
+                scan_type2_segment(
+                    south,
+                    south_pos,
+                    south.len(),
+                    nnp,
+                    north.len() as i64,
+                    graph,
+                    north_pos,
+                    &mut conflicts,
+                );
+            }
         }
     }
 
     conflicts
+}
+
+/// Scan a segment of the south layer for type-2 conflicts.
+///
+/// Checks each dummy node in `south[south_pos..south_end]` for dummy
+/// predecessors whose position falls outside `[prev_north_border,
+/// next_north_border]`.
+fn scan_type2_segment(
+    south: &[NodeIndex],
+    south_pos: usize,
+    south_end: usize,
+    prev_north_border: i64,
+    next_north_border: i64,
+    graph: &DiGraph<NodeData, EdgeData>,
+    north_pos: &HashMap<NodeIndex, usize>,
+    conflicts: &mut ConflictSet,
+) {
+    for i in south_pos..south_end {
+        let v = south[i];
+        if !graph[v].id.starts_with("__dummy_") {
+            continue;
+        }
+        for u in graph.neighbors_directed(v, petgraph::Direction::Incoming) {
+            if let Some(&u_pos) = north_pos.get(&u) {
+                if graph[u].id.starts_with("__dummy_") {
+                    let up = u_pos as i64;
+                    if up < prev_north_border || up > next_north_border {
+                        conflicts.insert(conflict_key(v, u));
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -853,6 +895,173 @@ mod tests {
         assert!(
             sep_sg > sep_no,
             "subgraph gap should increase separation (with={sep_sg}, without={sep_no})"
+        );
+    }
+
+    // ── Type-2 conflict detection tests ──────────────────────────────────
+
+    fn make_dummy(id: &str) -> NodeData {
+        NodeData {
+            id: id.to_string(),
+            label: String::new(),
+            shape: NodeShape::Rectangle,
+            style: Default::default(),
+            width: 0.0,
+            height: 0.0,
+        }
+    }
+
+    fn make_border(id: &str) -> NodeData {
+        NodeData {
+            id: id.to_string(),
+            label: String::new(),
+            shape: NodeShape::Rectangle,
+            style: Default::default(),
+            width: 0.0,
+            height: 0.0,
+        }
+    }
+
+    #[test]
+    fn test_type2_no_conflicts_simple_chain() {
+        // Two layers, each with a border pair and one dummy.
+        // Dummy chain doesn't cross borders → no conflicts.
+        //
+        // North: [bl_0, d_north, br_0]
+        // South: [bl_1, d_south, br_1]
+        // Edges: bl_0→bl_1, d_north→d_south, br_0→br_1
+        let mut g = DiGraph::new();
+        let bl0 = g.add_node(make_border("__border_bl_SG_0"));
+        let dn = g.add_node(make_dummy("__dummy_0_0"));
+        let br0 = g.add_node(make_border("__border_br_SG_0"));
+        let bl1 = g.add_node(make_border("__border_bl_SG_1"));
+        let ds = g.add_node(make_dummy("__dummy_0_1"));
+        let br1 = g.add_node(make_border("__border_br_SG_1"));
+
+        g.add_edge(bl0, bl1, make_edge());
+        g.add_edge(dn, ds, make_edge());
+        g.add_edge(br0, br1, make_edge());
+
+        let layers = vec![vec![bl0, dn, br0], vec![bl1, ds, br1]];
+        let conflicts = find_type2_conflicts(&g, &layers);
+        assert!(conflicts.is_empty(), "no crossings → no conflicts");
+    }
+
+    #[test]
+    fn test_type2_conflict_crossing_border() {
+        // Dummy edge crosses a border boundary → type-2 conflict.
+        //
+        // North: [bl_0, d_north, br_0]
+        // South: [bl_1, br_1, d_south]
+        // Edges: bl_0→bl_1, d_north→d_south (crosses br boundary), br_0→br_1
+        let mut g = DiGraph::new();
+        let bl0 = g.add_node(make_border("__border_bl_SG_0"));
+        let dn = g.add_node(make_dummy("__dummy_0_0"));
+        let br0 = g.add_node(make_border("__border_br_SG_0"));
+        let bl1 = g.add_node(make_border("__border_bl_SG_1"));
+        let br1 = g.add_node(make_border("__border_br_SG_1"));
+        let ds = g.add_node(make_dummy("__dummy_0_1"));
+
+        g.add_edge(bl0, bl1, make_edge());
+        g.add_edge(dn, ds, make_edge());
+        g.add_edge(br0, br1, make_edge());
+
+        // South order: [bl_1, br_1, d_south] — d_south is AFTER br_1
+        let layers = vec![vec![bl0, dn, br0], vec![bl1, br1, ds]];
+        let conflicts = find_type2_conflicts(&g, &layers);
+        // d_north (pos 1) → d_south crosses br boundary (br_0 at pos 2 maps to br_1 at pos 1)
+        assert!(
+            !conflicts.is_empty(),
+            "dummy edge crossing border should create a conflict"
+        );
+    }
+
+    #[test]
+    fn test_type2_no_conflict_border_without_predecessor() {
+        // Border node at south layer has no predecessor at north layer.
+        // This happens at subgraph boundaries where border chains start.
+        // dagre skips these borders → no false conflicts.
+        //
+        // North (CI layer): [ci_bl, d_0, d_1, ci_br]
+        // South (Staging layer): [stg_bl, d_0s, stg_br]
+        // Edges: d_0→d_0s (dummy chain crosses CI→Staging boundary)
+        // stg_bl and stg_br have NO predecessors at north layer.
+        let mut g = DiGraph::new();
+        let ci_bl = g.add_node(make_border("__border_bl_CI_10"));
+        let d0 = g.add_node(make_dummy("__dummy_0_10"));
+        let d1 = g.add_node(make_dummy("__dummy_1_10"));
+        let ci_br = g.add_node(make_border("__border_br_CI_10"));
+        let stg_bl = g.add_node(make_border("__border_bl_STG_11"));
+        let d0s = g.add_node(make_dummy("__dummy_0_11"));
+        let stg_br = g.add_node(make_border("__border_br_STG_11"));
+
+        // Dummy chain: d0→d0s (crosses subgraph boundary)
+        g.add_edge(d0, d0s, make_edge());
+        // No edges from north to stg_bl or stg_br (they're new borders)
+
+        let layers = vec![
+            vec![ci_bl, d0, d1, ci_br],
+            vec![stg_bl, d0s, stg_br],
+        ];
+        let conflicts = find_type2_conflicts(&g, &layers);
+
+        // The d0→d0s edge should NOT be flagged as a conflict.
+        // Bug fix: borders without predecessors are skipped (matching dagre).
+        assert!(
+            !has_conflict(&conflicts, d0, d0s),
+            "dummy chain crossing subgraph boundary should not be a type-2 conflict \
+             when border nodes have no predecessors"
+        );
+    }
+
+    #[test]
+    fn test_type2_no_conflicts_empty_layers() {
+        // Edge case: single-node layers, no borders.
+        let mut g = DiGraph::new();
+        let a = g.add_node(make_node("A"));
+        let b = g.add_node(make_node("B"));
+        g.add_edge(a, b, make_edge());
+
+        let layers = vec![vec![a], vec![b]];
+        let conflicts = find_type2_conflicts(&g, &layers);
+        assert!(conflicts.is_empty());
+    }
+
+    #[test]
+    fn test_type2_mixed_borders_with_and_without_predecessors() {
+        // Mix of border nodes: some with predecessors, some without.
+        // Only borders WITH predecessors should define segment boundaries.
+        //
+        // North: [bl_0, d_north, br_0]
+        // South: [new_bl, bl_1, d_south, br_1, new_br]
+        // new_bl/new_br have no predecessors. bl_1/br_1 chain from bl_0/br_0.
+        let mut g = DiGraph::new();
+        let bl0 = g.add_node(make_border("__border_bl_SG_0"));
+        let dn = g.add_node(make_dummy("__dummy_0_0"));
+        let br0 = g.add_node(make_border("__border_br_SG_0"));
+
+        let new_bl = g.add_node(make_border("__border_bl_NEW_1"));
+        let bl1 = g.add_node(make_border("__border_bl_SG_1"));
+        let ds = g.add_node(make_dummy("__dummy_0_1"));
+        let br1 = g.add_node(make_border("__border_br_SG_1"));
+        let new_br = g.add_node(make_border("__border_br_NEW_1"));
+
+        g.add_edge(bl0, bl1, make_edge());
+        g.add_edge(dn, ds, make_edge());
+        g.add_edge(br0, br1, make_edge());
+        // new_bl and new_br have NO predecessors
+
+        let layers = vec![
+            vec![bl0, dn, br0],
+            vec![new_bl, bl1, ds, br1, new_br],
+        ];
+        let conflicts = find_type2_conflicts(&g, &layers);
+
+        // d_north→d_south doesn't cross the bl_0→bl_1 / br_0→br_1 boundaries.
+        // new_bl and new_br (no predecessors) should be skipped.
+        assert!(
+            !has_conflict(&conflicts, dn, ds),
+            "non-crossing dummy edge should not be flagged as conflict"
         );
     }
 }
