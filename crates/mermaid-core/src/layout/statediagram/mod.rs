@@ -74,31 +74,22 @@ pub fn layout_statediagram(
     let mut positioned_nodes =
         flowchart::build_positioned_nodes_from_dagre(&dagre_graph, &node_data_map);
 
-    // Position subgraphs
-    let mut positioned_subgraphs = compound::position_subgraphs(
+    // Position subgraphs from dagre compound layout, falling back to
+    // bounding-box computation for any subgraphs dagre didn't position.
+    let mut positioned_subgraphs = flowchart::build_positioned_subgraphs_from_dagre(
+        &dagre_graph,
         &fc_ast.subgraphs,
-        &positioned_nodes,
         &fc_ast.style_overrides,
-        measurer,
-        &membership,
     );
-
-    // Separate overlapping sibling subgraphs
-    compound::separate_overlapping_sibling_subgraphs(
-        &fc_ast,
-        &membership,
-        &mut positioned_nodes,
-        &positioned_subgraphs,
-        &all_edges,
-        is_horizontal,
-    );
-    positioned_subgraphs = compound::position_subgraphs(
-        &fc_ast.subgraphs,
-        &positioned_nodes,
-        &fc_ast.style_overrides,
-        measurer,
-        &membership,
-    );
+    if positioned_subgraphs.len() < flowchart::count_subgraphs(&fc_ast.subgraphs) {
+        positioned_subgraphs = compound::position_subgraphs(
+            &fc_ast.subgraphs,
+            &positioned_nodes,
+            &fc_ast.style_overrides,
+            measurer,
+            &membership,
+        );
+    }
 
     // Extract bend points and route edges from dagre results
     let extraction = flowchart::extract_edge_data_from_dagre(&dagre_graph);

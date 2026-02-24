@@ -125,7 +125,7 @@ pub(crate) fn build_positioned_nodes_from_dagre(
 }
 
 /// Extract subgraph positions from dagre compound layout results.
-fn build_positioned_subgraphs_from_dagre(
+pub(crate) fn build_positioned_subgraphs_from_dagre(
     g: &dagre_rust::LayoutGraph,
     subgraphs: &[crate::ast::flowchart::SubgraphDef],
     style_overrides: &[crate::ast::flowchart::StyleOverride],
@@ -166,7 +166,7 @@ fn collect_subgraph_positions_from_dagre(
     }
 }
 
-fn count_subgraphs(subgraphs: &[crate::ast::flowchart::SubgraphDef]) -> usize {
+pub(crate) fn count_subgraphs(subgraphs: &[crate::ast::flowchart::SubgraphDef]) -> usize {
     subgraphs
         .iter()
         .map(|sg| 1 + count_subgraphs(&sg.subgraphs))
@@ -778,7 +778,7 @@ mod tests {
         assert_eq!(result.subgraphs.len(), 2);
     }
 
-    // -- compound.rs: compact_subgraphs --
+    // -- compound.rs: subgraph compaction --
 
     #[test]
     fn test_layout_subgraph_compaction() {
