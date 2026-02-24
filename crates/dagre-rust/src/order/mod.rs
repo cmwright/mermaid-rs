@@ -19,8 +19,8 @@ pub fn order(g: &mut LayoutGraph, disable_optimal_order_heuristic: bool) {
     let down_ranks: Vec<i64> = util::range(1, Some(max_rank + 1), 1);
     let up_ranks: Vec<i64> = util::range(max_rank - 1, Some(-1), -1);
 
-    let mut down_layer_graphs = build_layer_graphs(g, &down_ranks, "inEdges");
-    let mut up_layer_graphs = build_layer_graphs(g, &up_ranks, "outEdges");
+    let mut down_layer_graphs = build_layer_graphs(g, &down_ranks, true);
+    let mut up_layer_graphs = build_layer_graphs(g, &up_ranks, false);
 
     let mut layering = init_order::init_order(g);
     assign_order(g, &layering);
@@ -35,7 +35,7 @@ pub fn order(g: &mut LayoutGraph, disable_optimal_order_heuristic: bool) {
     let mut last_best = 0;
     let mut i = 0;
     while last_best < 4 {
-        let graphs: &mut Vec<(i64, LayoutGraph, String)> = if i % 2 != 0 {
+        let graphs: &mut Vec<(i64, LayoutGraph)> = if i % 2 != 0 {
             &mut down_layer_graphs
         } else {
             &mut up_layer_graphs
@@ -61,8 +61,8 @@ pub fn order(g: &mut LayoutGraph, disable_optimal_order_heuristic: bool) {
 fn build_layer_graphs(
     g: &LayoutGraph,
     ranks: &[i64],
-    relationship: &str,
-) -> Vec<(i64, LayoutGraph, String)> {
+    use_in_edges: bool,
+) -> Vec<(i64, LayoutGraph)> {
     // Build index of nodes by rank
     let mut nodes_by_rank: std::collections::HashMap<i64, Vec<String>> =
         std::collections::HashMap::new();
@@ -82,24 +82,25 @@ fn build_layer_graphs(
         }
     }
 
+    let empty: Vec<String> = Vec::new();
     ranks
         .iter()
         .map(|&rank| {
-            let nodes = nodes_by_rank.get(&rank).cloned().unwrap_or_default();
-            let lg = build_layer_graph::build_layer_graph(g, rank, relationship, &nodes);
-            (rank, lg, relationship.to_string())
+            let nodes = nodes_by_rank.get(&rank).unwrap_or(&empty);
+            let lg = build_layer_graph::build_layer_graph(g, rank, use_in_edges, nodes);
+            (rank, lg)
         })
         .collect()
 }
 
 fn sweep_layer_graphs(
     g: &mut LayoutGraph,
-    layer_graphs: &mut [(i64, LayoutGraph, String)],
+    layer_graphs: &mut [(i64, LayoutGraph)],
     bias_right: bool,
 ) {
     let mut cg: ConstraintGraph = ConstraintGraph::new();
 
-    for (_, lg, _) in layer_graphs.iter_mut() {
+    for (_, lg) in layer_graphs.iter_mut() {
         // Sync order attributes from g into the layer graph so barycenter reads current orders.
         // In JS, layer graph nodes share references with the original graph, so order updates
         // are automatically visible. In Rust, we must explicitly copy them.

@@ -50,27 +50,28 @@ fn layout_flowchart_impl(
     // 3. Collect all edges (including from subgraphs)
     let all_edges = graph_builder::collect_all_edges(ast);
 
-    // 4. Build dagre graph (compound + multigraph) and run layout
+    // 4. Build subgraph membership once and reuse in layout stages.
+    let membership = graph_builder::build_subgraph_membership(ast);
+
+    // 5. Build dagre graph (compound + multigraph) and run layout
     let (mut dagre_graph, node_data_map) =
-        graph_builder::build_dagre_graph_with_fixed_node_sizes(
+        graph_builder::build_dagre_graph_with_fixed_node_sizes_and_membership(
             &all_nodes,
             &all_edges,
             measurer,
             ast.direction,
             ast,
             fixed_node_sizes,
+            &membership,
         )?;
     if let Some(ranksep) = ranksep_override {
         dagre_graph.graph_mut().ranksep = ranksep;
     }
     dagre_rust::layout(&mut dagre_graph);
 
-    // 5. Extract positioned nodes and edge data from dagre results
+    // 6. Extract positioned nodes and edge data from dagre results
     let mut positioned_nodes = build_positioned_nodes_from_dagre(&dagre_graph, &node_data_map);
     let extraction = extract_edge_data_from_dagre(&dagre_graph);
-
-    // 6. Build subgraph membership map
-    let membership = graph_builder::build_subgraph_membership(ast);
 
     // 7. Extract subgraph positions from dagre compound layout,
     //    then fall back to bounding-box computation for any subgraphs

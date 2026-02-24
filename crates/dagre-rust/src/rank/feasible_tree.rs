@@ -33,13 +33,27 @@ pub fn feasible_tree(g: &mut LayoutGraph) -> LayoutGraph {
 /// Finds a maximal tree of tight edges using DFS, returns node count.
 fn tight_tree(t: &mut LayoutGraph, g: &LayoutGraph) -> usize {
     fn dfs(t: &mut LayoutGraph, g: &LayoutGraph, v: &str) {
-        if let Some(node_edges) = g.node_edges(v, None) {
-            for e in node_edges {
-                let w = if v == e.v { e.w.clone() } else { e.v.clone() };
-                if !t.has_node(&w) && slack(g, &e) == 0 {
-                    t.set_node(&w, Some(NodeLabel::default()));
-                    t.set_edge(v, &w, Some(EdgeLabel::default()), None);
-                    dfs(t, g, &w);
+        if let Some(out_edge_ids) = g.out_edge_ids(v) {
+            for edge_id in out_edge_ids {
+                let Some(e) = g.edge_obj_by_id(edge_id) else {
+                    continue;
+                };
+                if !t.has_node(&e.w) && slack(g, e) == 0 {
+                    t.set_node(&e.w, Some(NodeLabel::default()));
+                    t.set_edge(v, &e.w, Some(EdgeLabel::default()), None);
+                    dfs(t, g, &e.w);
+                }
+            }
+        }
+        if let Some(in_edge_ids) = g.in_edge_ids(v) {
+            for edge_id in in_edge_ids {
+                let Some(e) = g.edge_obj_by_id(edge_id) else {
+                    continue;
+                };
+                if !t.has_node(&e.v) && slack(g, e) == 0 {
+                    t.set_node(&e.v, Some(NodeLabel::default()));
+                    t.set_edge(v, &e.v, Some(EdgeLabel::default()), None);
+                    dfs(t, g, &e.v);
                 }
             }
         }
@@ -57,12 +71,15 @@ fn find_min_slack_edge(t: &LayoutGraph, g: &LayoutGraph) -> crate::graph::Edge {
     let mut best_slack = i64::MAX;
     let mut best_edge = None;
 
-    for edge in g.edges() {
+    for edge_id in g.edge_ids() {
+        let Some(edge) = g.edge_obj_by_id(edge_id) else {
+            continue;
+        };
         if t.has_node(&edge.v) != t.has_node(&edge.w) {
-            let s = slack(g, &edge).abs();
+            let s = slack(g, edge).abs();
             if s < best_slack {
                 best_slack = s;
-                best_edge = Some(edge);
+                best_edge = Some(edge.clone());
             }
         }
     }

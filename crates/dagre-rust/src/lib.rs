@@ -25,5 +25,5 @@ mod parity_harness;
 
 // Re-export the main API
 pub use graph::{Edge, Graph, GraphOptions, LayoutGraph};
-pub use layout::{layout, layout_with_opts, LayoutOpts};
+pub use layout::{layout, layout_profiled, layout_with_opts, LayoutOpts, LayoutProfile, LayoutStageTiming};
 pub use types::*;

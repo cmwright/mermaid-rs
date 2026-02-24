@@ -365,7 +365,7 @@ fn parse_edge(
             Rule::pipe_label => {
                 for pipe_inner in inner.into_inner() {
                     if pipe_inner.as_rule() == Rule::pipe_text {
-                        label = Some(pipe_inner.as_str().trim().to_string());
+                        label = Some(normalize_edge_label(pipe_inner.as_str()));
                     }
                 }
             }
@@ -390,10 +390,22 @@ fn extract_labeled_start_marker(s: &str) -> ArrowEnd {
 fn extract_edge_inline_label(pair: pest::iterators::Pair<'_, Rule>) -> String {
     for inner in pair.into_inner() {
         if inner.as_rule() == Rule::edge_inline_text {
-            return inner.as_str().trim().to_string();
+            return normalize_edge_label(inner.as_str());
         }
     }
     String::new()
+}
+
+fn normalize_edge_label(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if trimmed.len() >= 2 {
+        let first = trimmed.chars().next().unwrap();
+        let last = trimmed.chars().last().unwrap();
+        if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+            return trimmed[1..trimmed.len() - 1].to_string();
+        }
+    }
+    trimmed.to_string()
 }
 
 fn parse_subgraph(pair: pest::iterators::Pair<'_, Rule>) -> Result<SubgraphDef> {
@@ -578,7 +590,7 @@ mod tests {
         assert_eq!(ast.edges.len(), 1);
         assert_eq!(ast.edges[0].line_style, LineStyle::Dotted);
         assert_eq!(ast.edges[0].arrow_end, ArrowEnd::Arrow);
-        assert_eq!(ast.edges[0].label.as_deref(), Some("\"blocked by\""));
+        assert_eq!(ast.edges[0].label.as_deref(), Some("blocked by"));
     }
 
     #[test]

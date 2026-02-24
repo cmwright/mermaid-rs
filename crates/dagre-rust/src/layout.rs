@@ -13,11 +13,24 @@ use crate::position;
 use crate::rank;
 use crate::types::*;
 use crate::util;
+use std::time::Instant;
 
 /// Layout options, mirroring the second argument to JS `dagre.layout(g, opts)`.
 #[derive(Debug, Clone, Default)]
 pub struct LayoutOpts {
     pub disable_optimal_order_heuristic: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct LayoutStageTiming {
+    pub stage: &'static str,
+    pub duration_ms: f64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct LayoutProfile {
+    pub stages: Vec<LayoutStageTiming>,
+    pub total_ms: f64,
 }
 
 /// Performs the full dagre layout on the input graph.
@@ -32,6 +45,14 @@ pub fn layout_with_opts(g: &mut LayoutGraph, opts: &LayoutOpts) {
     update_input_graph(g, &layout_graph);
 }
 
+/// Runs full layout and returns per-stage timings.
+pub fn layout_profiled(g: &mut LayoutGraph, opts: &LayoutOpts) -> LayoutProfile {
+    let mut layout_graph = build_layout_graph(g);
+    let profile = run_layout_profiled(&mut layout_graph, opts);
+    update_input_graph(g, &layout_graph);
+    profile
+}
+
 fn run_layout(g: &mut LayoutGraph, opts: &LayoutOpts) {
     make_space_for_edge_labels(g);
     remove_self_edges(g);
@@ -42,9 +63,9 @@ fn run_layout(g: &mut LayoutGraph, opts: &LayoutOpts) {
     {
         let mut ncg = util::as_non_compound_graph(g);
         rank::rank(&mut ncg);
-        for v in ncg.node_ids().to_vec() {
-            if let Some(rank) = ncg.node(&v).and_then(|n| n.rank)
-                && let Some(node) = g.node_mut(&v)
+        for v in ncg.node_ids() {
+            if let Some(rank) = ncg.node(v).and_then(|n| n.rank)
+                && let Some(node) = g.node_mut(v)
             {
                 node.rank = Some(rank);
             }
@@ -73,6 +94,141 @@ fn run_layout(g: &mut LayoutGraph, opts: &LayoutOpts) {
     assign_node_intersects(g);
     reverse_points_for_reversed_edges(g);
     acyclic::undo(g);
+}
+
+fn run_layout_profiled(g: &mut LayoutGraph, opts: &LayoutOpts) -> LayoutProfile {
+    let mut stages = Vec::new();
+    let t0 = Instant::now();
+
+    let mut record = |name: &'static str, start: Instant| {
+        stages.push(LayoutStageTiming {
+            stage: name,
+            duration_ms: start.elapsed().as_secs_f64() * 1000.0,
+        });
+    };
+
+    let s = Instant::now();
+    make_space_for_edge_labels(g);
+    record("make_space_for_edge_labels", s);
+
+    let s = Instant::now();
+    remove_self_edges(g);
+    record("remove_self_edges", s);
+
+    let s = Instant::now();
+    acyclic::run(g);
+    record("acyclic_run", s);
+
+    let s = Instant::now();
+    nesting_graph::run(g);
+    record("nesting_graph_run", s);
+
+    let s = Instant::now();
+    {
+        let mut ncg = util::as_non_compound_graph(g);
+        rank::rank(&mut ncg);
+        for v in ncg.node_ids() {
+            if let Some(rank) = ncg.node(v).and_then(|n| n.rank)
+                && let Some(node) = g.node_mut(v)
+            {
+                node.rank = Some(rank);
+            }
+        }
+    }
+    record("rank_assign", s);
+
+    let s = Instant::now();
+    inject_edge_label_proxies(g);
+    record("inject_edge_label_proxies", s);
+
+    let s = Instant::now();
+    util::remove_empty_ranks(g);
+    record("remove_empty_ranks", s);
+
+    let s = Instant::now();
+    nesting_graph::cleanup(g);
+    record("nesting_graph_cleanup", s);
+
+    let s = Instant::now();
+    util::normalize_ranks(g);
+    record("normalize_ranks", s);
+
+    let s = Instant::now();
+    assign_rank_min_max(g);
+    record("assign_rank_min_max", s);
+
+    let s = Instant::now();
+    remove_edge_label_proxies(g);
+    record("remove_edge_label_proxies", s);
+
+    let s = Instant::now();
+    normalize::run(g);
+    record("normalize_run", s);
+
+    let s = Instant::now();
+    parent_dummy_chains::parent_dummy_chains(g);
+    record("parent_dummy_chains", s);
+
+    let s = Instant::now();
+    add_border_segments::add_border_segments(g);
+    record("add_border_segments", s);
+
+    let s = Instant::now();
+    order::order(g, opts.disable_optimal_order_heuristic);
+    record("order", s);
+
+    let s = Instant::now();
+    insert_self_edges(g);
+    record("insert_self_edges", s);
+
+    let s = Instant::now();
+    coordinate_system::adjust(g);
+    record("coordinate_system_adjust", s);
+
+    let s = Instant::now();
+    position::position(g);
+    record("position", s);
+
+    let s = Instant::now();
+    position_self_edges(g);
+    record("position_self_edges", s);
+
+    let s = Instant::now();
+    remove_border_nodes(g);
+    record("remove_border_nodes", s);
+
+    let s = Instant::now();
+    normalize::undo(g);
+    record("normalize_undo", s);
+
+    let s = Instant::now();
+    fixup_edge_label_coords(g);
+    record("fixup_edge_label_coords", s);
+
+    let s = Instant::now();
+    coordinate_system::undo(g);
+    record("coordinate_system_undo", s);
+
+    let s = Instant::now();
+    translate_graph(g);
+    record("translate_graph", s);
+
+    let s = Instant::now();
+    assign_node_intersects(g);
+    record("assign_node_intersects", s);
+
+    let s = Instant::now();
+    reverse_points_for_reversed_edges(g);
+    record("reverse_points_for_reversed_edges", s);
+
+    let s = Instant::now();
+    acyclic::undo(g);
+    record("acyclic_undo", s);
+
+    LayoutProfile {
+        stages,
+        total_ms: t0.elapsed().as_secs_f64() * 1000.0,
+    }
 }
 
 fn update_input_graph(input_graph: &mut LayoutGraph, layout_graph: &LayoutGraph) {
@@ -114,14 +270,18 @@ fn update_input_graph(input_graph: &mut LayoutGraph, layout_graph: &LayoutGraph)
     }
 
     for e in input_graph.edges() {
-        if let Some(ll) = layout_graph.edge_by_obj(&e).cloned()
-            && let Some(il) = input_graph.edge_mut_by_obj(&e)
-        {
-            il.points = ll.points;
-            if let Some(x) = ll.x {
-                il.x = Some(x);
-                if let Some(y) = ll.y {
-                    il.y = Some(y);
+        let Some(ll) = layout_graph.edge_by_obj(&e) else {
+            continue;
+        };
+        let points = ll.points.clone();
+        let x = ll.x;
+        let y = ll.y;
+        if let Some(il) = input_graph.edge_mut_by_obj(&e) {
+            il.points = points;
+            if let Some(xv) = x {
+                il.x = Some(xv);
+                if let Some(yv) = y {
+                    il.y = Some(yv);
                 }
             }
         }
@@ -178,10 +338,14 @@ fn build_layout_graph(input_graph: &LayoutGraph) -> LayoutGraph {
     // Ensure all nodes (including implicitly-created subgraph parents) have labels
     // in the layout graph. The input graph preserves None labels for JS parity,
     // but the layout pipeline needs every node to have a NodeLabel.
-    for v in g.node_ids().to_vec() {
-        if g.node(&v).is_none() {
-            g.set_node(&v, Some(NodeLabel::default()));
-        }
+    let missing_labels: Vec<String> = g
+        .node_ids()
+        .iter()
+        .filter(|v| g.node(v).is_none())
+        .cloned()
+        .collect();
+    for v in missing_labels {
+        g.set_node(&v, Some(NodeLabel::default()));
     }
 
     // Copy edges
@@ -402,26 +566,46 @@ fn translate_graph(g: &mut LayoutGraph) {
 
 fn assign_node_intersects(g: &mut LayoutGraph) {
     for e in g.edges() {
-        let (mut points, node_v, node_w) = {
-            let edge = g.edge_by_obj(&e).unwrap();
-            let pts = edge.points.clone();
-            let nv = g.node(&e.v).cloned().unwrap_or_default();
-            let nw = g.node(&e.w).cloned().unwrap_or_default();
-            (pts, nv, nw)
-        };
+        let mut points = g
+            .edge_by_obj(&e)
+            .map(|edge| edge.points.clone())
+            .unwrap_or_default();
+        let (vx, vy, vw, vh) = g
+            .node(&e.v)
+            .map(|n| (n.x.unwrap_or(0.0), n.y.unwrap_or(0.0), n.width, n.height))
+            .unwrap_or((0.0, 0.0, 0.0, 0.0));
+        let (wx, wy, ww, wh) = g
+            .node(&e.w)
+            .map(|n| (n.x.unwrap_or(0.0), n.y.unwrap_or(0.0), n.width, n.height))
+            .unwrap_or((0.0, 0.0, 0.0, 0.0));
 
         let (p1, p2) = if points.is_empty() {
             let pw = Point {
-                x: node_w.x.unwrap_or(0.0),
-                y: node_w.y.unwrap_or(0.0),
+                x: wx,
+                y: wy,
             };
             let pv = Point {
-                x: node_v.x.unwrap_or(0.0),
-                y: node_v.y.unwrap_or(0.0),
+                x: vx,
+                y: vy,
             };
             (pw, pv)
         } else {
             (points[0], *points.last().unwrap())
+        };
+
+        let node_v = NodeLabel {
+            x: Some(vx),
+            y: Some(vy),
+            width: vw,
+            height: vh,
+            ..Default::default()
+        };
+        let node_w = NodeLabel {
+            x: Some(wx),
+            y: Some(wy),
+            width: ww,
+            height: wh,
+            ..Default::default()
         };
 
         let start = util::intersect_rect(&node_v, &p1);

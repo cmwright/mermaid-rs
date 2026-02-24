@@ -68,8 +68,9 @@ pub fn resolve_conflicts(entries: &[BarycenterEntry], cg: &ConstraintGraph) -> V
         result_order.push(idx);
 
         // Handle in-entries (merge if needed)
-        let in_entries = entries_vec[idx].in_entries.clone();
-        for &u_idx in in_entries.iter().rev() {
+        let in_len = entries_vec[idx].in_entries.len();
+        for i in (0..in_len).rev() {
+            let u_idx = entries_vec[idx].in_entries[i];
             if entries_vec[u_idx].merged {
                 continue;
             }
@@ -84,8 +85,9 @@ pub fn resolve_conflicts(entries: &[BarycenterEntry], cg: &ConstraintGraph) -> V
         }
 
         // Handle out-entries
-        let out_entries = entries_vec[idx].out_entries.clone();
-        for &w_idx in &out_entries {
+        let out_len = entries_vec[idx].out_entries.len();
+        for i in 0..out_len {
+            let w_idx = entries_vec[idx].out_entries[i];
             entries_vec[w_idx].in_entries.push(idx);
             entries_vec[w_idx].indegree -= 1;
             if entries_vec[w_idx].indegree == 0 {
@@ -122,13 +124,12 @@ fn merge_entries(entries: &mut [MappedEntry], target: usize, source: usize) {
         weight += sw;
     }
 
-    let source_vs = entries[source].vs.clone();
+    let mut source_vs = std::mem::take(&mut entries[source].vs);
     let source_i = entries[source].i;
 
     // target.vs = source.vs.concat(target.vs)
-    let mut new_vs = source_vs;
-    new_vs.extend(entries[target].vs.clone());
-    entries[target].vs = new_vs;
+    source_vs.append(&mut entries[target].vs);
+    entries[target].vs = source_vs;
 
     if weight > 0.0 {
         entries[target].barycenter = Some(sum / weight);

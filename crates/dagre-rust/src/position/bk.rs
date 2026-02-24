@@ -9,22 +9,16 @@ use std::collections::{HashMap, HashSet};
 /// The block graph uses no node labels and f64 edge labels (separation values).
 type BlockGraph = Graph<(), f64, ()>;
 
-/// Boxed neighbor function used in alignment passes.
-type NeighborFn<'a> = Box<dyn Fn(&str) -> Vec<String> + 'a>;
-
 /// Main entry: assigns x coordinates using 4 alignment passes + median.
 pub fn position_x(g: &LayoutGraph) -> HashMap<String, f64> {
     let layering = util::build_layer_matrix(g);
     let mut conflicts = find_type1_conflicts(g, &layering);
     let type2 = find_type2_conflicts(g, &layering);
     for (k, v) in type2 {
-        let inner = conflicts.entry(k).or_default();
-        for k2 in v {
-            inner.insert(k2);
-        }
+        conflicts.entry(k).or_default().extend(v);
     }
 
-    let mut xss: HashMap<String, HashMap<String, f64>> = HashMap::new();
+    let mut xss: HashMap<&'static str, HashMap<String, f64>> = HashMap::with_capacity(4);
 
     for vert in &["u", "d"] {
         let adjusted_layering: Vec<Vec<String>> = if *vert == "u" {
@@ -34,29 +28,33 @@ pub fn position_x(g: &LayoutGraph) -> HashMap<String, f64> {
         };
 
         for horiz in &["l", "r"] {
-            let adj = if *horiz == "r" {
-                adjusted_layering
+            let adj_storage;
+            let adj: &[Vec<String>] = if *horiz == "r" {
+                adj_storage = adjusted_layering
                     .iter()
                     .map(|layer| layer.iter().rev().cloned().collect())
-                    .collect()
+                    .collect::<Vec<Vec<String>>>();
+                &adj_storage
             } else {
-                adjusted_layering.clone()
+                &adjusted_layering
             };
 
-            let neighbor_fn: NeighborFn = if *vert == "u" {
-                Box::new(|v: &str| g.predecessors(v).unwrap_or_default())
-            } else {
-                Box::new(|v: &str| g.successors(v).unwrap_or_default())
-            };
-
-            let align = vertical_alignment(g, &adj, &conflicts, &*neighbor_fn);
+            let align = vertical_alignment(g, &adj, &conflicts, *vert == "u");
             let mut xs = horizontal_compaction(g, &adj, &align.root, &align.align, *horiz == "r");
 
             if *horiz == "r" {
-                xs = xs.into_iter().map(|(k, v)| (k, -v)).collect();
+                for x in xs.values_mut() {
+                    *x = -*x;
+                }
             }
 
-            let key = format!("{}{}", vert, horiz);
+            let key = match (*vert, *horiz) {
+                ("u", "l") => "ul",
+                ("u", "r") => "ur",
+                ("d", "l") => "dl",
+                ("d", "r") => "dr",
+                _ => unreachable!("unexpected alignment combination"),
+            };
             xss.insert(key, xs);
         }
     }
@@ -86,8 +84,6 @@ fn find_type1_conflicts(g: &LayoutGraph, layering: &[Vec<String>]) -> Conflicts 
         let mut k0: usize = 0;
         let mut scan_pos: usize = 0;
         let prev_layer_length = prev_layer.len();
-        let last_node = layer.last().cloned().unwrap_or_default();
-
         for (i, v) in layer.iter().enumerate() {
             let w = find_other_inner_segment_node(g, v);
             let k1 = match &w {
@@ -99,23 +95,25 @@ fn find_type1_conflicts(g: &LayoutGraph, layering: &[Vec<String>]) -> Conflicts 
                 None => prev_layer_length,
             };
 
-            if w.is_some() || *v == last_node {
+            if w.is_some() || i + 1 == layer.len() {
                 for scan_idx in scan_pos..=i {
                     if scan_idx < layer.len() {
                         let scan_node = &layer[scan_idx];
-                        for u in g.predecessors(scan_node).unwrap_or_default() {
+                        if let Some(preds) = g.predecessor_map(scan_node) {
+                            for u in preds.keys() {
                             let u_pos = g
-                                .node(&u)
+                                .node(u)
                                 .and_then(|n| n.order)
                                 .map(|o| o as u64)
                                 .unwrap_or(0) as usize;
-                            let u_dummy = g.node(&u).map(|n| n.dummy.is_some()).unwrap_or(false);
+                            let u_dummy = g.node(u).map(|n| n.dummy.is_some()).unwrap_or(false);
                             let scan_dummy = g
                                 .node(scan_node)
                                 .map(|n| n.dummy.is_some())
                                 .unwrap_or(false);
                             if (u_pos < k0 || k1 < u_pos) && !(u_dummy && scan_dummy) {
-                                add_conflict(&mut conflicts, &u, scan_node);
+                                add_conflict(&mut conflicts, u, scan_node);
+                            }
                             }
                         }
                     }
@@ -147,9 +145,10 @@ fn find_type2_conflicts(g: &LayoutGraph, layering: &[Vec<String>]) -> Conflicts 
             let is_border = g.node(v).and_then(|n| n.dummy) == Some(DummyType::Border);
 
             if is_border {
-                let preds = g.predecessors(v).unwrap_or_default();
-                if !preds.is_empty() {
-                    next_north_pos = g.node(&preds[0]).and_then(|n| n.order).unwrap_or(0);
+                if let Some(preds) = g.predecessor_map(v)
+                    && let Some(pred) = preds.keys().next()
+                {
+                    next_north_pos = g.node(pred).and_then(|n| n.order).unwrap_or(0);
                     scan_type2(
                         g,
                         &mut conflicts,
@@ -194,12 +193,14 @@ fn scan_type2(
         let v = &south[i];
         let is_dummy = g.node(v).map(|n| n.dummy.is_some()).unwrap_or(false);
         if is_dummy {
-            for u in g.predecessors(v).unwrap_or_default() {
-                let u_dummy = g.node(&u).map(|n| n.dummy.is_some()).unwrap_or(false);
+            if let Some(preds) = g.predecessor_map(v) {
+                for u in preds.keys() {
+                    let u_dummy = g.node(u).map(|n| n.dummy.is_some()).unwrap_or(false);
                 if u_dummy {
-                    let u_order = g.node(&u).and_then(|n| n.order).unwrap_or(0);
+                        let u_order = g.node(u).and_then(|n| n.order).unwrap_or(0);
                     if u_order < prev_north_border || u_order > next_north_border {
-                        add_conflict(conflicts, &u, v);
+                            add_conflict(conflicts, u, v);
+                        }
                     }
                 }
             }
@@ -207,13 +208,15 @@ fn scan_type2(
     }
 }
 
-fn find_other_inner_segment_node(g: &LayoutGraph, v: &str) -> Option<String> {
+fn find_other_inner_segment_node<'a>(g: &'a LayoutGraph, v: &str) -> Option<&'a str> {
     let is_dummy = g.node(v).map(|n| n.dummy.is_some()).unwrap_or(false);
     if is_dummy {
-        g.predecessors(v)
-            .unwrap_or_default()
-            .into_iter()
-            .find(|u| g.node(u).map(|n| n.dummy.is_some()).unwrap_or(false))
+        g.predecessor_map(v).and_then(|preds| {
+            preds
+                .keys()
+                .find(|u| g.node(u.as_str()).map(|n| n.dummy.is_some()).unwrap_or(false))
+                .map(|u| u.as_str())
+        })
     } else {
         None
     }
@@ -243,10 +246,10 @@ struct AlignResult {
 }
 
 fn vertical_alignment(
-    _g: &LayoutGraph,
+    g: &LayoutGraph,
     layering: &[Vec<String>],
     conflicts: &Conflicts,
-    neighbor_fn: &dyn Fn(&str) -> Vec<String>,
+    use_predecessors: bool,
 ) -> AlignResult {
     let mut root: HashMap<String, String> = HashMap::new();
     let mut align: HashMap<String, String> = HashMap::new();
@@ -263,9 +266,19 @@ fn vertical_alignment(
     for layer in layering {
         let mut prev_idx: i64 = -1;
         for v in layer {
-            let mut ws = neighbor_fn(v);
+            let mut ws: Vec<&str> = if use_predecessors {
+                g.predecessor_map(v)
+                    .map(|m| m.keys().map(|k| k.as_str()).collect())
+                    .unwrap_or_default()
+            } else {
+                g.successor_map(v)
+                    .map(|m| m.keys().map(|k| k.as_str()).collect())
+                    .unwrap_or_default()
+            };
             if !ws.is_empty() {
-                ws.sort_by_key(|a| *pos.get(a).unwrap_or(&0));
+                if ws.len() > 1 {
+                    ws.sort_by_key(|a| *pos.get(*a).unwrap_or(&0));
+                }
                 let mp = (ws.len() as f64 - 1.0) / 2.0;
                 let i_start = mp.floor() as usize;
                 let i_end = mp.ceil() as usize;
@@ -274,13 +287,13 @@ fn vertical_alignment(
                         break;
                     }
                     let w = &ws[i];
-                    let w_pos = *pos.get(w).unwrap_or(&0) as i64;
+                    let w_pos = *pos.get(*w).unwrap_or(&0) as i64;
                     if align.get(v).map(|a| a == v).unwrap_or(false)
                         && prev_idx < w_pos
                         && !has_conflict(conflicts, v, w)
                     {
-                        align.insert(w.clone(), v.clone());
-                        let rw = root.get(w).cloned().unwrap_or_else(|| w.clone());
+                        align.insert((*w).to_string(), v.clone());
+                        let rw = root.get(*w).cloned().unwrap_or_else(|| (*w).to_string());
                         align.insert(v.clone(), rw.clone());
                         root.insert(v.clone(), rw);
                         prev_idx = w_pos;
@@ -310,23 +323,26 @@ fn horizontal_compaction(
     let mut visited: HashSet<String> = HashSet::new();
 
     while let Some(elem) = stack.pop() {
-        if visited.contains(&elem) {
+        if !visited.insert(elem.clone()) {
             // Process: xs[elem] = max of (xs[pred] + edge weight)
-            let in_edges = block_g.in_edges(&elem, None).unwrap_or_default();
-            let x = in_edges
-                .iter()
-                .map(|e| {
+            let mut x = 0.0f64;
+            if let Some(in_edge_ids) = block_g.in_edge_ids(&elem) {
+                for edge_id in in_edge_ids {
+                    let Some(e) = block_g.edge_obj_by_id(edge_id) else {
+                        continue;
+                    };
                     let pred_x = xs.get(&e.v).copied().unwrap_or(0.0);
-                    let edge_val = block_g.edge_by_obj(e).copied().unwrap_or(0.0);
-                    pred_x + edge_val
-                })
-                .fold(0.0f64, f64::max);
+                    let edge_val = block_g.edge_label_by_id(edge_id).copied().unwrap_or(0.0);
+                    x = x.max(pred_x + edge_val);
+                }
+            }
             xs.insert(elem, x);
         } else {
-            visited.insert(elem.clone());
             stack.push(elem.clone());
-            for pred in block_g.predecessors(&elem).unwrap_or_default() {
-                stack.push(pred);
+            if let Some(preds) = block_g.predecessor_map(&elem) {
+                for pred in preds.keys() {
+                    stack.push(pred.clone());
+                }
             }
         }
     }
@@ -342,16 +358,18 @@ fn horizontal_compaction(
     visited.clear();
 
     while let Some(elem) = stack.pop() {
-        if visited.contains(&elem) {
-            let out_edges = block_g.out_edges(&elem, None).unwrap_or_default();
-            let min = out_edges
-                .iter()
-                .map(|e| {
+        if !visited.insert(elem.clone()) {
+            let mut min = f64::INFINITY;
+            if let Some(out_edge_ids) = block_g.out_edge_ids(&elem) {
+                for edge_id in out_edge_ids {
+                    let Some(e) = block_g.edge_obj_by_id(edge_id) else {
+                        continue;
+                    };
                     let succ_x = xs.get(&e.w).copied().unwrap_or(0.0);
-                    let edge_val = block_g.edge_by_obj(e).copied().unwrap_or(0.0);
-                    succ_x - edge_val
-                })
-                .fold(f64::INFINITY, f64::min);
+                    let edge_val = block_g.edge_label_by_id(edge_id).copied().unwrap_or(0.0);
+                    min = min.min(succ_x - edge_val);
+                }
+            }
 
             let node_border = g.node(&elem).and_then(|n| n.border_type);
 
@@ -360,10 +378,11 @@ fn horizontal_compaction(
                 xs.insert(elem, current.max(min));
             }
         } else {
-            visited.insert(elem.clone());
             stack.push(elem.clone());
-            for succ in block_g.successors(&elem).unwrap_or_default() {
-                stack.push(succ);
+            if let Some(succs) = block_g.successor_map(&elem) {
+                for succ in succs.keys() {
+                    stack.push(succ.clone());
+                }
             }
         }
     }
@@ -389,21 +408,21 @@ fn build_block_graph(
     let edgesep = g.graph().edgesep;
 
     for layer in layering {
-        let mut u: Option<String> = None;
+        let mut u: Option<&str> = None;
         for v in layer {
-            let v_root = root.get(v).cloned().unwrap_or_else(|| v.clone());
-            block_graph.set_node(&v_root, None);
-            if let Some(ref u_node) = u {
-                let u_root = root.get(u_node).cloned().unwrap_or_else(|| u_node.clone());
+            let v_root = root.get(v).map(|s| s.as_str()).unwrap_or(v.as_str());
+            block_graph.set_node(v_root, None);
+            if let Some(u_node) = u {
+                let u_root = root.get(u_node).map(|s| s.as_str()).unwrap_or(u_node);
                 let prev_max = block_graph
-                    .edge(&u_root, &v_root, None)
+                    .edge(u_root, v_root, None)
                     .copied()
                     .unwrap_or(0.0);
                 let sep_val = sep(g, v, u_node, nodesep, edgesep, reverse_sep);
                 let new_val = sep_val.max(prev_max);
-                block_graph.set_edge(&u_root, &v_root, Some(new_val), None);
+                block_graph.set_edge(u_root, v_root, Some(new_val), None);
             }
-            u = Some(v.clone());
+            u = Some(v.as_str());
         }
     }
 
@@ -455,7 +474,7 @@ fn sep(g: &LayoutGraph, v: &str, w: &str, nodesep: f64, edgesep: f64, reverse_se
 
 fn find_smallest_width_alignment(
     g: &LayoutGraph,
-    xss: &HashMap<String, HashMap<String, f64>>,
+    xss: &HashMap<&'static str, HashMap<String, f64>>,
 ) -> HashMap<String, f64> {
     let mut best_width = f64::INFINITY;
     let mut best: Option<&HashMap<String, f64>> = None;
@@ -479,75 +498,84 @@ fn find_smallest_width_alignment(
 }
 
 fn align_coordinates(
-    xss: &mut HashMap<String, HashMap<String, f64>>,
+    xss: &mut HashMap<&'static str, HashMap<String, f64>>,
     align_to: &HashMap<String, f64>,
 ) {
     let align_to_min = align_to.values().copied().fold(f64::INFINITY, f64::min);
     let align_to_max = align_to.values().copied().fold(f64::NEG_INFINITY, f64::max);
 
-    for vert in &["u", "d"] {
-        for horiz in &["l", "r"] {
-            let key = format!("{}{}", vert, horiz);
-            // Skip if this is the alignment we're aligning to
-            let xs = match xss.get(&key) {
-                Some(xs) => xs.clone(),
-                None => continue,
+    for (key, horiz) in [("ul", "l"), ("ur", "r"), ("dl", "l"), ("dr", "r")] {
+            let Some(xs) = xss.get(&key) else {
+                continue;
             };
-
-            // Check if this IS the align_to map (by value equality)
-            if &xs == align_to {
+            if xs == align_to {
                 continue;
             }
-
             let xs_min = xs.values().copied().fold(f64::INFINITY, f64::min);
             let xs_max = xs.values().copied().fold(f64::NEG_INFINITY, f64::max);
 
-            let delta = if *horiz == "l" {
+            let delta = if horiz == "l" {
                 align_to_min - xs_min
             } else {
                 align_to_max - xs_max
             };
 
             if delta != 0.0 {
-                let shifted: HashMap<String, f64> =
-                    xs.into_iter().map(|(k, v)| (k, v + delta)).collect();
-                xss.insert(key, shifted);
+                if let Some(xs) = xss.get_mut(&key) {
+                    for value in xs.values_mut() {
+                        *value += delta;
+                    }
+                }
             }
-        }
     }
 }
 
 fn balance(
-    xss: &HashMap<String, HashMap<String, f64>>,
+    xss: &HashMap<&'static str, HashMap<String, f64>>,
     align: Option<Align>,
 ) -> HashMap<String, f64> {
-    let ul = xss.get("ul").cloned().unwrap_or_default();
+    let Some(ul) = xss.get("ul") else {
+        return HashMap::new();
+    };
     let mut result = HashMap::new();
+    let align_key = align.map(|a| match a {
+        Align::UL => "ul",
+        Align::UR => "ur",
+        Align::DL => "dl",
+        Align::DR => "dr",
+    });
 
     for v in ul.keys() {
-        if let Some(a) = align {
-            let key = match a {
-                Align::UL => "ul",
-                Align::UR => "ur",
-                Align::DL => "dl",
-                Align::DR => "dr",
-            }
-            .to_string();
+        if let Some(key) = align_key {
             result.insert(
                 v.clone(),
-                xss.get(&key)
+                xss.get(key)
                     .and_then(|xs| xs.get(v))
                     .copied()
                     .unwrap_or(0.0),
             );
         } else {
-            let mut vals: Vec<f64> = xss.values().filter_map(|xs| xs.get(v)).copied().collect();
-            vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-            if vals.len() >= 4 {
+            let mut vals = [0.0f64; 4];
+            let mut count = 0usize;
+            for key in ["ul", "ur", "dl", "dr"] {
+                if let Some(x) = xss.get(key).and_then(|xs| xs.get(v)).copied() {
+                    vals[count] = x;
+                    count += 1;
+                }
+            }
+
+            if count >= 4 {
+                vals.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
                 result.insert(v.clone(), (vals[1] + vals[2]) / 2.0);
-            } else if vals.len() >= 2 {
-                result.insert(v.clone(), (vals[0] + vals[vals.len() - 1]) / 2.0);
-            } else if !vals.is_empty() {
+            } else if count >= 2 {
+                let mut min_v = vals[0];
+                let mut max_v = vals[0];
+                for value in vals.iter().take(count).skip(1) {
+                    min_v = min_v.min(*value);
+                    max_v = max_v.max(*value);
+                }
+                result.insert(v.clone(), (min_v + max_v) / 2.0);
+            } else if count == 1 {
                 result.insert(v.clone(), vals[0]);
             }
         }

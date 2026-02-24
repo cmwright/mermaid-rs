@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::borrow::Cow;
 
 use petgraph::graph::{DiGraph, NodeIndex};
 
@@ -309,34 +310,8 @@ pub fn build_petgraph(
     sorted_nodes.sort_by_key(|(id, _)| id.as_str());
 
     for (id, (node_def, style)) in sorted_nodes {
-        let label = node_def.label.clone().unwrap_or_else(|| id.clone());
-        let original_label_html = label.clone();
-
-        let clean_text = crate::render::html_util::strip_html_tags(
-            &crate::render::html_util::normalize_br(&label),
-        );
-
-        // Word-wrap long text and update the label if wrapping occurred
-        let wrapped_text = measurer.wrap_text(&clean_text, MAX_NODE_TEXT_WIDTH);
-        let label = if wrapped_text != clean_text {
-            // Wrapping occurred — use the wrapped plain text as the label
-            wrapped_text.clone()
-        } else {
-            // No wrapping needed — preserve original label (may contain HTML)
-            label
-        };
-
-        let measure_text = &wrapped_text;
-        let mut text_metrics = if measure_text.contains('\n') {
-            measurer.measure_multiline(measure_text, 10.0)
-        } else {
-            measurer.measure(measure_text)
-        };
-        text_metrics = apply_html_style_measurement_adjustments(
-            &original_label_html,
-            text_metrics,
-            measurer,
-        );
+        let raw_label = node_def.label.clone().unwrap_or_else(|| id.clone());
+        let (label, text_metrics) = build_display_label_and_metrics(&raw_label, measurer);
         let (width, height) = compute_node_size(&node_def.shape, &text_metrics);
 
         let data = NodeData {
@@ -360,18 +335,10 @@ pub fn build_petgraph(
             .get(&edge.to)
             .ok_or_else(|| MermaidError::Layout(format!("Unknown target node: {}", edge.to)))?;
 
-        let (label_width, label_height) = if let Some(ref label_text) = edge.label {
-            let clean = crate::render::html_util::normalize_br(label_text);
-            let clean = crate::render::html_util::strip_html_tags(&clean);
-            let metrics = if clean.contains('\n') {
-                measurer.measure_multiline(&clean, 10.0)
-            } else {
-                measurer.measure(&clean)
-            };
-            (metrics.width + 10.0, metrics.height + 10.0)
-        } else {
-            (0.0, 0.0)
-        };
+        let (label_width, label_height) = edge
+            .label
+            .as_deref()
+            .map_or((0.0, 0.0), |label| edge_label_dimensions(label, measurer));
 
         graph.add_edge(
             *from_idx,
@@ -423,6 +390,27 @@ pub fn build_dagre_graph_with_fixed_node_sizes(
     direction: Direction,
     ast: &FlowchartAst,
     fixed_node_sizes: Option<&HashMap<String, (f64, f64)>>,
+) -> Result<(dagre_rust::LayoutGraph, HashMap<String, NodeData>)> {
+    let membership = build_subgraph_membership(ast);
+    build_dagre_graph_with_fixed_node_sizes_and_membership(
+        all_nodes,
+        edges,
+        measurer,
+        direction,
+        ast,
+        fixed_node_sizes,
+        &membership,
+    )
+}
+
+pub(crate) fn build_dagre_graph_with_fixed_node_sizes_and_membership(
+    all_nodes: &HashMap<String, (NodeDef, StyleProperties)>,
+    edges: &[EdgeDef],
+    measurer: &TextMeasurer<'_>,
+    direction: Direction,
+    ast: &FlowchartAst,
+    fixed_node_sizes: Option<&HashMap<String, (f64, f64)>>,
+    membership: &SubgraphMembership,
 ) -> Result<(dagre_rust::LayoutGraph, HashMap<String, NodeData>)> {
     let mut g = dagre_rust::Graph::with_options(&dagre_rust::GraphOptions {
         directed: true,
@@ -486,31 +474,8 @@ pub fn build_dagre_graph_with_fixed_node_sizes(
             }
             continue;
         };
-        let label = node_def.label.clone().unwrap_or_else(|| (*id).clone());
-        let original_label_html = label.clone();
-
-        let clean_text = crate::render::html_util::strip_html_tags(
-            &crate::render::html_util::normalize_br(&label),
-        );
-
-        let wrapped_text = measurer.wrap_text(&clean_text, MAX_NODE_TEXT_WIDTH);
-        let label = if wrapped_text != clean_text {
-            wrapped_text.clone()
-        } else {
-            label
-        };
-
-        let measure_text = &wrapped_text;
-        let mut text_metrics = if measure_text.contains('\n') {
-            measurer.measure_multiline(measure_text, 10.0)
-        } else {
-            measurer.measure(measure_text)
-        };
-        text_metrics = apply_html_style_measurement_adjustments(
-            &original_label_html,
-            text_metrics,
-            measurer,
-        );
+        let raw_label = node_def.label.clone().unwrap_or_else(|| (*id).clone());
+        let (label, text_metrics) = build_display_label_and_metrics(&raw_label, measurer);
         let (mut width, mut height) = compute_node_size(&node_def.shape, &text_metrics);
         if let Some((fw, fh)) = fixed_node_sizes.and_then(|m| m.get(id)).copied() {
             width = fw;
@@ -551,18 +516,10 @@ pub fn build_dagre_graph_with_fixed_node_sizes(
             )));
         }
 
-        let (label_width, label_height) = if let Some(ref label_text) = edge.label {
-            let clean = crate::render::html_util::normalize_br(label_text);
-            let clean = crate::render::html_util::strip_html_tags(&clean);
-            let metrics = if clean.contains('\n') {
-                measurer.measure_multiline(&clean, 10.0)
-            } else {
-                measurer.measure(&clean)
-            };
-            (metrics.width + 10.0, metrics.height + 10.0)
-        } else {
-            (0.0, 0.0)
-        };
+        let (label_width, label_height) = edge
+            .label
+            .as_deref()
+            .map_or((0.0, 0.0), |label| edge_label_dimensions(label, measurer));
 
         let mut el = dagre_rust::EdgeLabel::default();
         el.width = label_width;
@@ -573,7 +530,6 @@ pub fn build_dagre_graph_with_fixed_node_sizes(
 
     // Register subgraph nodes in dagre and set parent relationships
     // so dagre's compound layout can handle subgraph containment.
-    let membership = build_subgraph_membership(ast);
     register_subgraph_hierarchy(&mut g, &ast.subgraphs, &membership, Some(&ordered_ids));
 
     Ok((g, node_data_map))
@@ -657,6 +613,14 @@ fn compute_node_size(shape: &NodeShape, text: &TextMetrics) -> (f64, f64) {
     let base_w = (text.width + 2.0 * NODE_PADDING_H).max(MIN_NODE_WIDTH);
     let base_h = (text.height + 2.0 * NODE_PADDING_V).max(MIN_NODE_HEIGHT);
     const RECT_LABEL_EXTRA_WIDTH: f64 = 4.0;
+    // Mermaid flowchart default node padding.
+    const MERMAID_NODE_PADDING: f64 = 15.0;
+    // Safety inset so text never visually touches shape borders.
+    const MIN_TEXT_INSET: f64 = 2.0;
+    // Extra guard because Rust-side font metrics can under-estimate browser glyph extents,
+    // especially with mixed punctuation/non-latin labels.
+    const SHAPE_TEXT_WIDTH_GUARD: f64 = 1.12;
+    const SHAPE_TEXT_HEIGHT_GUARD: f64 = 1.08;
 
     match shape {
         NodeShape::Rectangle
@@ -664,16 +628,36 @@ fn compute_node_size(shape: &NodeShape, text: &TextMetrics) -> (f64, f64) {
         | NodeShape::Stadium
         | NodeShape::Subroutine
         | NodeShape::Cylinder => (base_w + RECT_LABEL_EXTRA_WIDTH, base_h),
+        // Mermaid question.ts: s = (bbox.width + padding) + (bbox.height + padding)
         NodeShape::Diamond => {
-            // Rotated square: to inscribe a rectangle W×H inside a 45°-rotated square,
-            // the half-diagonal must be (W + H) / 2. Both diagonals are equal.
-            let d = base_w + base_h;
-            (d, d)
+            let mermaid_s = (text.width + MERMAID_NODE_PADDING) + (text.height + MERMAID_NODE_PADDING);
+            // For a diamond with equal diagonals s, inscribed axis-aligned rect constraint is:
+            // rect_w + rect_h <= s
+            let guard_w = text.width * SHAPE_TEXT_WIDTH_GUARD + 2.0 * MIN_TEXT_INSET;
+            let guard_h = text.height * SHAPE_TEXT_HEIGHT_GUARD + 2.0 * MIN_TEXT_INSET;
+            let min_s = guard_w + guard_h;
+            let s = mermaid_s.max(min_s);
+            (s, s)
         }
-        NodeShape::Circle | NodeShape::DoubleCircle => {
-            // Circle must fully contain the text rectangle: diameter = diagonal of the rect
-            let diameter = (base_w * base_w + base_h * base_h).sqrt();
+        // Mermaid circle.ts: diameter = bbox.width + padding
+        NodeShape::Circle => {
+            let mermaid_d = text.width + MERMAID_NODE_PADDING;
+            // Circle must contain full text bbox (plus safety inset): d >= diagonal(rect)
+            let rect_w = text.width * SHAPE_TEXT_WIDTH_GUARD + 2.0 * MIN_TEXT_INSET;
+            let rect_h = text.height * SHAPE_TEXT_HEIGHT_GUARD + 2.0 * MIN_TEXT_INSET;
+            let min_d = (rect_w * rect_w + rect_h * rect_h).sqrt();
+            let diameter = mermaid_d.max(min_d);
             (diameter, diameter)
+        }
+        // Mermaid doubleCircle.ts: inner diameter = bbox.width + padding, outer adds gap*2
+        NodeShape::DoubleCircle => {
+            let mermaid_inner_d = text.width + MERMAID_NODE_PADDING;
+            let rect_w = text.width * SHAPE_TEXT_WIDTH_GUARD + 2.0 * MIN_TEXT_INSET;
+            let rect_h = text.height * SHAPE_TEXT_HEIGHT_GUARD + 2.0 * MIN_TEXT_INSET;
+            let min_inner_d = (rect_w * rect_w + rect_h * rect_h).sqrt();
+            let inner_d = mermaid_inner_d.max(min_inner_d);
+            let outer_d = inner_d + 10.0;
+            (outer_d, outer_d)
         }
         NodeShape::Hexagon => (base_w + base_h * 0.5, base_h),
         NodeShape::Asymmetric => {
@@ -684,6 +668,52 @@ fn compute_node_size(shape: &NodeShape, text: &TextMetrics) -> (f64, f64) {
         }
         _ => (base_w, base_h),
     }
+}
+
+fn plain_text_for_measurement(text: &str) -> Cow<'_, str> {
+    if !text.contains('<') {
+        return Cow::Borrowed(text);
+    }
+
+    let normalized = crate::render::html_util::normalize_br(text);
+    if !normalized.contains('<') {
+        return Cow::Owned(normalized);
+    }
+
+    Cow::Owned(crate::render::html_util::strip_html_tags(&normalized))
+}
+
+fn measure_text_block(text: &str, measurer: &TextMeasurer<'_>) -> TextMetrics {
+    const LINE_SPACING: f32 = 10.0;
+    if text.contains('\n') {
+        measurer.measure_multiline(text, LINE_SPACING)
+    } else {
+        measurer.measure(text)
+    }
+}
+
+fn edge_label_dimensions(label_text: &str, measurer: &TextMeasurer<'_>) -> (f64, f64) {
+    const EDGE_LABEL_PAD: f64 = 10.0;
+    let plain = plain_text_for_measurement(label_text);
+    let metrics = measure_text_block(&plain, measurer);
+    (metrics.width + EDGE_LABEL_PAD, metrics.height + EDGE_LABEL_PAD)
+}
+
+fn build_display_label_and_metrics(raw_label: &str, measurer: &TextMeasurer<'_>) -> (String, TextMetrics) {
+    let plain = plain_text_for_measurement(raw_label);
+    let wrapped_text = measurer.wrap_text(&plain, MAX_NODE_TEXT_WIDTH);
+    let label = if wrapped_text != plain {
+        wrapped_text.clone()
+    } else {
+        raw_label.to_string()
+    };
+
+    let metrics = apply_html_style_measurement_adjustments(
+        raw_label,
+        measure_text_block(&wrapped_text, measurer),
+        measurer,
+    );
+    (label, metrics)
 }
 
 fn apply_html_style_measurement_adjustments(
@@ -1086,6 +1116,43 @@ mod tests {
             assert_eq!(graph[node].shape, expected_shape);
             assert!(graph[node].width > 0.0);
             assert!(graph[node].height > 0.0);
+        }
+    }
+
+    #[test]
+    fn test_circle_and_diamond_never_overflow_text_bbox() {
+        let provider = FontProvider::default_font();
+        let measurer = make_measurer(&provider);
+        let labels = [
+            "Circle",
+            "Link text",
+            "Inner / circle\nand some odd\nspecial characters",
+            "WIDE WIDE WIDE LABEL",
+        ];
+
+        for label in labels {
+            let metrics = if label.contains('\n') {
+                measurer.measure_multiline(label, 10.0)
+            } else {
+                measurer.measure(label)
+            };
+
+            let (cw, ch) = compute_node_size(&NodeShape::Circle, &metrics);
+            let rect_diag = (metrics.width * metrics.width + metrics.height * metrics.height).sqrt();
+            assert!(
+                cw >= rect_diag && ch >= rect_diag,
+                "circle too small for label '{label}': node=({cw},{ch}) text=({}, {}) diag={rect_diag}",
+                metrics.width,
+                metrics.height
+            );
+
+            let (dw, dh) = compute_node_size(&NodeShape::Diamond, &metrics);
+            assert!(
+                dw >= metrics.width + metrics.height && dh >= metrics.width + metrics.height,
+                "diamond too small for label '{label}': node=({dw},{dh}) text=({}, {})",
+                metrics.width,
+                metrics.height
+            );
         }
     }
 

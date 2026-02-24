@@ -15,9 +15,33 @@ pub fn strip_html_tags(s: &str) -> String {
 
 /// Replace <br>, <br/>, <br /> (case-insensitive) with \n.
 pub fn normalize_br(s: &str) -> String {
-    let mut result = s.to_string();
-    for pattern in &["<br/>", "<br />", "<br>", "<BR/>", "<BR />", "<BR>"] {
-        result = result.replace(pattern, "\n");
+    let mut result = String::with_capacity(s.len());
+    let mut i = 0;
+
+    while i < s.len() {
+        let rest = &s[i..];
+        if rest.as_bytes().first() == Some(&b'<') {
+            if let Some(close_rel) = rest.find('>') {
+                let close_idx = i + close_rel;
+                let tag = s[i + 1..close_idx].trim();
+                let normalized_tag: String =
+                    tag.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+                if normalized_tag.eq_ignore_ascii_case("br")
+                    || normalized_tag.eq_ignore_ascii_case("br/")
+                {
+                    result.push('\n');
+                    i = close_idx + 1;
+                    continue;
+                }
+            }
+        }
+
+        if let Some(ch) = rest.chars().next() {
+            result.push(ch);
+            i += ch.len_utf8();
+        } else {
+            break;
+        }
     }
     result
 }

@@ -25,10 +25,13 @@ fn two_layer_cross_count(g: &LayoutGraph, north_layer: &[String], south_layer: &
     let mut south_entries: Vec<(usize, f64)> = Vec::new();
     for v in north_layer {
         let mut entries: Vec<(usize, f64)> = Vec::new();
-        if let Some(out_edges) = g.out_edges(v, None) {
-            for e in &out_edges {
+        if let Some(out_edge_ids) = g.out_edge_ids(v) {
+            for edge_id in out_edge_ids {
+                let Some(e) = g.edge_obj_by_id(edge_id) else {
+                    continue;
+                };
                 if let Some(&pos) = south_pos.get(e.w.as_str()) {
-                    let weight = g.edge_by_obj(e).map(|l| l.weight).unwrap_or(0.0);
+                    let weight = g.edge_label_by_id(edge_id).map(|l| l.weight).unwrap_or(0.0);
                     entries.push((pos, weight));
                 }
             }

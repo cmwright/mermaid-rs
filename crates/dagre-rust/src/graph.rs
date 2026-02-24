@@ -202,9 +202,9 @@ impl<N: Default + Clone, E: Default + Clone, G: Default + Clone> Graph<N, E, G> 
     /// Set node with a label. If node exists, updates label only if value is Some.
     /// Passing `None` creates a node without a label (mirrors JS `setNode(v)` with undefined).
     pub fn set_node(&mut self, v: &str, value: Option<N>) -> &mut Self {
-        if self.nodes.contains_key(v) {
+        if let Some(existing) = self.nodes.get_mut(v) {
             if let Some(val) = value {
-                self.nodes.insert(v.to_string(), Some(val));
+                *existing = Some(val);
             }
             return self;
         }
@@ -374,14 +374,37 @@ impl<N: Default + Clone, E: Default + Clone, G: Default + Clone> Graph<N, E, G> 
         }
     }
 
+    /// Returns direct children by reference (compound graphs only).
+    /// Avoids cloning child IDs in hot traversal paths.
+    pub fn children_ids(&self, v: Option<&str>) -> Option<&[String]> {
+        if !self.is_compound {
+            return None;
+        }
+        let v = v.unwrap_or(GRAPH_NODE);
+        self.children
+            .as_ref()
+            .and_then(|c| c.get(v))
+            .map(Vec::as_slice)
+    }
+
     // === Predecessor/Successor/Neighbor functions ===
 
     pub fn predecessors(&self, v: &str) -> Option<Vec<String>> {
         self.preds.get(v).map(|m| m.keys().cloned().collect())
     }
 
+    /// Returns predecessor count map by reference (avoids cloning keys).
+    pub fn predecessor_map(&self, v: &str) -> Option<&IndexMap<String, usize>> {
+        self.preds.get(v)
+    }
+
     pub fn successors(&self, v: &str) -> Option<Vec<String>> {
         self.sucs.get(v).map(|m| m.keys().cloned().collect())
+    }
+
+    /// Returns successor count map by reference (avoids cloning keys).
+    pub fn successor_map(&self, v: &str) -> Option<&IndexMap<String, usize>> {
+        self.sucs.get(v)
     }
 
     pub fn neighbors(&self, v: &str) -> Option<Vec<String>> {
@@ -488,6 +511,21 @@ impl<N: Default + Clone, E: Default + Clone, G: Default + Clone> Graph<N, E, G> 
             .collect()
     }
 
+    /// Returns edge IDs in insertion order (no edge cloning).
+    pub fn edge_ids(&self) -> &[String] {
+        &self.edge_order
+    }
+
+    /// Returns edge object by edge ID (no edge cloning).
+    pub fn edge_obj_by_id(&self, edge_id: &str) -> Option<&Edge> {
+        self.edge_objs.get(edge_id)
+    }
+
+    /// Returns edge label by edge ID (no edge cloning).
+    pub fn edge_label_by_id(&self, edge_id: &str) -> Option<&E> {
+        self.edge_labels.get(edge_id)
+    }
+
     /// Set an edge by (v, w) with optional name and label.
     pub fn set_edge(
         &mut self,
@@ -496,11 +534,12 @@ impl<N: Default + Clone, E: Default + Clone, G: Default + Clone> Graph<N, E, G> 
         value: Option<E>,
         name: Option<&str>,
     ) -> &mut Self {
-        let v_str = v.to_string();
-        let w_str = w.to_string();
-        let name_str = name.map(|s| s.to_string());
-
-        let e = edge_args_to_id(self.is_directed, &v_str, &w_str, name_str.as_deref());
+        let (ev, ew) = if !self.is_directed && v > w {
+            (w, v)
+        } else {
+            (v, w)
+        };
+        let e = edge_args_to_id(self.is_directed, ev, ew, name);
 
         if let std::collections::hash_map::Entry::Occupied(mut entry) =
             self.edge_labels.entry(e.clone())
@@ -515,13 +554,17 @@ impl<N: Default + Clone, E: Default + Clone, G: Default + Clone> Graph<N, E, G> 
             panic!("Cannot set a named edge when isMultigraph = false");
         }
 
-        self.set_node(&v_str, None);
-        self.set_node(&w_str, None);
+        self.set_node(ev, None);
+        self.set_node(ew, None);
 
         let label = value.unwrap_or_default();
         self.edge_labels.insert(e.clone(), label);
 
-        let edge_obj = edge_args_to_obj(self.is_directed, &v_str, &w_str, name_str.as_deref());
+        let edge_obj = Edge {
+            v: ev.to_string(),
+            w: ew.to_string(),
+            name: name.map(|s| s.to_string()),
+        };
         let ev = edge_obj.v.clone();
         let ew = edge_obj.w.clone();
 
@@ -627,6 +670,24 @@ impl<N: Default + Clone, E: Default + Clone, G: Default + Clone> Graph<N, E, G> 
         }
     }
 
+    /// In-edge IDs for node v (directed graphs only), without cloning edge objects.
+    pub fn in_edge_ids(&self, v: &str) -> Option<&[String]> {
+        if self.is_directed {
+            self.in_edges.get(v).map(Vec::as_slice)
+        } else {
+            None
+        }
+    }
+
+    /// Out-edge IDs for node v (directed graphs only), without cloning edge objects.
+    pub fn out_edge_ids(&self, v: &str) -> Option<&[String]> {
+        if self.is_directed {
+            self.out_edges.get(v).map(Vec::as_slice)
+        } else {
+            None
+        }
+    }
+
     /// All edges incident to node v, optionally filtered to node w.
     pub fn node_edges(&self, v: &str, w: Option<&str>) -> Option<Vec<Edge>> {
         if !self.nodes.contains_key(v) {
@@ -716,8 +777,11 @@ impl<N: Default + Clone, E: Default + Clone, G: Default + Clone> Default for Gra
 // === Helper functions ===
 
 fn increment_or_init_entry(map: &mut IndexMap<String, usize>, k: &str) {
-    let entry = map.entry(k.to_string()).or_insert(0);
-    *entry += 1;
+    if let Some(entry) = map.get_mut(k) {
+        *entry += 1;
+    } else {
+        map.insert(k.to_string(), 1);
+    }
 }
 
 fn decrement_or_remove_entry(map: &mut IndexMap<String, usize>, k: &str) {
@@ -736,23 +800,13 @@ fn edge_args_to_id(is_directed: bool, v: &str, w: &str, name: Option<&str>) -> S
         (v, w)
     };
     let name_part = name.unwrap_or(DEFAULT_EDGE_NAME);
-    format!(
-        "{}{}{}{}{}",
-        v, EDGE_KEY_DELIM, w, EDGE_KEY_DELIM, name_part
-    )
-}
-
-fn edge_args_to_obj(is_directed: bool, v: &str, w: &str, name: Option<&str>) -> Edge {
-    let (v, w) = if !is_directed && v > w {
-        (w, v)
-    } else {
-        (v, w)
-    };
-    Edge {
-        v: v.to_string(),
-        w: w.to_string(),
-        name: name.map(|s| s.to_string()),
-    }
+    let mut id = String::with_capacity(v.len() + w.len() + name_part.len() + EDGE_KEY_DELIM.len() * 2);
+    id.push_str(v);
+    id.push_str(EDGE_KEY_DELIM);
+    id.push_str(w);
+    id.push_str(EDGE_KEY_DELIM);
+    id.push_str(name_part);
+    id
 }
 
 /// Compute edge ID from an Edge object.

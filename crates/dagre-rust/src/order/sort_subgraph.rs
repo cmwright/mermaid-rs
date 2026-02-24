@@ -36,8 +36,11 @@ pub fn sort_subgraph(
     let mut subgraphs: HashMap<String, sort::SortResult> = HashMap::new();
 
     for entry in &mut barycenters {
-        let children = g.children(Some(&entry.v)).unwrap_or_default();
-        if !children.is_empty() {
+        let has_children = g
+            .children_ids(Some(&entry.v))
+            .map(|children| !children.is_empty())
+            .unwrap_or(false);
+        if has_children {
             let sub_result = sort_subgraph(g, &entry.v, cg, bias_right);
             subgraphs.insert(entry.v.clone(), sub_result);
 
@@ -55,17 +58,15 @@ pub fn sort_subgraph(
     let expanded: Vec<resolve_conflicts::ResolvedEntry> = entries
         .into_iter()
         .map(|mut entry| {
-            entry.vs = entry
-                .vs
-                .iter()
-                .flat_map(|v| {
-                    if let Some(sr) = subgraphs.get(v) {
-                        sr.vs.clone()
-                    } else {
-                        vec![v.clone()]
-                    }
-                })
-                .collect();
+            let mut expanded_vs: Vec<String> = Vec::with_capacity(entry.vs.len());
+            for v in &entry.vs {
+                if let Some(sr) = subgraphs.get(v) {
+                    expanded_vs.extend(sr.vs.iter().cloned());
+                } else {
+                    expanded_vs.push(v.clone());
+                }
+            }
+            entry.vs = expanded_vs;
             entry
         })
         .collect();

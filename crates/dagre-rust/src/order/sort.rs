@@ -12,8 +12,8 @@ pub struct SortResult {
 
 /// Sorts entries by barycenter, interleaving unsortable entries.
 pub fn sort(entries: &[ResolvedEntry], bias_right: bool) -> SortResult {
-    let mut sortable: Vec<&ResolvedEntry> = Vec::new();
-    let mut unsortable: Vec<&ResolvedEntry> = Vec::new();
+    let mut sortable: Vec<&ResolvedEntry> = Vec::with_capacity(entries.len());
+    let mut unsortable: Vec<&ResolvedEntry> = Vec::with_capacity(entries.len());
 
     for entry in entries {
         if entry.barycenter.is_some() {
@@ -41,7 +41,8 @@ pub fn sort(entries: &[ResolvedEntry], bias_right: bool) -> SortResult {
         }
     });
 
-    let mut vs: Vec<Vec<String>> = Vec::new();
+    let total_nodes: usize = entries.iter().map(|e| e.vs.len()).sum();
+    let mut vs: Vec<String> = Vec::with_capacity(total_nodes);
     let mut sum = 0.0;
     let mut weight = 0.0;
     let mut vs_index: usize = 0;
@@ -51,16 +52,14 @@ pub fn sort(entries: &[ResolvedEntry], bias_right: bool) -> SortResult {
 
     for entry in &sortable {
         vs_index += entry.vs.len();
-        vs.push(entry.vs.clone());
+        vs.extend(entry.vs.iter().cloned());
         sum += entry.barycenter.unwrap_or(0.0) * entry.weight.unwrap_or(0.0);
         weight += entry.weight.unwrap_or(0.0);
         vs_index = consume_unsortable(&mut vs, &mut unsortable, vs_index);
     }
 
-    let flat: Vec<String> = vs.into_iter().flatten().collect();
-
     SortResult {
-        vs: flat,
+        vs,
         barycenter: if weight > 0.0 {
             Some(sum / weight)
         } else {
@@ -71,14 +70,14 @@ pub fn sort(entries: &[ResolvedEntry], bias_right: bool) -> SortResult {
 }
 
 fn consume_unsortable(
-    vs: &mut Vec<Vec<String>>,
+    vs: &mut Vec<String>,
     unsortable: &mut Vec<&ResolvedEntry>,
     mut index: usize,
 ) -> usize {
     while let Some(last) = unsortable.last() {
         if last.i <= index {
             let entry = unsortable.pop().unwrap();
-            vs.push(entry.vs.clone());
+            vs.extend(entry.vs.iter().cloned());
             index += 1;
         } else {
             break;

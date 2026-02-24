@@ -6,7 +6,6 @@ use crate::rank::feasible_tree::feasible_tree;
 use crate::rank::util::{longest_path, slack};
 use crate::types::EdgeLabel;
 use crate::util::simplify;
-use std::collections::HashSet;
 
 /// Runs the network simplex algorithm to assign optimal ranks.
 pub fn network_simplex(g: &mut LayoutGraph) {
@@ -36,7 +35,13 @@ pub fn network_simplex(g: &mut LayoutGraph) {
 
 /// Initializes cut values for all edges in the tree.
 fn init_cut_values(t: &mut LayoutGraph, g: &LayoutGraph) {
-    let all_vs = postorder_traversal(t, &t.nodes());
+    let root = t
+        .node_ids()
+        .iter()
+        .find(|v| t.node(v).and_then(|n| n.parent_node.as_ref()).is_none())
+        .cloned()
+        .unwrap_or_default();
+    let all_vs = postorder_traversal(t, &root);
     let len = all_vs.len();
     for child in all_vs.iter().take(len.saturating_sub(1)) {
         assign_cut_value(t, g, child);
@@ -46,12 +51,12 @@ fn init_cut_values(t: &mut LayoutGraph, g: &LayoutGraph) {
 fn assign_cut_value(t: &mut LayoutGraph, g: &LayoutGraph, child: &str) {
     let parent = t
         .node(child)
-        .and_then(|n| n.parent_node.as_deref())
-        .map(|s| s.to_string());
+        .and_then(|n| n.parent_node.as_deref());
 
-    if let Some(ref parent) = parent {
+    if let Some(parent) = parent {
+        let parent = parent.to_string();
         let cv = calc_cut_value(t, g, child);
-        t.edge_mut(child, parent, None).unwrap().cutvalue = Some(cv);
+        t.edge_mut(child, &parent, None).unwrap().cutvalue = Some(cv);
     }
 }
 
@@ -63,42 +68,95 @@ fn calc_cut_value(t: &LayoutGraph, g: &LayoutGraph, child: &str) -> f64 {
         .unwrap_or("");
 
     let mut child_is_tail = true;
-    let graph_edge = g.edge(child, parent, None);
-    let graph_edge = if graph_edge.is_none() {
-        child_is_tail = false;
-        g.edge(parent, child, None)
-    } else {
-        graph_edge
-    };
+    let mut cut_value = 0.0;
+    let mut found_parent_edge = false;
+    if let Some(out_edge_ids) = g.out_edge_ids(child) {
+        for edge_id in out_edge_ids {
+            let Some(e) = g.edge_obj_by_id(edge_id) else {
+                continue;
+            };
+            if e.w == parent {
+                cut_value = g.edge_label_by_id(edge_id).map(|l| l.weight).unwrap_or(0.0);
+                child_is_tail = true;
+                found_parent_edge = true;
+                break;
+            }
+        }
+    }
+    if !found_parent_edge
+        && let Some(in_edge_ids) = g.in_edge_ids(child)
+    {
+        for edge_id in in_edge_ids {
+            let Some(e) = g.edge_obj_by_id(edge_id) else {
+                continue;
+            };
+            if e.v == parent {
+                cut_value = g.edge_label_by_id(edge_id).map(|l| l.weight).unwrap_or(0.0);
+                child_is_tail = false;
+                break;
+            }
+        }
+    }
 
-    let mut cut_value = graph_edge.map(|e| e.weight).unwrap_or(0.0);
+    if let Some(out_edge_ids) = g.out_edge_ids(child) {
+        for edge_id in out_edge_ids {
+            let Some(e) = g.edge_obj_by_id(edge_id) else {
+                continue;
+            };
+            let other = &e.w;
+            if other == parent {
+                continue;
+            }
+            let points_to_head = child_is_tail;
+            let other_weight = g.edge_label_by_id(edge_id).map(|l| l.weight).unwrap_or(0.0);
 
-    if let Some(node_edges) = g.node_edges(child, None) {
-        for e in &node_edges {
-            let is_out_edge = e.v == child;
-            let other = if is_out_edge { &e.w } else { &e.v };
+            cut_value += if points_to_head {
+                other_weight
+            } else {
+                -other_weight
+            };
 
-            if other != parent {
-                let points_to_head = is_out_edge == child_is_tail;
-                let other_weight = g.edge_by_obj(e).map(|l| l.weight).unwrap_or(0.0);
-
+            if is_tree_edge(t, child, other) {
+                let other_cut_value = t
+                    .edge(child, other, None)
+                    .and_then(|l| l.cutvalue)
+                    .unwrap_or(0.0);
                 cut_value += if points_to_head {
-                    other_weight
+                    -other_cut_value
                 } else {
-                    -other_weight
+                    other_cut_value
                 };
+            }
+        }
+    }
+    if let Some(in_edge_ids) = g.in_edge_ids(child) {
+        for edge_id in in_edge_ids {
+            let Some(e) = g.edge_obj_by_id(edge_id) else {
+                continue;
+            };
+            let other = &e.v;
+            if other == parent {
+                continue;
+            }
+            let points_to_head = !child_is_tail;
+            let other_weight = g.edge_label_by_id(edge_id).map(|l| l.weight).unwrap_or(0.0);
 
-                if is_tree_edge(t, child, other) {
-                    let other_cut_value = t
-                        .edge(child, other, None)
-                        .and_then(|l| l.cutvalue)
-                        .unwrap_or(0.0);
-                    cut_value += if points_to_head {
-                        -other_cut_value
-                    } else {
-                        other_cut_value
-                    };
-                }
+            cut_value += if points_to_head {
+                other_weight
+            } else {
+                -other_weight
+            };
+
+            if is_tree_edge(t, child, other) {
+                let other_cut_value = t
+                    .edge(child, other, None)
+                    .and_then(|l| l.cutvalue)
+                    .unwrap_or(0.0);
+                cut_value += if points_to_head {
+                    -other_cut_value
+                } else {
+                    other_cut_value
+                };
             }
         }
     }
@@ -110,25 +168,22 @@ fn calc_cut_value(t: &LayoutGraph, g: &LayoutGraph, child: &str) -> f64 {
 fn init_low_lim_values(tree: &mut LayoutGraph, root: Option<&str>) {
     let root = root
         .map(|s| s.to_string())
-        .unwrap_or_else(|| tree.nodes()[0].clone());
-    let mut visited = HashSet::new();
-    dfs_assign_low_lim(tree, &mut visited, 1, &root, None);
+        .unwrap_or_else(|| tree.node_ids()[0].clone());
+    dfs_assign_low_lim(tree, 1, &root, None);
 }
 
 fn dfs_assign_low_lim(
     tree: &mut LayoutGraph,
-    visited: &mut HashSet<String>,
     mut next_lim: i64,
     v: &str,
     parent: Option<&str>,
 ) -> i64 {
     let low = next_lim;
-    visited.insert(v.to_string());
 
     let neighbors = tree.neighbors(v).unwrap_or_default();
     for w in &neighbors {
-        if !visited.contains(w) {
-            next_lim = dfs_assign_low_lim(tree, visited, next_lim, w, Some(v));
+        if Some(w.as_str()) != parent {
+            next_lim = dfs_assign_low_lim(tree, next_lim, w, Some(v));
         }
     }
 
@@ -142,12 +197,20 @@ fn dfs_assign_low_lim(
 
 /// Find an edge with a negative cut value to leave the tree.
 fn leave_edge(tree: &LayoutGraph) -> Option<Edge> {
-    tree.edges().into_iter().find(|e| {
-        tree.edge_by_obj(e)
+    for edge_id in tree.edge_ids() {
+        let e = tree
+            .edge_obj_by_id(edge_id)
+            .expect("edge ID should resolve to edge object");
+        if tree
+            .edge_by_obj(e)
             .and_then(|l| l.cutvalue)
             .map(|c| c < 0.0)
             .unwrap_or(false)
-    })
+        {
+            return Some(e.clone());
+        }
+    }
+    None
 }
 
 /// Find the edge to enter the tree that replaces the leaving edge.
@@ -172,26 +235,28 @@ fn enter_edge(t: &LayoutGraph, g: &LayoutGraph, edge: &Edge) -> Edge {
         (vn.low.unwrap_or(0), vn.lim.unwrap_or(0), false)
     };
 
-    let candidates: Vec<Edge> = g
-        .edges()
-        .into_iter()
-        .filter(|e| {
-            let v_lim_val = t.node(&e.v).and_then(|n| n.lim).unwrap_or(0);
-            let w_lim_val = t.node(&e.w).and_then(|n| n.lim).unwrap_or(0);
-            let v_desc = tail_low <= v_lim_val && v_lim_val <= tail_lim;
-            let w_desc = tail_low <= w_lim_val && w_lim_val <= tail_lim;
-            flip == v_desc && flip != w_desc
-        })
-        .collect();
+    let mut best_edge: Option<Edge> = None;
+    let mut best_slack: Option<i64> = None;
+    for edge_id in g.edge_ids() {
+        let e = g
+            .edge_obj_by_id(edge_id)
+            .expect("edge ID should resolve to edge object");
+        let v_lim_val = t.node(&e.v).and_then(|n| n.lim).unwrap_or(0);
+        let w_lim_val = t.node(&e.w).and_then(|n| n.lim).unwrap_or(0);
+        let v_desc = tail_low <= v_lim_val && v_lim_val <= tail_lim;
+        let w_desc = tail_low <= w_lim_val && w_lim_val <= tail_lim;
+        if !(flip == v_desc && flip != w_desc) {
+            continue;
+        }
 
-    candidates
-        .into_iter()
-        .min_by(|a, b| {
-            let sa = slack(g, a);
-            let sb = slack(g, b);
-            sa.cmp(&sb)
-        })
-        .expect("No enter edge found")
+        let s = slack(g, e);
+        if best_slack.is_none_or(|cur| s < cur) {
+            best_slack = Some(s);
+            best_edge = Some(e.clone());
+        }
+    }
+
+    best_edge.expect("No enter edge found")
 }
 
 fn exchange_edges(t: &mut LayoutGraph, g: &mut LayoutGraph, e: &Edge, f: &Edge) {
@@ -205,9 +270,11 @@ fn exchange_edges(t: &mut LayoutGraph, g: &mut LayoutGraph, e: &Edge, f: &Edge) 
 fn update_ranks(t: &LayoutGraph, g: &mut LayoutGraph) {
     // Find root: node without a parent in t's labels
     let root = t
-        .nodes()
+        .node_ids()
+        .iter()
         .into_iter()
         .find(|v| t.node(v).and_then(|n| n.parent_node.as_ref()).is_none())
+        .cloned()
         .unwrap_or_default();
 
     let vs = preorder_traversal(t, &root);
@@ -216,21 +283,20 @@ fn update_ranks(t: &LayoutGraph, g: &mut LayoutGraph) {
         let parent = t
             .node(v)
             .and_then(|n| n.parent_node.as_deref())
-            .unwrap_or("")
-            .to_string();
+            .unwrap_or("");
 
         let mut flipped = false;
-        let edge = g.edge(v, &parent, None);
+        let edge = g.edge(v, parent, None);
         let edge = if edge.is_none() {
             flipped = true;
-            g.edge(&parent, v, None)
+            g.edge(parent, v, None)
         } else {
             edge
         };
 
         let minlen = edge.map(|e| e.minlen as i64).unwrap_or(1);
 
-        let parent_rank = g.node(&parent).and_then(|n| n.rank).unwrap_or(0);
+        let parent_rank = g.node(parent).and_then(|n| n.rank).unwrap_or(0);
 
         let new_rank = parent_rank + if flipped { minlen } else { -minlen };
 
@@ -247,41 +313,31 @@ fn is_tree_edge(tree: &LayoutGraph, u: &str, v: &str) -> bool {
 /// Pre-order DFS traversal.
 fn preorder_traversal(g: &LayoutGraph, root: &str) -> Vec<String> {
     let mut result = Vec::new();
-    let mut visited = HashSet::new();
-
-    fn dfs(g: &LayoutGraph, v: &str, visited: &mut HashSet<String>, result: &mut Vec<String>) {
-        if visited.contains(v) {
-            return;
-        }
-        visited.insert(v.to_string());
+    fn dfs(g: &LayoutGraph, v: &str, parent: Option<&str>, result: &mut Vec<String>) {
         result.push(v.to_string());
         for w in g.neighbors(v).unwrap_or_default() {
-            dfs(g, &w, visited, result);
+            if Some(w.as_str()) != parent {
+                dfs(g, &w, Some(v), result);
+            }
         }
     }
 
-    dfs(g, root, &mut visited, &mut result);
+    dfs(g, root, None, &mut result);
     result
 }
 
-/// Post-order DFS traversal from multiple roots.
-fn postorder_traversal(g: &LayoutGraph, roots: &[String]) -> Vec<String> {
+/// Post-order DFS traversal from a single root.
+fn postorder_traversal(g: &LayoutGraph, root: &str) -> Vec<String> {
     let mut result = Vec::new();
-    let mut visited = HashSet::new();
-
-    fn dfs(g: &LayoutGraph, v: &str, visited: &mut HashSet<String>, result: &mut Vec<String>) {
-        if visited.contains(v) {
-            return;
-        }
-        visited.insert(v.to_string());
+    fn dfs(g: &LayoutGraph, v: &str, parent: Option<&str>, result: &mut Vec<String>) {
         for w in g.neighbors(v).unwrap_or_default() {
-            dfs(g, &w, visited, result);
+            if Some(w.as_str()) != parent {
+                dfs(g, &w, Some(v), result);
+            }
         }
         result.push(v.to_string());
     }
 
-    for root in roots {
-        dfs(g, root, &mut visited, &mut result);
-    }
+    dfs(g, root, None, &mut result);
     result
 }

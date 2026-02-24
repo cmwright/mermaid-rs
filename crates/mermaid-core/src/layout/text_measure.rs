@@ -1,4 +1,8 @@
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
+use std::cell::RefCell;
+use std::collections::HashMap;
+
+const CACHE_MAX_TEXT_LEN: usize = 96;
 
 /// Measured dimensions of a text string in pixels.
 #[derive(Debug, Clone, Copy)]
@@ -10,6 +14,9 @@ pub struct TextMetrics {
 pub struct TextMeasurer<'a> {
     font: FontRef<'a>,
     scale: PxScale,
+    single_line_cache: RefCell<HashMap<String, TextMetrics>>,
+    multiline_cache: RefCell<HashMap<(String, u32), TextMetrics>>,
+    wrap_cache: RefCell<HashMap<(String, u64), String>>,
 }
 
 impl<'a> TextMeasurer<'a> {
@@ -17,11 +24,21 @@ impl<'a> TextMeasurer<'a> {
         Self {
             font,
             scale: PxScale::from(font_size),
+            single_line_cache: RefCell::new(HashMap::new()),
+            multiline_cache: RefCell::new(HashMap::new()),
+            wrap_cache: RefCell::new(HashMap::new()),
         }
     }
 
     /// Measure a single line of text, returning pixel width and height.
     pub fn measure(&self, text: &str) -> TextMetrics {
+        let use_cache = text.len() <= CACHE_MAX_TEXT_LEN;
+        if use_cache {
+            if let Some(cached) = self.single_line_cache.borrow().get(text).copied() {
+                return cached;
+            }
+        }
+
         let scaled = self.font.as_scaled(self.scale);
         let mut width = 0.0f32;
         let mut prev_glyph_id = None;
@@ -36,10 +53,17 @@ impl<'a> TextMeasurer<'a> {
         }
 
         let height = scaled.height();
-        TextMetrics {
+        let metrics = TextMetrics {
             width: width as f64,
             height: height as f64,
+        };
+
+        if use_cache {
+            self.single_line_cache
+                .borrow_mut()
+                .insert(text.to_string(), metrics);
         }
+        metrics
     }
 
     /// Word-wrap text so no line exceeds `max_width` pixels.
@@ -48,6 +72,19 @@ impl<'a> TextMeasurer<'a> {
     /// `max_width`, break at word boundaries. Single words longer than
     /// `max_width` are kept intact (never mid-word break).
     pub fn wrap_text(&self, text: &str, max_width: f64) -> String {
+        let use_cache = text.len() <= CACHE_MAX_TEXT_LEN;
+        let cache_key = use_cache.then(|| (text.to_string(), max_width.to_bits()));
+        if use_cache {
+            if let Some(cached) = self
+                .wrap_cache
+                .borrow()
+                .get(cache_key.as_ref().unwrap())
+                .cloned()
+            {
+                return cached;
+            }
+        }
+
         let mut result_lines: Vec<String> = Vec::new();
 
         for line in text.split('\n') {
@@ -58,38 +95,60 @@ impl<'a> TextMeasurer<'a> {
             }
 
             // Need to wrap this line at word boundaries
-            let words: Vec<&str> = line.split_whitespace().collect();
-            if words.is_empty() {
-                result_lines.push(String::new());
-                continue;
-            }
-
             let mut current_line = String::new();
-            for word in &words {
+            let mut saw_word = false;
+            for word in line.split_whitespace() {
+                saw_word = true;
                 if current_line.is_empty() {
                     // First word on the line — always add it (even if it exceeds max_width)
-                    current_line = word.to_string();
+                    current_line.push_str(word);
                 } else {
-                    let candidate = format!("{} {}", current_line, word);
-                    if self.measure(&candidate).width <= max_width {
-                        current_line = candidate;
+                    let prior_len = current_line.len();
+                    current_line.push(' ');
+                    current_line.push_str(word);
+                    if self.measure(&current_line).width <= max_width {
+                        // keep the appended word
                     } else {
+                        current_line.truncate(prior_len);
                         // Current line is full, start a new one
                         result_lines.push(current_line);
                         current_line = word.to_string();
                     }
                 }
             }
+            if !saw_word {
+                result_lines.push(String::new());
+                continue;
+            }
             if !current_line.is_empty() {
                 result_lines.push(current_line);
             }
         }
 
-        result_lines.join("\n")
+        let wrapped = result_lines.join("\n");
+        if use_cache {
+            self.wrap_cache
+                .borrow_mut()
+                .insert(cache_key.unwrap(), wrapped.clone());
+        }
+        wrapped
     }
 
     /// Measure multi-line text (split by newline).
     pub fn measure_multiline(&self, text: &str, line_spacing: f32) -> TextMetrics {
+        let use_cache = text.len() <= CACHE_MAX_TEXT_LEN;
+        let cache_key = use_cache.then(|| (text.to_string(), line_spacing.to_bits()));
+        if use_cache {
+            if let Some(cached) = self
+                .multiline_cache
+                .borrow()
+                .get(cache_key.as_ref().unwrap())
+                .copied()
+            {
+                return cached;
+            }
+        }
+
         let lines: Vec<&str> = text.lines().collect();
         if lines.is_empty() {
             return TextMetrics {
@@ -112,10 +171,16 @@ impl<'a> TextMeasurer<'a> {
         let total_height =
             line_height * lines.len() as f64 + line_spacing as f64 * (lines.len() - 1) as f64;
 
-        TextMetrics {
+        let metrics = TextMetrics {
             width: max_width,
             height: total_height,
+        };
+        if use_cache {
+            self.multiline_cache
+                .borrow_mut()
+                .insert(cache_key.unwrap(), metrics);
         }
+        metrics
     }
 }
 

@@ -9,7 +9,9 @@ use crate::render::html_util;
 use crate::render::svg_util::{build_basis_curve_path, escape_xml};
 use crate::render::theme::Theme;
 
-const SVG_PADDING: f64 = 8.0;
+// Architecture nodes combine icon tiles + text labels and have long curved edges
+// with markers; use a larger canvas inset so labels/arrowheads do not clip.
+const SVG_PADDING: f64 = 20.0;
 
 /// Render a positioned architecture graph to an SVG string.
 pub fn render_svg(graph: &PositionedGraph, theme: &Theme) -> Result<String> {
@@ -374,6 +376,14 @@ mod tests {
             height: 200.0,
             direction: Direction::LeftToRight,
         }
+    }
+
+    #[test]
+    fn viewbox_includes_architecture_padding() {
+        let graph = make_graph(vec![], vec![], vec![]);
+        let svg = render_svg(&graph, &Theme::default()).unwrap();
+        // 400x200 graph + 20px inset on each side.
+        assert!(svg.contains(r#"viewBox="0 0 440 240""#), "svg: {svg}");
     }
 
     fn make_node(id: &str, label: &str) -> PositionedNode {
