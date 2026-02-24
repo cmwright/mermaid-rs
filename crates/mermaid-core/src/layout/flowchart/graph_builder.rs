@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use petgraph::graph::{DiGraph, NodeIndex};
 
@@ -62,6 +62,85 @@ pub fn collect_all_nodes(
     }
 
     all_nodes
+}
+
+pub fn collect_node_order_from_ast(ast: &FlowchartAst) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut order = Vec::new();
+
+    let push = |id: &str, order: &mut Vec<String>, seen: &mut HashSet<String>| {
+        if seen.insert(id.to_string()) {
+            order.push(id.to_string());
+        }
+    };
+
+    for n in &ast.nodes {
+        if n.label.is_some() {
+            push(&n.id, &mut order, &mut seen);
+        }
+    }
+    fn walk_subgraphs(
+        subgraphs: &[SubgraphDef],
+        order: &mut Vec<String>,
+        seen: &mut HashSet<String>,
+    ) {
+        for sg in subgraphs {
+            for n in &sg.nodes {
+                if seen.insert(n.id.clone()) {
+                    order.push(n.id.clone());
+                }
+            }
+            for e in &sg.edges {
+                if seen.insert(e.from.clone()) {
+                    order.push(e.from.clone());
+                }
+                if seen.insert(e.to.clone()) {
+                    order.push(e.to.clone());
+                }
+            }
+            walk_subgraphs(&sg.subgraphs, order, seen);
+        }
+    }
+
+    for e in &ast.edges {
+        push(&e.from, &mut order, &mut seen);
+        push(&e.to, &mut order, &mut seen);
+    }
+    walk_subgraphs(&ast.subgraphs, &mut order, &mut seen);
+    order
+}
+
+fn collect_leaf_node_order_from_ast(ast: &FlowchartAst) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut order = Vec::new();
+
+    let push = |id: &str, order: &mut Vec<String>, seen: &mut HashSet<String>| {
+        if seen.insert(id.to_string()) {
+            order.push(id.to_string());
+        }
+    };
+
+    for n in &ast.nodes {
+        push(&n.id, &mut order, &mut seen);
+    }
+
+    fn walk_subgraphs_nodes_only(
+        subgraphs: &[SubgraphDef],
+        order: &mut Vec<String>,
+        seen: &mut HashSet<String>,
+    ) {
+        for sg in subgraphs {
+            walk_subgraphs_nodes_only(&sg.subgraphs, order, seen);
+            for n in &sg.nodes {
+                if n.label.is_some() && seen.insert(n.id.clone()) {
+                    order.push(n.id.clone());
+                }
+            }
+        }
+    }
+
+    walk_subgraphs_nodes_only(&ast.subgraphs, &mut order, &mut seen);
+    order
 }
 
 fn collect_subgraph_nodes(
@@ -142,17 +221,16 @@ fn resolve_node_style(
 // ── Edge collection ─────────────────────────────────────────
 
 pub fn collect_all_edges(ast: &FlowchartAst) -> Vec<EdgeDef> {
-    let mut all_edges = ast.edges.clone();
+    let mut all_edges = Vec::new();
     collect_subgraph_edges(&ast.subgraphs, &mut all_edges);
-    let mut seen = std::collections::HashSet::new();
-    all_edges.retain(|e| seen.insert((e.from.clone(), e.to.clone())));
+    all_edges.extend(ast.edges.iter().cloned());
     all_edges
 }
 
 fn collect_subgraph_edges(subgraphs: &[SubgraphDef], all_edges: &mut Vec<EdgeDef>) {
     for sg in subgraphs {
-        all_edges.extend(sg.edges.iter().cloned());
         collect_subgraph_edges(&sg.subgraphs, all_edges);
+        all_edges.extend(sg.edges.iter().cloned());
     }
 }
 
@@ -222,6 +300,7 @@ pub fn build_petgraph(
 
     for (id, (node_def, style)) in sorted_nodes {
         let label = node_def.label.clone().unwrap_or_else(|| id.clone());
+        let original_label_html = label.clone();
 
         let clean_text = crate::render::html_util::strip_html_tags(
             &crate::render::html_util::normalize_br(&label),
@@ -238,11 +317,16 @@ pub fn build_petgraph(
         };
 
         let measure_text = &wrapped_text;
-        let text_metrics = if measure_text.contains('\n') {
-            measurer.measure_multiline(measure_text, 4.0)
+        let mut text_metrics = if measure_text.contains('\n') {
+            measurer.measure_multiline(measure_text, 10.0)
         } else {
             measurer.measure(measure_text)
         };
+        text_metrics = apply_html_style_measurement_adjustments(
+            &original_label_html,
+            text_metrics,
+            measurer,
+        );
         let (width, height) = compute_node_size(&node_def.shape, &text_metrics);
 
         let data = NodeData {
@@ -270,11 +354,11 @@ pub fn build_petgraph(
             let clean = crate::render::html_util::normalize_br(label_text);
             let clean = crate::render::html_util::strip_html_tags(&clean);
             let metrics = if clean.contains('\n') {
-                measurer.measure_multiline(&clean, 4.0)
+                measurer.measure_multiline(&clean, 10.0)
             } else {
                 measurer.measure(&clean)
             };
-            (metrics.width + 10.0, metrics.height + 6.0)
+            (metrics.width + 10.0, metrics.height + 10.0)
         } else {
             (0.0, 0.0)
         };
@@ -319,6 +403,17 @@ pub fn build_dagre_graph(
     direction: Direction,
     ast: &FlowchartAst,
 ) -> Result<(dagre_rust::LayoutGraph, HashMap<String, NodeData>)> {
+    build_dagre_graph_with_fixed_node_sizes(all_nodes, edges, measurer, direction, ast, None)
+}
+
+pub fn build_dagre_graph_with_fixed_node_sizes(
+    all_nodes: &HashMap<String, (NodeDef, StyleProperties)>,
+    edges: &[EdgeDef],
+    measurer: &TextMeasurer<'_>,
+    direction: Direction,
+    ast: &FlowchartAst,
+    fixed_node_sizes: Option<&HashMap<String, (f64, f64)>>,
+) -> Result<(dagre_rust::LayoutGraph, HashMap<String, NodeData>)> {
     let mut g = dagre_rust::Graph::with_options(&dagre_rust::GraphOptions {
         directed: true,
         multigraph: true,
@@ -337,12 +432,52 @@ pub fn build_dagre_graph(
 
     let mut node_data_map: HashMap<String, NodeData> = HashMap::new();
 
-    // Sort nodes by ID for deterministic ordering
-    let mut sorted_nodes: Vec<_> = all_nodes.iter().collect();
-    sorted_nodes.sort_by_key(|(id, _)| id.as_str());
+    let sg_ids = subgraph_ids_recursive(&ast.subgraphs);
 
-    for (id, (node_def, style)) in &sorted_nodes {
+    // Mermaid.js/graphlib are sensitive to insertion order.
+    // For compound/subgraph charts Mermaid inserts subgraphs first (reverse declaration
+    // order, recursively), then leaf nodes in AST encounter order.
+    let ordered_ids = if ast.subgraphs.is_empty() {
+        let mut ids = collect_node_order_from_ast(ast);
+        let seen_ids: HashSet<String> = ids.iter().cloned().collect();
+        let mut leftovers: Vec<_> = all_nodes
+            .keys()
+            .filter(|id| !seen_ids.contains(*id))
+            .cloned()
+            .collect();
+        leftovers.sort();
+        ids.extend(leftovers);
+        ids
+    } else {
+        let mut ids = Vec::new();
+        collect_subgraph_order_reverse(&ast.subgraphs, &mut ids);
+
+        for id in collect_leaf_node_order_from_ast(ast) {
+            if !sg_ids.contains(&id) {
+                ids.push(id);
+            }
+        }
+
+        let seen: HashSet<String> = ids.iter().cloned().collect();
+        let mut leftovers: Vec<_> = all_nodes
+            .keys()
+            .filter(|id| !seen.contains(*id))
+            .cloned()
+            .collect();
+        leftovers.sort();
+        ids.extend(leftovers);
+        ids
+    };
+
+    for id in &ordered_ids {
+        let Some((node_def, style)) = all_nodes.get(id) else {
+            if sg_ids.contains(id) {
+                g.set_node(id, Some(dagre_rust::NodeLabel::default()));
+            }
+            continue;
+        };
         let label = node_def.label.clone().unwrap_or_else(|| (*id).clone());
+        let original_label_html = label.clone();
 
         let clean_text = crate::render::html_util::strip_html_tags(
             &crate::render::html_util::normalize_br(&label),
@@ -356,12 +491,21 @@ pub fn build_dagre_graph(
         };
 
         let measure_text = &wrapped_text;
-        let text_metrics = if measure_text.contains('\n') {
-            measurer.measure_multiline(measure_text, 4.0)
+        let mut text_metrics = if measure_text.contains('\n') {
+            measurer.measure_multiline(measure_text, 10.0)
         } else {
             measurer.measure(measure_text)
         };
-        let (width, height) = compute_node_size(&node_def.shape, &text_metrics);
+        text_metrics = apply_html_style_measurement_adjustments(
+            &original_label_html,
+            text_metrics,
+            measurer,
+        );
+        let (mut width, mut height) = compute_node_size(&node_def.shape, &text_metrics);
+        if let Some((fw, fh)) = fixed_node_sizes.and_then(|m| m.get(id)).copied() {
+            width = fw;
+            height = fh;
+        }
 
         let mut nl = dagre_rust::NodeLabel::default();
         nl.width = width;
@@ -369,19 +513,21 @@ pub fn build_dagre_graph(
         g.set_node(id, Some(nl));
 
         node_data_map.insert(
-            (*id).clone(),
+            id.clone(),
             NodeData {
-                id: (*id).clone(),
+                id: id.clone(),
                 label,
                 shape: node_def.shape,
-                style: (*style).clone(),
+                style: style.clone(),
                 width,
                 height,
             },
         );
     }
 
-    for edge in edges {
+    let ordered_edges: Vec<&EdgeDef> = edges.iter().collect();
+
+    for edge in ordered_edges {
         if !all_nodes.contains_key(&edge.from) {
             return Err(MermaidError::Layout(format!(
                 "Unknown source node: {}",
@@ -399,11 +545,11 @@ pub fn build_dagre_graph(
             let clean = crate::render::html_util::normalize_br(label_text);
             let clean = crate::render::html_util::strip_html_tags(&clean);
             let metrics = if clean.contains('\n') {
-                measurer.measure_multiline(&clean, 4.0)
+                measurer.measure_multiline(&clean, 10.0)
             } else {
                 measurer.measure(&clean)
             };
-            (metrics.width + 10.0, metrics.height + 6.0)
+            (metrics.width + 10.0, metrics.height + 10.0)
         } else {
             (0.0, 0.0)
         };
@@ -418,7 +564,7 @@ pub fn build_dagre_graph(
     // Register subgraph nodes in dagre and set parent relationships
     // so dagre's compound layout can handle subgraph containment.
     let membership = build_subgraph_membership(ast);
-    register_subgraph_hierarchy(&mut g, &ast.subgraphs, &membership);
+    register_subgraph_hierarchy(&mut g, &ast.subgraphs, &membership, Some(&ordered_ids));
 
     Ok((g, node_data_map))
 }
@@ -428,18 +574,35 @@ fn register_subgraph_hierarchy(
     g: &mut dagre_rust::LayoutGraph,
     subgraphs: &[SubgraphDef],
     membership: &SubgraphMembership,
+    leaf_order: Option<&[String]>,
 ) {
     let sg_ids = subgraph_ids_recursive(subgraphs);
 
     // First, register all subgraph nodes and set their parent relationships
     register_subgraphs_recursive(g, subgraphs, None);
 
-    // Then set parent for all leaf nodes based on membership
-    for (node_id, path) in membership {
-        if !path.is_empty() && !sg_ids.contains(node_id) {
-            let parent = &path[path.len() - 1];
-            if g.node(node_id).is_some() {
+    // Then set parent for all leaf nodes based on membership.
+    // Use deterministic ordering matching node insertion order when available.
+    if let Some(order) = leaf_order {
+        for node_id in order {
+            let Some(path) = membership.get(node_id) else {
+                continue;
+            };
+            if !path.is_empty() && !sg_ids.contains(node_id) && g.node(node_id).is_some() {
+                let parent = &path[path.len() - 1];
                 g.set_parent(node_id, Some(parent));
+            }
+        }
+    } else {
+        let mut node_ids: Vec<_> = membership.keys().cloned().collect();
+        node_ids.sort();
+        for node_id in node_ids {
+            let Some(path) = membership.get(&node_id) else {
+                continue;
+            };
+            if !path.is_empty() && !sg_ids.contains(&node_id) && g.node(&node_id).is_some() {
+                let parent = &path[path.len() - 1];
+                g.set_parent(&node_id, Some(parent));
             }
         }
     }
@@ -473,10 +636,17 @@ fn subgraph_ids_recursive(subgraphs: &[SubgraphDef]) -> std::collections::HashSe
     ids
 }
 
+fn collect_subgraph_order_reverse(subgraphs: &[SubgraphDef], out: &mut Vec<String>) {
+    for sg in subgraphs.iter().rev() {
+        out.push(sg.id.clone());
+        collect_subgraph_order_reverse(&sg.subgraphs, out);
+    }
+}
+
 fn compute_node_size(shape: &NodeShape, text: &TextMetrics) -> (f64, f64) {
     let base_w = (text.width + 2.0 * NODE_PADDING_H).max(MIN_NODE_WIDTH);
     let base_h = (text.height + 2.0 * NODE_PADDING_V).max(MIN_NODE_HEIGHT);
-    const RECT_LABEL_EXTRA_WIDTH: f64 = 12.0;
+    const RECT_LABEL_EXTRA_WIDTH: f64 = 4.0;
 
     match shape {
         NodeShape::Rectangle
@@ -506,11 +676,59 @@ fn compute_node_size(shape: &NodeShape, text: &TextMetrics) -> (f64, f64) {
     }
 }
 
+fn apply_html_style_measurement_adjustments(
+    raw_label: &str,
+    mut metrics: TextMetrics,
+    measurer: &TextMeasurer<'_>,
+) -> TextMetrics {
+    if !crate::render::html_util::has_html(raw_label) {
+        return metrics;
+    }
+
+    let normalized = crate::render::html_util::normalize_br(raw_label);
+    if !normalized.contains("<b>")
+        && !normalized.contains("<B>")
+        && !normalized.contains("<strong>")
+        && !normalized.contains("<STRONG>")
+    {
+        return metrics;
+    }
+
+    // Approximate bold text expansion for HTML labels by widening bold segments.
+    // This mirrors Mermaid's browser measurement behavior more closely than treating
+    // all segments as regular-weight text.
+    const BOLD_WIDTH_MULTIPLIER: f64 = 1.14;
+    let mut max_line_width = 0.0_f64;
+    for line in normalized.lines() {
+        let segments = crate::render::html_util::parse_segments(line);
+        let mut line_width = 0.0_f64;
+        for seg in segments {
+            let mut seg_width = measurer.measure(&seg.text).width;
+            if seg.bold {
+                seg_width *= BOLD_WIDTH_MULTIPLIER;
+            }
+            line_width += seg_width;
+        }
+        if line_width > max_line_width {
+            max_line_width = line_width;
+        }
+    }
+
+    if max_line_width > 0.0 {
+        metrics.width = metrics.width.max(max_line_width);
+    }
+
+    metrics
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::ast::common::{parse_style_string, StyleProperties};
     use crate::font::FontProvider;
+    use crate::parser::flowchart::parse_flowchart;
+    use serde::Deserialize;
+    use std::collections::{HashMap, HashSet};
 
     fn make_measurer(provider: &FontProvider) -> TextMeasurer<'_> {
         let font = provider.font_ref().unwrap();
@@ -803,5 +1021,716 @@ mod tests {
             assert!(graph[node].width > 0.0);
             assert!(graph[node].height > 0.0);
         }
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct MermaidDagreInputRef {
+        graph: MermaidGraphRef,
+        nodes: Vec<MermaidNodeRef>,
+        edges: Vec<MermaidEdgeRef>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct MermaidGraphRef {
+        rankdir: String,
+        nodesep: f64,
+        ranksep: f64,
+        marginx: f64,
+        marginy: f64,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct MermaidNodeRef {
+        id: String,
+        width: Option<f64>,
+        height: Option<f64>,
+        parent: Option<String>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct MermaidEdgeRef {
+        from: String,
+        to: String,
+        name: Option<String>,
+        width: f64,
+        height: f64,
+        minlen: f64,
+        weight: f64,
+        labeloffset: f64,
+        labelpos: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct MermaidOrderSnapshot {
+        graph: MermaidGraphRef,
+        node_order: Vec<String>,
+        edge_order: Vec<MermaidOrderEdgeRef>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct MermaidOrderEdgeRef {
+        from: String,
+        to: String,
+        minlen: f64,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct MermaidAfterLayoutRef {
+        graph: MermaidAfterGraphRef,
+        nodes: Vec<MermaidAfterNodeRef>,
+        edges: Vec<MermaidAfterEdgeRef>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct MermaidAfterGraphRef {
+        width: f64,
+        height: f64,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct MermaidAfterNodeRef {
+        id: String,
+        x: f64,
+        y: f64,
+        width: f64,
+        height: f64,
+        parent: Option<String>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct MermaidAfterEdgeRef {
+        from: String,
+        to: String,
+        minlen: f64,
+        points: Vec<MermaidPointRef>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct MermaidPointRef {
+        x: f64,
+        y: f64,
+    }
+
+    fn approx_eq(a: f64, b: f64, eps: f64) -> bool {
+        (a - b).abs() <= eps
+    }
+
+    fn milli(v: f64) -> i64 {
+        (v * 1000.0).round() as i64
+    }
+
+    fn build_graph_from_numeric_ref_input(reference: &MermaidDagreInputRef) -> dagre_rust::LayoutGraph {
+        let mut g = dagre_rust::Graph::with_options(&dagre_rust::GraphOptions {
+            directed: true,
+            multigraph: true,
+            compound: true,
+        });
+
+        let mut gl = dagre_rust::GraphLabel::default();
+        gl.rankdir = match reference.graph.rankdir.as_str() {
+            "TB" => dagre_rust::RankDir::TB,
+            "BT" => dagre_rust::RankDir::BT,
+            "LR" => dagre_rust::RankDir::LR,
+            "RL" => dagre_rust::RankDir::RL,
+            other => panic!("unsupported rankdir in fixture: {other}"),
+        };
+        gl.nodesep = reference.graph.nodesep;
+        gl.ranksep = reference.graph.ranksep;
+        gl.marginx = reference.graph.marginx;
+        gl.marginy = reference.graph.marginy;
+        g.set_graph(gl);
+
+        for n in &reference.nodes {
+            let mut nl = dagre_rust::NodeLabel::default();
+            if let Some(w) = n.width {
+                nl.width = w;
+            }
+            if let Some(h) = n.height {
+                nl.height = h;
+            }
+            g.set_node(&n.id, Some(nl));
+        }
+
+        for n in &reference.nodes {
+            if let Some(parent) = &n.parent {
+                g.set_parent(&n.id, Some(parent));
+            }
+        }
+
+        for e in &reference.edges {
+            let mut el = dagre_rust::EdgeLabel::default();
+            el.width = e.width;
+            el.height = e.height;
+            el.minlen = e.minlen;
+            el.weight = e.weight;
+            el.labeloffset = e.labeloffset;
+            el.labelpos = match e.labelpos.as_str() {
+                "l" | "L" => dagre_rust::LabelPos::Left,
+                "c" | "C" => dagre_rust::LabelPos::Center,
+                "r" | "R" => dagre_rust::LabelPos::Right,
+                other => panic!("unsupported labelpos in fixture: {other}"),
+            };
+            g.set_edge(&e.from, &e.to, Some(el), e.name.as_deref());
+        }
+
+        g
+    }
+
+    fn build_example5_dagre_and_ref() -> (dagre_rust::LayoutGraph, MermaidDagreInputRef) {
+        let source = include_str!("../../../../../tests/test_loop/input_mermaid.mmd");
+        let ast = parse_flowchart(source).expect("example #5 should parse");
+
+        let class_defs = build_class_map(&ast.class_defs);
+        let all_nodes = collect_all_nodes(&ast, &class_defs);
+        let all_edges = collect_all_edges(&ast);
+        let provider = FontProvider::default_font();
+        let measurer = make_measurer(&provider);
+
+        let (g, _) = build_dagre_graph(&all_nodes, &all_edges, &measurer, ast.direction, &ast)
+            .expect("dagre graph build should succeed");
+
+        let reference: MermaidDagreInputRef = serde_json::from_str(include_str!(
+            "../../../../../tests/test_loop/example5_mermaidjs_dagre_input_reduced.json"
+        ))
+        .expect("reference fixture should deserialize");
+
+        (g, reference)
+    }
+
+    fn build_example2_dagre_and_ref() -> (dagre_rust::LayoutGraph, MermaidDagreInputRef) {
+        let source = include_str!("../../../../../tests/test_loop/example2_input.mmd");
+        let ast = parse_flowchart(source).expect("example #2 should parse");
+
+        let class_defs = build_class_map(&ast.class_defs);
+        let all_nodes = collect_all_nodes(&ast, &class_defs);
+        let all_edges = collect_all_edges(&ast);
+        let provider = FontProvider::default_font();
+        let measurer = make_measurer(&provider);
+
+        let (g, _) = build_dagre_graph(&all_nodes, &all_edges, &measurer, ast.direction, &ast)
+            .expect("dagre graph build should succeed");
+
+        let reference: MermaidDagreInputRef = serde_json::from_str(include_str!(
+            "../../../../../tests/test_loop/example2_mermaidjs_dagre_input_reduced.json"
+        ))
+        .expect("reference fixture should deserialize");
+
+        (g, reference)
+    }
+
+    fn build_example7_dagre_and_ref() -> (dagre_rust::LayoutGraph, MermaidDagreInputRef) {
+        let source = include_str!("../../../../../tests/test_loop/complex_subgraphs.mmd");
+        let ast = parse_flowchart(source).expect("example #7 should parse");
+
+        let class_defs = build_class_map(&ast.class_defs);
+        let all_nodes = collect_all_nodes(&ast, &class_defs);
+        let all_edges = collect_all_edges(&ast);
+        let provider = FontProvider::default_font();
+        let measurer = make_measurer(&provider);
+
+        let (g, _) = build_dagre_graph(&all_nodes, &all_edges, &measurer, ast.direction, &ast)
+            .expect("dagre graph build should succeed");
+
+        let reference: MermaidDagreInputRef = serde_json::from_str(include_str!(
+            "../../../../../tests/test_loop/example7_mermaidjs_dagre_input_reduced.json"
+        ))
+        .expect("reference fixture should deserialize");
+
+        (g, reference)
+    }
+
+    #[test]
+    fn test_example5_dagre_input_structure_matches_mermaidjs_debug_snapshot() {
+        let (g, reference) = build_example5_dagre_and_ref();
+
+        let gl = g.graph();
+        assert_eq!(reference.graph.rankdir, format!("{:?}", gl.rankdir));
+        assert!(
+            approx_eq(reference.graph.nodesep, gl.nodesep, 1e-6),
+            "nodesep mismatch: expected {}, got {}",
+            reference.graph.nodesep,
+            gl.nodesep
+        );
+        assert!(
+            approx_eq(reference.graph.ranksep, gl.ranksep, 1e-6),
+            "ranksep mismatch: expected {}, got {}",
+            reference.graph.ranksep,
+            gl.ranksep
+        );
+        assert!(approx_eq(reference.graph.marginx, gl.marginx, 1e-6));
+        assert!(approx_eq(reference.graph.marginy, gl.marginy, 1e-6));
+
+        let expected_nodes: HashMap<_, _> = reference
+            .nodes
+            .iter()
+            .map(|n| (n.id.as_str(), n))
+            .collect();
+        assert_eq!(expected_nodes.len(), g.nodes().len());
+
+        for node_id in g.nodes() {
+            let expected = expected_nodes
+                .get(node_id.as_str())
+                .unwrap_or_else(|| panic!("missing expected node: {node_id}"));
+            let actual_parent = g.parent(&node_id).map(|s| s.to_string());
+            assert_eq!(
+                expected.parent, actual_parent,
+                "parent mismatch for {}",
+                node_id
+            );
+        }
+
+        let expected_edges: HashSet<_> = reference
+            .edges
+            .iter()
+            .map(|e| (e.from.as_str(), e.to.as_str(), milli(e.minlen)))
+            .collect();
+        let actual_edges: HashSet<_> = g
+            .edges()
+            .into_iter()
+            .map(|edge| {
+                let el = g
+                    .edge_by_obj(&edge)
+                    .unwrap_or_else(|| panic!("missing edge label for {} -> {}", edge.v, edge.w));
+                (
+                    edge.v.clone(),
+                    edge.w.clone(),
+                    milli(el.minlen),
+                )
+            })
+            .collect();
+        let actual_edges: HashSet<_> = actual_edges
+            .iter()
+            .map(|(v, w, m)| (v.as_str(), w.as_str(), *m))
+            .collect();
+        assert_eq!(expected_edges, actual_edges);
+    }
+
+    #[test]
+    #[ignore = "known mismatch: MermaidJS collapses isolated subgraph A before top-level dagre layout"]
+    fn test_example2_dagre_input_structure_matches_mermaidjs_debug_snapshot() {
+        let (g, reference) = build_example2_dagre_and_ref();
+
+        let gl = g.graph();
+        assert_eq!(reference.graph.rankdir, format!("{:?}", gl.rankdir));
+        assert!(
+            approx_eq(reference.graph.nodesep, gl.nodesep, 1e-6),
+            "nodesep mismatch: expected {}, got {}",
+            reference.graph.nodesep,
+            gl.nodesep
+        );
+        assert!(
+            approx_eq(reference.graph.ranksep, gl.ranksep, 1e-6),
+            "ranksep mismatch: expected {}, got {}",
+            reference.graph.ranksep,
+            gl.ranksep
+        );
+        assert!(approx_eq(reference.graph.marginx, gl.marginx, 1e-6));
+        assert!(approx_eq(reference.graph.marginy, gl.marginy, 1e-6));
+
+        let expected_nodes: HashMap<_, _> = reference
+            .nodes
+            .iter()
+            .map(|n| (n.id.as_str(), n))
+            .collect();
+        assert_eq!(expected_nodes.len(), g.nodes().len());
+
+        for node_id in g.nodes() {
+            let expected = expected_nodes
+                .get(node_id.as_str())
+                .unwrap_or_else(|| panic!("missing expected node: {node_id}"));
+            let actual_parent = g.parent(&node_id).map(|s| s.to_string());
+            assert_eq!(
+                expected.parent, actual_parent,
+                "parent mismatch for {}",
+                node_id
+            );
+        }
+
+        let expected_edges: HashSet<_> = reference
+            .edges
+            .iter()
+            .map(|e| (e.from.as_str(), e.to.as_str(), milli(e.minlen)))
+            .collect();
+        let actual_edges: HashSet<_> = g
+            .edges()
+            .into_iter()
+            .map(|edge| {
+                let el = g
+                    .edge_by_obj(&edge)
+                    .unwrap_or_else(|| panic!("missing edge label for {} -> {}", edge.v, edge.w));
+                (
+                    edge.v.clone(),
+                    edge.w.clone(),
+                    milli(el.minlen),
+                )
+            })
+            .collect();
+        let actual_edges: HashSet<_> = actual_edges
+            .iter()
+            .map(|(v, w, m)| (v.as_str(), w.as_str(), *m))
+            .collect();
+        assert_eq!(expected_edges, actual_edges);
+    }
+
+    #[test]
+    fn test_example7_dagre_input_structure_matches_mermaidjs_debug_snapshot() {
+        let (g, reference) = build_example7_dagre_and_ref();
+
+        let gl = g.graph();
+        assert_eq!(reference.graph.rankdir, format!("{:?}", gl.rankdir));
+        assert!(
+            approx_eq(reference.graph.nodesep, gl.nodesep, 1e-6),
+            "nodesep mismatch: expected {}, got {}",
+            reference.graph.nodesep,
+            gl.nodesep
+        );
+        assert!(
+            approx_eq(reference.graph.ranksep, gl.ranksep, 1e-6),
+            "ranksep mismatch: expected {}, got {}",
+            reference.graph.ranksep,
+            gl.ranksep
+        );
+        assert!(approx_eq(reference.graph.marginx, gl.marginx, 1e-6));
+        assert!(approx_eq(reference.graph.marginy, gl.marginy, 1e-6));
+
+        let expected_nodes: HashMap<_, _> = reference
+            .nodes
+            .iter()
+            .map(|n| (n.id.as_str(), n))
+            .collect();
+        assert_eq!(expected_nodes.len(), g.nodes().len());
+
+        for node_id in g.nodes() {
+            let expected = expected_nodes
+                .get(node_id.as_str())
+                .unwrap_or_else(|| panic!("missing expected node: {node_id}"));
+            let actual_parent = g.parent(&node_id).map(|s| s.to_string());
+            assert_eq!(
+                expected.parent, actual_parent,
+                "parent mismatch for {}",
+                node_id
+            );
+        }
+
+        let expected_edges: HashSet<_> = reference
+            .edges
+            .iter()
+            .map(|e| (e.from.as_str(), e.to.as_str(), milli(e.minlen)))
+            .collect();
+        let actual_edges: HashSet<_> = g
+            .edges()
+            .into_iter()
+            .map(|edge| {
+                let el = g
+                    .edge_by_obj(&edge)
+                    .unwrap_or_else(|| panic!("missing edge label for {} -> {}", edge.v, edge.w));
+                (
+                    edge.v.clone(),
+                    edge.w.clone(),
+                    milli(el.minlen),
+                )
+            })
+            .collect();
+        let actual_edges: HashSet<_> = actual_edges
+            .iter()
+            .map(|(v, w, m)| (v.as_str(), w.as_str(), *m))
+            .collect();
+        assert_eq!(expected_edges, actual_edges);
+    }
+
+    #[test]
+    fn test_example5_identical_numeric_dagre_input_produces_identical_output() {
+        let input_ref: MermaidDagreInputRef = serde_json::from_str(include_str!(
+            "../../../../../tests/test_loop/example5_mermaidjs_dagre_input_reduced.json"
+        ))
+        .expect("input fixture should deserialize");
+        let output_ref: MermaidAfterLayoutRef = serde_json::from_str(include_str!(
+            "../../../../../tests/test_loop/example5_mermaidjs_dagre_after_layout_reduced.json"
+        ))
+        .expect("after-layout fixture should deserialize");
+
+        let mut g = build_graph_from_numeric_ref_input(&input_ref);
+        dagre_rust::layout(&mut g);
+
+        let gl = g.graph();
+        assert!(
+            approx_eq(gl.width, output_ref.graph.width, 1e-6),
+            "graph width mismatch (expected {}, got {})",
+            output_ref.graph.width,
+            gl.width
+        );
+        assert!(
+            approx_eq(gl.height, output_ref.graph.height, 1e-6),
+            "graph height mismatch (expected {}, got {})",
+            output_ref.graph.height,
+            gl.height
+        );
+
+        for expected in &output_ref.nodes {
+            let nl = g
+                .node(&expected.id)
+                .unwrap_or_else(|| panic!("missing node in dagre output: {}", expected.id));
+            assert!(
+                approx_eq(nl.x.unwrap_or_default(), expected.x, 1e-6),
+                "node x mismatch for {}",
+                expected.id
+            );
+            assert!(
+                approx_eq(nl.y.unwrap_or_default(), expected.y, 1e-6),
+                "node y mismatch for {}",
+                expected.id
+            );
+            assert!(approx_eq(nl.width, expected.width, 1e-6), "node width mismatch for {}", expected.id);
+            assert!(
+                approx_eq(nl.height, expected.height, 1e-6),
+                "node height mismatch for {}",
+                expected.id
+            );
+            let actual_parent = g.parent(&expected.id).map(|s| s.to_string());
+            assert_eq!(
+                actual_parent, expected.parent,
+                "node parent mismatch for {}",
+                expected.id
+            );
+        }
+
+        for expected in &output_ref.edges {
+            let edge_obj = g
+                .edges()
+                .into_iter()
+                .find(|e| e.v == expected.from && e.w == expected.to)
+                .unwrap_or_else(|| panic!("missing edge in dagre output: {} -> {}", expected.from, expected.to));
+            let el = g
+                .edge_by_obj(&edge_obj)
+                .unwrap_or_else(|| panic!("missing edge label for {} -> {}", expected.from, expected.to));
+
+            assert!(
+                approx_eq(el.minlen, expected.minlen, 1e-6),
+                "edge minlen mismatch for {} -> {}",
+                expected.from,
+                expected.to
+            );
+            assert_eq!(
+                el.points.len(),
+                expected.points.len(),
+                "edge point count mismatch for {} -> {}",
+                expected.from,
+                expected.to
+            );
+            for (idx, (actual_p, expected_p)) in el.points.iter().zip(expected.points.iter()).enumerate() {
+                assert!(
+                    approx_eq(actual_p.x, expected_p.x, 1e-6),
+                    "edge point[{idx}] x mismatch for {} -> {}",
+                    expected.from,
+                    expected.to
+                );
+                assert!(
+                    approx_eq(actual_p.y, expected_p.y, 1e-6),
+                    "edge point[{idx}] y mismatch for {} -> {}",
+                    expected.from,
+                    expected.to
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_example4_dagre_order_matches_mermaidjs_debug_snapshot() {
+        let source = include_str!("../../../../../tests/test_loop/example4_input.mmd");
+        let ast = parse_flowchart(source).expect("example #4 should parse");
+
+        let class_defs = build_class_map(&ast.class_defs);
+        let all_nodes = collect_all_nodes(&ast, &class_defs);
+        let all_edges = collect_all_edges(&ast);
+        let provider = FontProvider::default_font();
+        let measurer = make_measurer(&provider);
+        let (g, _) = build_dagre_graph(&all_nodes, &all_edges, &measurer, ast.direction, &ast)
+            .expect("dagre graph build should succeed");
+
+        let snap: MermaidOrderSnapshot = serde_json::from_str(include_str!(
+            "../../../../../tests/test_loop/example4_mermaidjs_dagre_order_snapshot.json"
+        ))
+        .expect("order snapshot fixture should deserialize");
+
+        let gl = g.graph();
+        assert_eq!(snap.graph.rankdir, format!("{:?}", gl.rankdir));
+        assert!(approx_eq(snap.graph.nodesep, gl.nodesep, 1e-6));
+        assert!(approx_eq(snap.graph.ranksep, gl.ranksep, 1e-6));
+        assert!(approx_eq(snap.graph.marginx, gl.marginx, 1e-6));
+        assert!(approx_eq(snap.graph.marginy, gl.marginy, 1e-6));
+
+        assert_eq!(snap.node_order, g.nodes(), "node insertion order mismatch");
+
+        let actual_edges: Vec<_> = g
+            .edges()
+            .into_iter()
+            .map(|e| {
+                let el = g
+                    .edge_by_obj(&e)
+                    .unwrap_or_else(|| panic!("missing edge label for {} -> {}", e.v, e.w));
+                MermaidOrderEdgeRef {
+                    from: e.v,
+                    to: e.w,
+                    minlen: el.minlen,
+                }
+            })
+            .collect();
+
+        let expected_edges: Vec<_> = snap.edge_order;
+        assert_eq!(expected_edges.len(), actual_edges.len());
+        for (idx, (exp, act)) in expected_edges.iter().zip(actual_edges.iter()).enumerate() {
+            assert_eq!(exp.from, act.from, "edge[{idx}] from mismatch");
+            assert_eq!(exp.to, act.to, "edge[{idx}] to mismatch");
+            assert!(
+                approx_eq(exp.minlen, act.minlen, 1e-6),
+                "edge[{idx}] minlen mismatch"
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "strict width/height parity requires Mermaid-equivalent text metrics"]
+    fn test_example5_dagre_input_matches_mermaidjs_debug_snapshot() {
+        let (g, reference) = build_example5_dagre_and_ref();
+
+        let expected_nodes: HashMap<_, _> = reference
+            .nodes
+            .iter()
+            .map(|n| (n.id.as_str(), n))
+            .collect();
+        assert_eq!(expected_nodes.len(), g.nodes().len());
+        for node_id in g.nodes() {
+            let expected = expected_nodes
+                .get(node_id.as_str())
+                .unwrap_or_else(|| panic!("missing expected node: {node_id}"));
+            let nl = g.node(&node_id).expect("node should exist");
+            if let Some(w) = expected.width {
+                assert!(
+                    approx_eq(w, nl.width, 0.01),
+                    "node width mismatch for {} (expected {}, got {})",
+                    node_id,
+                    w,
+                    nl.width
+                );
+            }
+            if let Some(h) = expected.height {
+                assert!(
+                    approx_eq(h, nl.height, 0.01),
+                    "node height mismatch for {} (expected {}, got {})",
+                    node_id,
+                    h,
+                    nl.height
+                );
+            }
+        }
+
+        let expected_edges: HashMap<_, _> = reference
+            .edges
+            .iter()
+            .map(|e| {
+                (
+                    (
+                        e.from.as_str(),
+                        e.to.as_str(),
+                        milli(e.width),
+                        milli(e.height),
+                    ),
+                    e,
+                )
+            })
+            .collect();
+        assert_eq!(expected_edges.len(), g.edges().len());
+
+        for edge in g.edges() {
+            let el = g
+                .edge_by_obj(&edge)
+                .unwrap_or_else(|| panic!("missing edge label for {} -> {}", edge.v, edge.w));
+            let key = (
+                edge.v.as_str(),
+                edge.w.as_str(),
+                milli(el.width),
+                milli(el.height),
+            );
+            let expected = expected_edges.get(&key).unwrap_or_else(|| {
+                panic!(
+                    "missing expected edge for {} -> {} with dims ({}, {})",
+                    edge.v, edge.w, el.width, el.height
+                )
+            });
+
+            assert!(
+                approx_eq(expected.width, el.width, 0.01),
+                "edge width mismatch for {} -> {}",
+                edge.v,
+                edge.w
+            );
+            assert!(
+                approx_eq(expected.height, el.height, 0.01),
+                "edge height mismatch for {} -> {}",
+                edge.v,
+                edge.w
+            );
+            assert!(approx_eq(expected.minlen, el.minlen, 1e-6));
+        }
+    }
+
+    #[test]
+    #[ignore = "debug helper for size parity tuning"]
+    fn debug_example5_node_size_diffs_against_mermaidjs() {
+        let (g, reference) = build_example5_dagre_and_ref();
+        let expected_nodes: HashMap<_, _> = reference
+            .nodes
+            .iter()
+            .map(|n| (n.id.as_str(), n))
+            .collect();
+
+        let mut deltas = Vec::new();
+        for node_id in g.nodes() {
+            let Some(expected) = expected_nodes.get(node_id.as_str()) else {
+                continue;
+            };
+            let nl = g.node(&node_id).expect("node should exist");
+            if let (Some(w), Some(h)) = (expected.width, expected.height) {
+                deltas.push((
+                    node_id.clone(),
+                    (nl.width - w).abs() + (nl.height - h).abs(),
+                    nl.width - w,
+                    nl.height - h,
+                    nl.width,
+                    nl.height,
+                    w,
+                    h,
+                ));
+            }
+        }
+
+        deltas.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        eprintln!("--- Top size deltas (ours - js) ---");
+        for (id, score, dw, dh, ow, oh, ew, eh) in deltas.iter().take(15) {
+            eprintln!(
+                "{id:10} score={score:8.3} dw={dw:8.3} dh={dh:8.3} ours=({ow:8.3},{oh:8.3}) js=({ew:8.3},{eh:8.3})"
+            );
+        }
+        panic!("debug output above");
+    }
+
+    #[test]
+    #[ignore = "debug helper for input insertion ordering"]
+    fn debug_example5_dagre_input_order_vs_mermaidjs() {
+        let (g, reference) = build_example5_dagre_and_ref();
+        let ours_nodes = g.nodes();
+        let expected_nodes: Vec<String> = reference.nodes.iter().map(|n| n.id.clone()).collect();
+        eprintln!("ours nodes:    {:?}", ours_nodes);
+        eprintln!("expected nodes:{:?}", expected_nodes);
+
+        let ours_edges: Vec<(String, String)> = g.edges().into_iter().map(|e| (e.v, e.w)).collect();
+        let expected_edges: Vec<(String, String)> = reference
+            .edges
+            .iter()
+            .map(|e| (e.from.clone(), e.to.clone()))
+            .collect();
+        eprintln!("ours edges:    {:?}", ours_edges);
+        eprintln!("expected edges:{:?}", expected_edges);
+        panic!("debug output above");
     }
 }

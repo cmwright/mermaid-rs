@@ -869,6 +869,8 @@ dependencies = [
  "png",
  "pretty_assertions",
  "resvg",
+ "serde",
+ "serde_json",
  "thiserror",
 ]
 

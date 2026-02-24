@@ -1,0 +1,499 @@
+{
+  "graph": {
+    "rankdir": "TB",
+    "nodesep": 50,
+    "ranksep": 50,
+    "marginx": 8,
+    "marginy": 8
+  },
+  "nodes": [
+    {
+      "id": "ExtIdPs",
+      "width": null,
+      "height": null,
+      "parent": null
+    },
+    {
+      "id": "OryNetwork",
+      "width": null,
+      "height": null,
+      "parent": null
+    },
+    {
+      "id": "OrySmall",
+      "width": null,
+      "height": null,
+      "parent": "OryNetwork"
+    },
+    {
+      "id": "OryEU",
+      "width": null,
+      "height": null,
+      "parent": "OryNetwork"
+    },
+    {
+      "id": "OryUS",
+      "width": null,
+      "height": null,
+      "parent": "OryNetwork"
+    },
+    {
+      "id": "Platform",
+      "width": null,
+      "height": null,
+      "parent": null
+    },
+    {
+      "id": "LEPkg3",
+      "width": null,
+      "height": null,
+      "parent": "Platform"
+    },
+    {
+      "id": "LEPkg2",
+      "width": null,
+      "height": null,
+      "parent": "Platform"
+    },
+    {
+      "id": "LEPkg1",
+      "width": null,
+      "height": null,
+      "parent": "Platform"
+    },
+    {
+      "id": "OrgPkg2",
+      "width": null,
+      "height": null,
+      "parent": "Platform"
+    },
+    {
+      "id": "OrgPkg",
+      "width": null,
+      "height": null,
+      "parent": "Platform"
+    },
+    {
+      "id": "RootOU",
+      "width": 203.359375,
+      "height": 126,
+      "parent": "OrgPkg"
+    },
+    {
+      "id": "EUOU",
+      "width": 208.109375,
+      "height": 126,
+      "parent": "OrgPkg"
+    },
+    {
+      "id": "APACOU",
+      "width": 225.546875,
+      "height": 126,
+      "parent": "OrgPkg"
+    },
+    {
+      "id": "SmallOU",
+      "width": 202.609375,
+      "height": 126,
+      "parent": "OrgPkg2"
+    },
+    {
+      "id": "LE1",
+      "width": 254.921875,
+      "height": 102,
+      "parent": "LEPkg1"
+    },
+    {
+      "id": "D1",
+      "width": 137.203125,
+      "height": 54,
+      "parent": "LEPkg1"
+    },
+    {
+      "id": "LE2",
+      "width": 182,
+      "height": 102,
+      "parent": "LEPkg2"
+    },
+    {
+      "id": "D2",
+      "width": 124.875,
+      "height": 54,
+      "parent": "LEPkg2"
+    },
+    {
+      "id": "LE3",
+      "width": 179.390625,
+      "height": 102,
+      "parent": "LEPkg3"
+    },
+    {
+      "id": "D3",
+      "width": 121,
+      "height": 54,
+      "parent": "LEPkg3"
+    },
+    {
+      "id": "OO1",
+      "width": 214.203125,
+      "height": 126,
+      "parent": "OryUS"
+    },
+    {
+      "id": "SSO1",
+      "width": 210.625,
+      "height": 78,
+      "parent": "OryUS"
+    },
+    {
+      "id": "ID1",
+      "width": 254.75,
+      "height": 54,
+      "parent": "OryUS"
+    },
+    {
+      "id": "ID2",
+      "width": 254.75,
+      "height": 54,
+      "parent": "OryUS"
+    },
+    {
+      "id": "OO2",
+      "width": 201.875,
+      "height": 126,
+      "parent": "OryEU"
+    },
+    {
+      "id": "SSO2",
+      "width": 211.125,
+      "height": 78,
+      "parent": "OryEU"
+    },
+    {
+      "id": "ID3",
+      "width": 242.4375,
+      "height": 54,
+      "parent": "OryEU"
+    },
+    {
+      "id": "OO3",
+      "width": 198,
+      "height": 126,
+      "parent": "OrySmall"
+    },
+    {
+      "id": "ID4",
+      "width": 238.5625,
+      "height": 54,
+      "parent": "OrySmall"
+    },
+    {
+      "id": "ID5",
+      "width": 238.5625,
+      "height": 54,
+      "parent": "OrySmall"
+    },
+    {
+      "id": "OktaIdP",
+      "width": 158.84375,
+      "height": 54,
+      "parent": "ExtIdPs"
+    },
+    {
+      "id": "AzureIdP",
+      "width": 160.21875,
+      "height": 54,
+      "parent": "ExtIdPs"
+    }
+  ],
+  "edges": [
+    {
+      "from": "RootOU",
+      "to": "EUOU",
+      "name": "L_RootOU_EUOU_0",
+      "label": "HAS_CHILD_OU",
+      "width": 107.953125,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "RootOU",
+      "to": "APACOU",
+      "name": "L_RootOU_APACOU_0",
+      "label": "HAS_CHILD_OU",
+      "width": 107.953125,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "LE1",
+      "to": "D1",
+      "name": "L_LE1_D1_0",
+      "label": "OWNS_DOMAIN",
+      "width": 106.765625,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "LE2",
+      "to": "D2",
+      "name": "L_LE2_D2_0",
+      "label": "OWNS_DOMAIN",
+      "width": 106.765625,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "LE3",
+      "to": "D3",
+      "name": "L_LE3_D3_0",
+      "label": "OWNS_DOMAIN",
+      "width": 106.765625,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "RootOU",
+      "to": "LE1",
+      "name": "L_RootOU_LE1_0",
+      "label": "REPRESENTS",
+      "width": 88.15625,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "EUOU",
+      "to": "LE2",
+      "name": "L_EUOU_LE2_0",
+      "label": "REPRESENTS",
+      "width": 88.15625,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "SmallOU",
+      "to": "LE3",
+      "name": "L_SmallOU_LE3_0",
+      "label": "REPRESENTS",
+      "width": 88.15625,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "OO1",
+      "to": "SSO1",
+      "name": "L_OO1_SSO1_0",
+      "label": "SSO provider",
+      "width": 90.96875,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "OO1",
+      "to": "ID1",
+      "name": "L_OO1_ID1_0",
+      "label": "member",
+      "width": 59.15625,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "OO1",
+      "to": "ID2",
+      "name": "L_OO1_ID2_0",
+      "label": "member",
+      "width": 59.15625,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "OO2",
+      "to": "SSO2",
+      "name": "L_OO2_SSO2_0",
+      "label": "SSO provider",
+      "width": 90.96875,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "OO2",
+      "to": "ID3",
+      "name": "L_OO2_ID3_0",
+      "label": "member",
+      "width": 59.15625,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "OO3",
+      "to": "ID4",
+      "name": "L_OO3_ID4_0",
+      "label": "member",
+      "width": 59.15625,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "OO3",
+      "to": "ID5",
+      "name": "L_OO3_ID5_0",
+      "label": "member",
+      "width": 59.15625,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "RootOU",
+      "to": "OO1",
+      "name": "L_RootOU_OO1_0",
+      "label": "org_id",
+      "width": 44.703125,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "EUOU",
+      "to": "OO2",
+      "name": "L_EUOU_OO2_0",
+      "label": "org_id",
+      "width": 44.703125,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "APACOU",
+      "to": "OO1",
+      "name": "L_APACOU_OO1_0",
+      "label": "inherits from parent",
+      "width": 145.375,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "SmallOU",
+      "to": "OO3",
+      "name": "L_SmallOU_OO3_0",
+      "label": "org_id",
+      "width": 44.703125,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "D1",
+      "to": "OO1",
+      "name": "L_D1_OO1_0",
+      "label": "configures domain",
+      "width": 131.234375,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "D2",
+      "to": "OO2",
+      "name": "L_D2_OO2_0",
+      "label": "configures domain",
+      "width": 131.234375,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "D3",
+      "to": "OO3",
+      "name": "L_D3_OO3_0",
+      "label": "configures domain",
+      "width": 131.234375,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "SSO1",
+      "to": "OktaIdP",
+      "name": "L_SSO1_OktaIdP_0",
+      "label": "SAML AuthnRequest",
+      "width": 138.53125,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "SSO2",
+      "to": "AzureIdP",
+      "name": "L_SSO2_AzureIdP_0",
+      "label": "OIDC /authorize",
+      "width": 115.75,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    }
+  ]
+}

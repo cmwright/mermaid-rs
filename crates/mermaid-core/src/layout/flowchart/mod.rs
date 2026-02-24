@@ -11,7 +11,7 @@ use crate::layout::text_measure::TextMeasurer;
 // Re-export public types for API compatibility
 pub use types::{PositionedEdge, PositionedGraph, PositionedNode, PositionedSubgraph};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use types::*;
 
@@ -20,6 +20,22 @@ pub fn layout_flowchart(
     ast: &FlowchartAst,
     measurer: &TextMeasurer<'_>,
 ) -> Result<PositionedGraph> {
+    layout_flowchart_impl(ast, measurer, true, None, None)
+}
+
+fn layout_flowchart_impl(
+    ast: &FlowchartAst,
+    measurer: &TextMeasurer<'_>,
+    allow_isolated_subgraph_extraction: bool,
+    fixed_node_sizes: Option<&HashMap<String, (f64, f64)>>,
+    ranksep_override: Option<f64>,
+) -> Result<PositionedGraph> {
+    if allow_isolated_subgraph_extraction && fixed_node_sizes.is_none() {
+        if let Some(extracted) = layout_with_extracted_isolated_subgraphs(ast, measurer)? {
+            return Ok(extracted);
+        }
+    }
+
     let is_horizontal = matches!(
         ast.direction,
         Direction::LeftToRight | Direction::RightToLeft
@@ -36,7 +52,17 @@ pub fn layout_flowchart(
 
     // 4. Build dagre graph (compound + multigraph) and run layout
     let (mut dagre_graph, node_data_map) =
-        graph_builder::build_dagre_graph(&all_nodes, &all_edges, measurer, ast.direction, ast)?;
+        graph_builder::build_dagre_graph_with_fixed_node_sizes(
+            &all_nodes,
+            &all_edges,
+            measurer,
+            ast.direction,
+            ast,
+            fixed_node_sizes,
+        )?;
+    if let Some(ranksep) = ranksep_override {
+        dagre_graph.graph_mut().ranksep = ranksep;
+    }
     dagre_rust::layout(&mut dagre_graph);
 
     // 5. Extract positioned nodes and edge data from dagre results
@@ -51,16 +77,24 @@ pub fn layout_flowchart(
     //    dagre didn't position (e.g. those with no children).
     let mut positioned_subgraphs =
         build_positioned_subgraphs_from_dagre(&dagre_graph, &ast.subgraphs, &ast.style_overrides);
-    // If dagre didn't produce positions for some subgraphs, fall back to
-    // the bounding-box approach for those.
+    // If dagre didn't produce positions for some subgraphs, compute fallbacks
+    // and merge only the missing IDs, preserving dagre-derived positions.
     if positioned_subgraphs.len() < count_subgraphs(&ast.subgraphs) {
-        positioned_subgraphs = compound::position_subgraphs(
+        let fallback_subgraphs = compound::position_subgraphs(
             &ast.subgraphs,
             &positioned_nodes,
             &ast.style_overrides,
             measurer,
             &membership,
         );
+        let dagre_by_id: HashMap<String, PositionedSubgraph> = positioned_subgraphs
+            .drain(..)
+            .map(|s| (s.id.clone(), s))
+            .collect();
+        positioned_subgraphs = fallback_subgraphs
+            .into_iter()
+            .map(|s| dagre_by_id.get(&s.id).cloned().unwrap_or(s))
+            .collect();
     }
 
     // 8. Route edges using dagre bend points
@@ -68,6 +102,7 @@ pub fn layout_flowchart(
         &positioned_nodes,
         &all_edges,
         is_horizontal,
+        &extraction.raw_points,
         &extraction.bend_points,
         &extraction.label_positions,
         &extraction.label_dimensions,
@@ -94,6 +129,182 @@ pub fn layout_flowchart(
         height,
         direction: ast.direction,
     })
+}
+
+fn toggle_direction(dir: Direction) -> Direction {
+    match dir {
+        Direction::TopToBottom => Direction::LeftToRight,
+        Direction::BottomToTop => Direction::RightToLeft,
+        Direction::LeftToRight => Direction::TopToBottom,
+        Direction::RightToLeft => Direction::BottomToTop,
+    }
+}
+
+fn layout_with_extracted_isolated_subgraphs(
+    ast: &FlowchartAst,
+    measurer: &TextMeasurer<'_>,
+) -> Result<Option<PositionedGraph>> {
+    if ast.subgraphs.is_empty() {
+        return Ok(None);
+    }
+
+    let membership = graph_builder::build_subgraph_membership(ast);
+    let all_edges = graph_builder::collect_all_edges(ast);
+
+    #[derive(Clone)]
+    struct IsolatedSubgraphLayout {
+        id: String,
+        descendants: HashSet<String>,
+        layout: PositionedGraph,
+        wrapper: PositionedSubgraph,
+    }
+
+    let mut isolated = Vec::new();
+    for sg in &ast.subgraphs {
+        let descendants: HashSet<String> = membership
+            .iter()
+            .filter_map(|(node_id, path)| {
+                (path.first().map(|p| p == &sg.id).unwrap_or(false)).then_some(node_id.clone())
+            })
+            .collect();
+        if descendants.is_empty() {
+            continue;
+        }
+
+        let has_external_edges = all_edges.iter().any(|e| {
+            let from_in = descendants.contains(&e.from);
+            let to_in = descendants.contains(&e.to);
+            from_in ^ to_in
+        });
+        if has_external_edges {
+            continue;
+        }
+
+        let mut local_ast = ast.clone();
+        local_ast.direction = sg.direction.unwrap_or(toggle_direction(ast.direction));
+        local_ast.nodes = Vec::new();
+        local_ast.edges = Vec::new();
+        local_ast.subgraphs = vec![sg.clone()];
+
+        // MermaidJS recursive cluster render applies parent ranksep + 25.
+        let local_layout = layout_flowchart_impl(
+            &local_ast,
+            measurer,
+            false,
+            None,
+            Some(RANK_SEP + 25.0),
+        )?;
+        let wrapper = local_layout
+            .subgraphs
+            .iter()
+            .find(|s| s.id == sg.id)
+            .cloned()
+            .ok_or_else(|| {
+                crate::error::MermaidError::Layout(format!(
+                    "isolated subgraph '{}' missing wrapper layout",
+                    sg.id
+                ))
+            })?;
+
+        isolated.push(IsolatedSubgraphLayout {
+            id: sg.id.clone(),
+            descendants,
+            layout: local_layout,
+            wrapper,
+        });
+    }
+
+    if isolated.is_empty() {
+        return Ok(None);
+    }
+
+    let isolated_ids: HashSet<String> = isolated.iter().map(|i| i.id.clone()).collect();
+    let isolated_descendants: HashSet<String> = isolated
+        .iter()
+        .flat_map(|i| i.descendants.iter().cloned())
+        .collect();
+
+    let mut transformed = ast.clone();
+    transformed
+        .subgraphs
+        .retain(|sg| !isolated_ids.contains(&sg.id));
+    transformed
+        .nodes
+        .retain(|n| !isolated_descendants.contains(&n.id));
+    transformed.edges.retain(|e| {
+        !isolated_descendants.contains(&e.from) && !isolated_descendants.contains(&e.to)
+    });
+
+    let mut synthetic_nodes = Vec::new();
+    for i in &isolated {
+        synthetic_nodes.push(crate::ast::flowchart::NodeDef {
+            id: i.id.clone(),
+            label: Some(i.id.clone()),
+            shape: crate::ast::flowchart::NodeShape::Rectangle,
+            class_shorthand: None,
+        });
+    }
+    synthetic_nodes.extend(transformed.nodes);
+    transformed.nodes = synthetic_nodes;
+
+    let fixed_sizes: HashMap<String, (f64, f64)> = isolated
+        .iter()
+        .map(|i| (i.id.clone(), (i.wrapper.width, i.wrapper.height)))
+        .collect();
+
+    let mut top_layout = layout_flowchart_impl(&transformed, measurer, false, Some(&fixed_sizes), None)?;
+
+    for i in isolated {
+        let Some(anchor_idx) = top_layout.nodes.iter().position(|n| n.id == i.id) else {
+            continue;
+        };
+        let anchor = top_layout.nodes[anchor_idx].clone();
+        let target_x = anchor.x - anchor.width / 2.0;
+        let target_y = anchor.y - anchor.height / 2.0;
+        let shift_x = target_x - i.wrapper.x;
+        let shift_y = target_y - i.wrapper.y;
+
+        top_layout.nodes.remove(anchor_idx);
+
+        top_layout.nodes.extend(i.layout.nodes.into_iter().map(|mut n| {
+            n.x += shift_x;
+            n.y += shift_y;
+            n
+        }));
+
+        top_layout.edges.extend(i.layout.edges.into_iter().map(|mut e| {
+            for p in &mut e.points {
+                p.0 += shift_x;
+                p.1 += shift_y;
+            }
+            if let Some(x) = &mut e.label_x {
+                *x += shift_x;
+            }
+            if let Some(y) = &mut e.label_y {
+                *y += shift_y;
+            }
+            e
+        }));
+
+        top_layout
+            .subgraphs
+            .extend(i.layout.subgraphs.into_iter().map(|mut s| {
+                s.x += shift_x;
+                s.y += shift_y;
+                s
+            }));
+    }
+
+    let (width, height) = normalize::normalize_and_compute_bounds(
+        &mut top_layout.nodes,
+        &mut top_layout.edges,
+        &mut top_layout.subgraphs,
+    );
+    top_layout.width = width;
+    top_layout.height = height;
+    top_layout.direction = ast.direction;
+
+    Ok(Some(top_layout))
 }
 
 /// Build PositionedNode list from dagre layout results.
@@ -175,6 +386,7 @@ pub(crate) fn count_subgraphs(subgraphs: &[crate::ast::flowchart::SubgraphDef]) 
 
 /// Result of extracting edge data from dagre layout.
 pub(crate) struct DagreEdgeExtraction {
+    pub(crate) raw_points: HashMap<(String, String), Vec<(f64, f64)>>,
     pub(crate) bend_points: HashMap<(String, String), Vec<(f64, f64)>>,
     pub(crate) label_positions: HashMap<(String, String), (f64, f64)>,
     pub(crate) label_dimensions: HashMap<(String, String), (f64, f64)>,
@@ -182,6 +394,7 @@ pub(crate) struct DagreEdgeExtraction {
 
 /// Extract bend points, label positions, and label dimensions from dagre edge labels.
 pub(crate) fn extract_edge_data_from_dagre(g: &dagre_rust::LayoutGraph) -> DagreEdgeExtraction {
+    let mut raw_points = HashMap::new();
     let mut bend_points = HashMap::new();
     let mut label_positions = HashMap::new();
     let mut label_dimensions = HashMap::new();
@@ -190,6 +403,14 @@ pub(crate) fn extract_edge_data_from_dagre(g: &dagre_rust::LayoutGraph) -> Dagre
         let Some(el) = g.edge_by_obj(&edge) else {
             continue;
         };
+
+        // Preserve full dagre polyline for parity-first rendering on rect-like nodes.
+        if el.points.len() >= 2 {
+            let raw: Vec<(f64, f64)> = el.points.iter().map(|p| (p.x, p.y)).collect();
+            raw_points.insert((edge.v.clone(), edge.w.clone()), raw.clone());
+            let rev_raw: Vec<_> = raw.into_iter().rev().collect();
+            raw_points.insert((edge.w.clone(), edge.v.clone()), rev_raw);
+        }
 
         // Extract interior bend points from edge.points, stripping the first
         // and last entries which are dagre's rect-intersection endpoints
@@ -223,6 +444,7 @@ pub(crate) fn extract_edge_data_from_dagre(g: &dagre_rust::LayoutGraph) -> Dagre
     }
 
     DagreEdgeExtraction {
+        raw_points,
         bend_points,
         label_positions,
         label_dimensions,
@@ -1595,6 +1817,191 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn orient(a: (f64, f64), b: (f64, f64), c: (f64, f64)) -> f64 {
+        (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0)
+    }
+
+    fn on_segment(a: (f64, f64), b: (f64, f64), c: (f64, f64)) -> bool {
+        c.0 >= a.0.min(b.0) - 1e-6
+            && c.0 <= a.0.max(b.0) + 1e-6
+            && c.1 >= a.1.min(b.1) - 1e-6
+            && c.1 <= a.1.max(b.1) + 1e-6
+    }
+
+    fn segments_intersect(a: (f64, f64), b: (f64, f64), c: (f64, f64), d: (f64, f64)) -> bool {
+        let o1 = orient(a, b, c);
+        let o2 = orient(a, b, d);
+        let o3 = orient(c, d, a);
+        let o4 = orient(c, d, b);
+        let s = |x: f64| {
+            if x.abs() < 1e-6 {
+                0
+            } else if x > 0.0 {
+                1
+            } else {
+                -1
+            }
+        };
+        let (s1, s2, s3, s4) = (s(o1), s(o2), s(o3), s(o4));
+
+        if s1 == 0 && on_segment(a, b, c) {
+            return true;
+        }
+        if s2 == 0 && on_segment(a, b, d) {
+            return true;
+        }
+        if s3 == 0 && on_segment(c, d, a) {
+            return true;
+        }
+        if s4 == 0 && on_segment(c, d, b) {
+            return true;
+        }
+        s1 * s2 < 0 && s3 * s4 < 0
+    }
+
+    fn points_equal(a: (f64, f64), b: (f64, f64)) -> bool {
+        (a.0 - b.0).abs() < 1e-6 && (a.1 - b.1).abs() < 1e-6
+    }
+
+    fn segments_share_endpoint(a: (f64, f64), b: (f64, f64), c: (f64, f64), d: (f64, f64)) -> bool {
+        points_equal(a, c) || points_equal(a, d) || points_equal(b, c) || points_equal(b, d)
+    }
+
+    fn count_edge_crossings(edges: &[PositionedEdge]) -> (usize, Vec<(String, String, String, String)>) {
+        let mut count = 0usize;
+        let mut offenders = Vec::new();
+
+        for i in 0..edges.len() {
+            for j in (i + 1)..edges.len() {
+                let e1 = &edges[i];
+                let e2 = &edges[j];
+
+                // Ignore pairs that share a node.
+                if e1.from_id == e2.from_id
+                    || e1.from_id == e2.to_id
+                    || e1.to_id == e2.from_id
+                    || e1.to_id == e2.to_id
+                {
+                    continue;
+                }
+
+                let mut hit = false;
+                for s1 in e1.points.windows(2) {
+                    let a = s1[0];
+                    let b = s1[1];
+                    for s2 in e2.points.windows(2) {
+                        let c = s2[0];
+                        let d = s2[1];
+                        if segments_share_endpoint(a, b, c, d) {
+                            continue;
+                        }
+                        if segments_intersect(a, b, c, d) {
+                            hit = true;
+                            break;
+                        }
+                    }
+                    if hit {
+                        break;
+                    }
+                }
+                if hit {
+                    count += 1;
+                    offenders.push((
+                        e1.from_id.clone(),
+                        e1.to_id.clone(),
+                        e2.from_id.clone(),
+                        e2.to_id.clone(),
+                    ));
+                }
+            }
+        }
+        (count, offenders)
+    }
+
+    #[test]
+    fn test_example5_crossings_match_mermaidjs() {
+        // Mermaid.js debug output for this exact input reports 0 edge-pair crossings
+        // under this same segment-intersection rule.
+        const MERMAID_JS_CROSSINGS: usize = 0;
+        let source = include_str!("../../../../../tests/test_loop/input_mermaid.mmd");
+        let result = layout_from_source(source);
+        let (count, offenders) = count_edge_crossings(&result.edges);
+        assert_eq!(
+            count, MERMAID_JS_CROSSINGS,
+            "edge crossings mismatch; expected {}, got {}. Offenders: {:?}",
+            MERMAID_JS_CROSSINGS, count, offenders
+        );
+    }
+
+    #[test]
+    #[ignore = "debug helper for example5 rank/order parity"]
+    fn debug_example5_key_node_positions() {
+        let source = include_str!("../../../../../tests/test_loop/input_mermaid.mmd");
+        let result = layout_from_source(source);
+        let ids = ["RootOU", "EUOU", "APACOU", "OO1", "OO2", "D1", "D2"];
+        for id in ids {
+            let n = result
+                .nodes
+                .iter()
+                .find(|n| n.id == id)
+                .unwrap_or_else(|| panic!("node '{id}' not found"));
+            eprintln!(
+                "{id:8} x={:8.3} y={:8.3} w={:8.3} h={:8.3}",
+                n.x, n.y, n.width, n.height
+            );
+        }
+        for (from, to) in [("EUOU", "OO2"), ("APACOU", "OO1"), ("D2", "OO2")] {
+            let e = result
+                .edges
+                .iter()
+                .find(|e| e.from_id == from && e.to_id == to)
+                .unwrap_or_else(|| panic!("edge {from}->{to} not found"));
+            eprintln!("{from}->{to} points={:?}", e.points);
+        }
+        panic!("debug output above");
+    }
+
+    #[test]
+    fn test_example2_isolated_subgraph_extraction_layout_shape() {
+        let source = include_str!("../../../../../tests/test_loop/example2_input.mmd");
+        let result = layout_from_source(source);
+
+        let sg = result
+            .subgraphs
+            .iter()
+            .find(|s| s.id == "A")
+            .unwrap_or_else(|| panic!("subgraph A not found"));
+
+        let top_row = ["sq", "e", "cyr"];
+        let bottom_row = ["ci", "od3", "f", "cyr2"];
+
+        // MermaidJS extracts isolated cluster A and lays it out as a standalone
+        // left-side component in the top-level graph.
+        for id in top_row.into_iter().chain(bottom_row) {
+            let n = result
+                .nodes
+                .iter()
+                .find(|n| n.id == id)
+                .unwrap_or_else(|| panic!("node '{id}' not found"));
+            assert!(
+                sg.x + sg.width / 2.0 < n.x,
+                "isolated subgraph A should be left of node {id}"
+            );
+        }
+
+        let sq = result
+            .nodes
+            .iter()
+            .find(|n| n.id == "sq")
+            .expect("sq node should exist");
+        let ci = result
+            .nodes
+            .iter()
+            .find(|n| n.id == "ci")
+            .expect("ci node should exist");
+        assert!(ci.y > sq.y, "sq should be on an upper rank than ci");
     }
 
     /// Edges should not pass through subgraphs that don't contain their

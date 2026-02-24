@@ -74,6 +74,7 @@ pub fn layout_er_diagram(
         &positioned_nodes,
         &all_edges,
         is_horizontal,
+        &extraction.raw_points,
         &extraction.bend_points,
         &extraction.label_positions,
         &extraction.label_dimensions,

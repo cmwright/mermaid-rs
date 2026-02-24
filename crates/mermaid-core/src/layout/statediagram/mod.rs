@@ -98,6 +98,7 @@ pub fn layout_statediagram(
         &positioned_nodes,
         &all_edges,
         is_horizontal,
+        &extraction.raw_points,
         &extraction.bend_points,
         &extraction.label_positions,
         &extraction.label_dimensions,
@@ -177,7 +178,9 @@ fn inject_bidi_phantom_widths_dagre(g: &mut dagre_rust::LayoutGraph) {
         .iter()
         .filter(|e| {
             let has_no_label = g.edge_by_obj(e).map(|el| el.width < 1.0).unwrap_or(true);
-            let has_reverse = g.has_edge(&e.w, &e.v, None);
+            let has_reverse = g
+                .out_edges(&e.w, Some(&e.v))
+                .is_some_and(|rev_edges| !rev_edges.is_empty());
             has_no_label && has_reverse
         })
         .cloned()

@@ -1,0 +1,6 @@
+{
+  "logLevel": "trace",
+  "flowchart": {
+    "defaultRenderer": "dagre"
+  }
+}

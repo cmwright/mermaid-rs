@@ -1,0 +1,49 @@
+flowchart TD
+    USO[User Service Org data sync] --> FF[Feature Flagging]
+    USO --> VM[Vendor Management]
+    USO --> FVM[File Vault Management]
+    USO --> OO[Organization Onboarding]
+
+    FF --> RCT[Rebrand Colors Typography]
+    RCT --> RGUN[Rebrand Global UI NAV]
+
+    USO -. "blocked by" .-> HC[HC services live in Titan]
+    HC --> IHCTUS[Integrate HC to Titan User Service]
+    IHCTUS --> AUHCE[Assign users to HC entities]
+
+    AUHCE -. "blocked by" .-> AOSI[Assess Org Service Integration]
+
+    AOSI --> AQPF[AI Questionnaire Pre-Fill]
+    AOSI --> AAW[Assessment Approval Workflow]
+    AOSI --> VA[Vendor Assessments]
+    AOSI --> IDOA[Include Docs and Obs in Assessments]
+    AOSI --> SVQ[Send a vendor a questionnaire]
+
+    AAW --> IRQ[Inherent Risk Questionnaire]
+    IRQ --> SNI[ServiceNow Integration]
+    AAW --> CQ[Conditional Questions]
+    CQ --> ATI[AI Template Import]
+    ATI --> ATG[AI Template Generation]
+    AAW --> FRT[Findings and Risk Treatments]
+    AAW --> ASR[Assessment Summary Report]
+    ASR --> APLR[Assessment Program Level Reporting]
+    APLR --> AR[Automated Re-assessment]
+    AAW --> RA[Reviewer Assignments]
+
+    VA --> ATRA[AI Text Response Analysis]
+    ATRA --> STA[Scoring Text Answers]
+    VA --> LAVM[Launch Assessments from Vendor Manager]
+
+    VM -. "also blocked by" .-> IDOA
+    IDOA --> FI[Filevault Integration]
+    IDOA --> AEA[AI Evidence Analysis]
+
+    OO -. "blocked by" .-> SVQ
+    FVM -. "blocked by" .-> SVQ
+    SVQ --> SRS[Scheduled Recurring Send]
+
+    AUHCE -. "blocked by" .-> RSQ[Respond - Streamlined Questionnaire]
+    AUHCE -. "blocked by" .-> RNTQ[Respond to a non-Titan questionnaire via file upload]
+    RNTQ --> RSQ
+    OO -. "blocked by" .-> RTQ[Respond to a Titan questionnaire]
+    RTQ --> DL[Data Localization]

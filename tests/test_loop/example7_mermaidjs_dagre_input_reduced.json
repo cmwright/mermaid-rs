@@ -1,0 +1,605 @@
+{
+  "graph": {
+    "rankdir": "TB",
+    "nodesep": 50,
+    "ranksep": 50,
+    "marginx": 8,
+    "marginy": 8
+  },
+  "nodes": [
+    {
+      "id": "Monitoring",
+      "width": null,
+      "height": null,
+      "parent": null
+    },
+    {
+      "id": "External",
+      "width": null,
+      "height": null,
+      "parent": null
+    },
+    {
+      "id": "Prod",
+      "width": null,
+      "height": null,
+      "parent": null
+    },
+    {
+      "id": "ProdData",
+      "width": null,
+      "height": null,
+      "parent": "Prod"
+    },
+    {
+      "id": "ProdBE",
+      "width": null,
+      "height": null,
+      "parent": "Prod"
+    },
+    {
+      "id": "ProdFE",
+      "width": null,
+      "height": null,
+      "parent": "Prod"
+    },
+    {
+      "id": "Staging",
+      "width": null,
+      "height": null,
+      "parent": null
+    },
+    {
+      "id": "StageData",
+      "width": null,
+      "height": null,
+      "parent": "Staging"
+    },
+    {
+      "id": "StageBE",
+      "width": null,
+      "height": null,
+      "parent": "Staging"
+    },
+    {
+      "id": "StageFE",
+      "width": null,
+      "height": null,
+      "parent": "Staging"
+    },
+    {
+      "id": "CI",
+      "width": null,
+      "height": null,
+      "parent": null
+    },
+    {
+      "id": "Commit",
+      "width": 116.640625,
+      "height": 54,
+      "parent": "CI"
+    },
+    {
+      "id": "Build",
+      "width": 96,
+      "height": 54,
+      "parent": "CI"
+    },
+    {
+      "id": "Lint",
+      "width": 87.75,
+      "height": 54,
+      "parent": "CI"
+    },
+    {
+      "id": "Unit",
+      "width": 129.875,
+      "height": 54,
+      "parent": "CI"
+    },
+    {
+      "id": "Integration",
+      "width": 179.015625,
+      "height": 54,
+      "parent": "CI"
+    },
+    {
+      "id": "Gate",
+      "width": 150.59375,
+      "height": 54,
+      "parent": "CI"
+    },
+    {
+      "id": "SCDN",
+      "width": 89.59375,
+      "height": 54,
+      "parent": "StageFE"
+    },
+    {
+      "id": "SWeb",
+      "width": 121.75,
+      "height": 54,
+      "parent": "StageFE"
+    },
+    {
+      "id": "SAPI",
+      "width": 150.140625,
+      "height": 54,
+      "parent": "StageBE"
+    },
+    {
+      "id": "SAuth",
+      "width": 149.78125,
+      "height": 54,
+      "parent": "StageBE"
+    },
+    {
+      "id": "SQueue",
+      "width": 135.703125,
+      "height": 54,
+      "parent": "StageBE"
+    },
+    {
+      "id": "SPG",
+      "width": 139.171875,
+      "height": 54,
+      "parent": "StageData"
+    },
+    {
+      "id": "SRedis",
+      "width": 97.34375,
+      "height": 54,
+      "parent": "StageData"
+    },
+    {
+      "id": "PCDN",
+      "width": 89.59375,
+      "height": 54,
+      "parent": "ProdFE"
+    },
+    {
+      "id": "PWA",
+      "width": 121.75,
+      "height": 54,
+      "parent": "ProdFE"
+    },
+    {
+      "id": "PPWA",
+      "width": 129.125,
+      "height": 54,
+      "parent": "ProdFE"
+    },
+    {
+      "id": "PAPI",
+      "width": 150.140625,
+      "height": 54,
+      "parent": "ProdBE"
+    },
+    {
+      "id": "PAuth",
+      "width": 149.78125,
+      "height": 54,
+      "parent": "ProdBE"
+    },
+    {
+      "id": "PQueue",
+      "width": 135.703125,
+      "height": 54,
+      "parent": "ProdBE"
+    },
+    {
+      "id": "PNotify",
+      "width": 151.21875,
+      "height": 54,
+      "parent": "ProdBE"
+    },
+    {
+      "id": "PPrimary",
+      "width": 139.3125,
+      "height": 54,
+      "parent": "ProdData"
+    },
+    {
+      "id": "PReplica",
+      "width": 136.484375,
+      "height": 54,
+      "parent": "ProdData"
+    },
+    {
+      "id": "PRedis",
+      "width": 152.96875,
+      "height": 54,
+      "parent": "ProdData"
+    },
+    {
+      "id": "PS3",
+      "width": 150.953125,
+      "height": 54,
+      "parent": "ProdData"
+    },
+    {
+      "id": "Stripe",
+      "width": 102.46875,
+      "height": 54,
+      "parent": "External"
+    },
+    {
+      "id": "SendGrid",
+      "width": 124.59375,
+      "height": 54,
+      "parent": "External"
+    },
+    {
+      "id": "Datadog",
+      "width": 118.5,
+      "height": 54,
+      "parent": "External"
+    },
+    {
+      "id": "Grafana",
+      "width": 116.921875,
+      "height": 54,
+      "parent": "Monitoring"
+    },
+    {
+      "id": "Alerts",
+      "width": 132.34375,
+      "height": 54,
+      "parent": "Monitoring"
+    }
+  ],
+  "edges": [
+    {
+      "from": "Commit",
+      "to": "Build",
+      "name": "L_Commit_Build_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "Build",
+      "to": "Lint",
+      "name": "L_Build_Lint_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "Build",
+      "to": "Unit",
+      "name": "L_Build_Unit_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "Build",
+      "to": "Integration",
+      "name": "L_Build_Integration_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "Lint",
+      "to": "Gate",
+      "name": "L_Lint_Gate_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "Unit",
+      "to": "Gate",
+      "name": "L_Unit_Gate_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "Integration",
+      "to": "Gate",
+      "name": "L_Integration_Gate_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "SWeb",
+      "to": "SCDN",
+      "name": "L_SWeb_SCDN_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "SAPI",
+      "to": "SAuth",
+      "name": "L_SAPI_SAuth_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "SAPI",
+      "to": "SQueue",
+      "name": "L_SAPI_SQueue_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "SWeb",
+      "to": "SAPI",
+      "name": "L_SWeb_SAPI_0",
+      "width": 59.875,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "SAuth",
+      "to": "SPG",
+      "name": "L_SAuth_SPG_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "SQueue",
+      "to": "SRedis",
+      "name": "L_SQueue_SRedis_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "PWA",
+      "to": "PCDN",
+      "name": "L_PWA_PCDN_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "PPWA",
+      "to": "PCDN",
+      "name": "L_PPWA_PCDN_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "PAPI",
+      "to": "PAuth",
+      "name": "L_PAPI_PAuth_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "PAPI",
+      "to": "PQueue",
+      "name": "L_PAPI_PQueue_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "PQueue",
+      "to": "PNotify",
+      "name": "L_PQueue_PNotify_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "PPrimary",
+      "to": "PReplica",
+      "name": "L_PPrimary_PReplica_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "PWA",
+      "to": "PAPI",
+      "name": "L_PWA_PAPI_0",
+      "width": 59.875,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "PAuth",
+      "to": "PPrimary",
+      "name": "L_PAuth_PPrimary_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "PQueue",
+      "to": "PRedis",
+      "name": "L_PQueue_PRedis_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "PQueue",
+      "to": "PS3",
+      "name": "L_PQueue_PS3_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "PAPI",
+      "to": "PReplica",
+      "name": "L_PAPI_PReplica_0",
+      "width": 86.5625,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "Grafana",
+      "to": "Alerts",
+      "name": "L_Grafana_Alerts_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "Gate",
+      "to": "SAPI",
+      "name": "L_Gate_SAPI_0",
+      "width": 103.171875,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "Gate",
+      "to": "PAPI",
+      "name": "L_Gate_PAPI_0",
+      "width": 85.203125,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "PNotify",
+      "to": "SendGrid",
+      "name": "L_PNotify_SendGrid_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "PAPI",
+      "to": "Stripe",
+      "name": "L_PAPI_Stripe_0",
+      "width": 68.78125,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "SAuth",
+      "to": "Datadog",
+      "name": "L_SAuth_Datadog_0",
+      "width": 53.53125,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "PAuth",
+      "to": "Datadog",
+      "name": "L_PAuth_Datadog_0",
+      "width": 53.53125,
+      "height": 24,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "Datadog",
+      "to": "Grafana",
+      "name": "L_Datadog_Grafana_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    }
+  ]
+}

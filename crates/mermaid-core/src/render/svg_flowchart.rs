@@ -56,20 +56,58 @@ pub fn render_svg(graph: &PositionedGraph, theme: &Theme) -> Result<String> {
     );
     svg.push('\n');
 
-    // Subgraph backgrounds (behind everything)
-    for sg in &graph.subgraphs {
+    // Sort elements for deterministic output ordering.
+    let mut subgraphs: Vec<&PositionedSubgraph> = graph.subgraphs.iter().collect();
+    subgraphs.sort_by(|a, b| {
+        a.y.total_cmp(&b.y)
+            .then(a.x.total_cmp(&b.x))
+            .then(a.id.cmp(&b.id))
+    });
+
+    let mut edges: Vec<&PositionedEdge> = graph.edges.iter().collect();
+    edges.sort_by(|a, b| {
+        edge_sort_key_y(a)
+            .total_cmp(&edge_sort_key_y(b))
+            .then(edge_sort_key_x(a).total_cmp(&edge_sort_key_x(b)))
+            .then(a.from_id.cmp(&b.from_id))
+            .then(a.to_id.cmp(&b.to_id))
+    });
+
+    let mut nodes: Vec<&PositionedNode> = graph.nodes.iter().collect();
+    nodes.sort_by(|a, b| {
+        a.y.total_cmp(&b.y)
+            .then(a.x.total_cmp(&b.x))
+            .then(a.id.cmp(&b.id))
+    });
+
+    // Mermaid-like layer grouping: clusters, edge paths, edge labels, nodes.
+    svg.push_str(r#"<g class="clusters">"#);
+    svg.push('\n');
+    for sg in &subgraphs {
         render_subgraph(&mut svg, sg, theme);
     }
+    svg.push_str("</g>\n");
 
-    // Edges (behind nodes)
-    for edge in &graph.edges {
-        render_edge(&mut svg, edge, theme);
+    svg.push_str(r#"<g class="edgePaths">"#);
+    svg.push('\n');
+    for edge in &edges {
+        render_edge_path(&mut svg, edge, theme);
     }
+    svg.push_str("</g>\n");
 
-    // Nodes (on top)
-    for node in &graph.nodes {
+    svg.push_str(r#"<g class="edgeLabels">"#);
+    svg.push('\n');
+    for edge in &edges {
+        render_edge_label(&mut svg, edge, theme);
+    }
+    svg.push_str("</g>\n");
+
+    svg.push_str(r#"<g class="nodes">"#);
+    svg.push('\n');
+    for node in &nodes {
         render_node(&mut svg, node, theme);
     }
+    svg.push_str("</g>\n");
 
     svg.push_str("</g>\n");
     svg.push_str("</svg>\n");
@@ -521,7 +559,27 @@ fn marker_start_attr(arrow: ArrowEnd) -> &'static str {
     }
 }
 
-fn render_edge(svg: &mut String, edge: &PositionedEdge, theme: &Theme) {
+fn edge_sort_key_y(edge: &PositionedEdge) -> f64 {
+    if let Some(y) = edge.label_y {
+        return y;
+    }
+    if edge.points.is_empty() {
+        return 0.0;
+    }
+    edge.points.iter().map(|p| p.1).sum::<f64>() / edge.points.len() as f64
+}
+
+fn edge_sort_key_x(edge: &PositionedEdge) -> f64 {
+    if let Some(x) = edge.label_x {
+        return x;
+    }
+    if edge.points.is_empty() {
+        return 0.0;
+    }
+    edge.points.iter().map(|p| p.0).sum::<f64>() / edge.points.len() as f64
+}
+
+fn render_edge_path(svg: &mut String, edge: &PositionedEdge, theme: &Theme) {
     if edge.points.len() < 2 {
         return;
     }
@@ -557,8 +615,13 @@ fn render_edge(svg: &mut String, edge: &PositionedEdge, theme: &Theme) {
         m_start,
     );
     svg.push('\n');
+}
 
-    // Edge label
+fn render_edge_label(svg: &mut String, edge: &PositionedEdge, theme: &Theme) {
+    if edge.line_style == LineStyle::Invisible || edge.points.len() < 2 {
+        return;
+    }
+
     if let (Some(label), Some(lx), Some(ly)) = (&edge.label, edge.label_x, edge.label_y) {
         // Use measured dimensions if available, otherwise fall back to rough approximation
         let label_w = edge.label_width.unwrap_or(label.len() as f64 * 8.0 + 10.0);

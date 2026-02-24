@@ -1,0 +1,105 @@
+{
+  "graph": {
+    "rankdir": "TB",
+    "nodesep": 50,
+    "ranksep": 50,
+    "marginx": 8,
+    "marginy": 8
+  },
+  "nodes": [
+    {
+      "id": "A",
+      "width": 622.484375,
+      "height": 358.515625,
+      "parent": null
+    },
+    {
+      "id": "sq",
+      "width": 154.796875,
+      "height": 54,
+      "parent": null
+    },
+    {
+      "id": "ci",
+      "width": 102.8125,
+      "height": 102.8125,
+      "parent": null
+    },
+    {
+      "id": "e",
+      "width": 144.9375,
+      "height": 144.9375,
+      "parent": null
+    },
+    {
+      "id": "od3",
+      "width": 236.75,
+      "height": 87,
+      "parent": null
+    },
+    {
+      "id": "f",
+      "width": 81.46875,
+      "height": 54,
+      "parent": null
+    },
+    {
+      "id": "cyr",
+      "width": 110.171875,
+      "height": 54,
+      "parent": null
+    },
+    {
+      "id": "cyr2",
+      "width": 160.609375,
+      "height": 160.609375,
+      "parent": null
+    }
+  ],
+  "edges": [
+    {
+      "from": "sq",
+      "to": "ci",
+      "name": "L_sq_ci_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "e",
+      "to": "od3",
+      "name": "L_e_od3_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "e",
+      "to": "f",
+      "name": "L_e_f_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    },
+    {
+      "from": "cyr",
+      "to": "cyr2",
+      "name": "L_cyr_cyr2_0",
+      "width": 0,
+      "height": 0,
+      "minlen": 1,
+      "weight": 1,
+      "labeloffset": 10,
+      "labelpos": "c"
+    }
+  ]
+}

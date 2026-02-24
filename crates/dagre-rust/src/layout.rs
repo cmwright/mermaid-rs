@@ -249,7 +249,7 @@ fn inject_edge_label_proxies(g: &mut LayoutGraph) {
         if width != 0.0 && height != 0.0 {
             let label = NodeLabel {
                 rank: Some(((w_rank - v_rank) / 2.0 + v_rank) as i64),
-                e: Some(Edge::new(&e.v, &e.w, None)),
+                e: Some(Edge::new(&e.v, &e.w, e.name.as_deref())),
                 ..Default::default()
             };
             util::add_dummy_node(g, DummyType::EdgeProxy, label, "_ep");
@@ -298,12 +298,12 @@ fn remove_edge_label_proxies(g: &mut LayoutGraph) {
 
     for (v, node) in to_remove {
         let rank = node.rank.unwrap_or(0);
-        let (e_v, e_w) = match &node.e {
-            Some(e) => (e.v.clone(), e.w.clone()),
+        let (e_v, e_w, e_name) = match &node.e {
+            Some(e) => (e.v.clone(), e.w.clone(), e.name.clone()),
             None => continue,
         };
 
-        if let Some(edge) = g.edge_mut(&e_v, &e_w, None) {
+        if let Some(edge) = g.edge_mut(&e_v, &e_w, e_name.as_deref()) {
             edge.label_rank = Some(rank);
         }
         g.remove_node(&v);

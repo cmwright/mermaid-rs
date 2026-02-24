@@ -20,6 +20,9 @@ pub mod rank;
 pub mod types;
 pub mod util;
 
+#[cfg(test)]
+mod parity_harness;
+
 // Re-export the main API
 pub use graph::{Edge, Graph, GraphOptions, LayoutGraph};
 pub use layout::{layout, layout_with_opts, LayoutOpts};

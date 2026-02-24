@@ -106,12 +106,13 @@ pub fn adjust_labels_for_subgraph_boundaries(
     }
 }
 
-/// Route edges using dummy-node bend points for long edges and S-curve fallback
+/// Route edges using dummy-node bend points for long edges and direct segments
 /// for short edges.
 pub fn route_edges(
     positioned_nodes: &[PositionedNode],
     edges: &[EdgeDef],
     is_horizontal: bool,
+    raw_points: &HashMap<(String, String), Vec<(f64, f64)>>,
     bend_points: &HashMap<(String, String), Vec<(f64, f64)>>,
     label_positions: &HashMap<(String, String), (f64, f64)>,
     label_dimensions: &HashMap<(String, String), (f64, f64)>,
@@ -128,11 +129,15 @@ pub fn route_edges(
             let to = node_pos.get(edge.to.as_str())?;
 
             let key = (edge.from.clone(), edge.to.clone());
-            let points = if let Some(bps) = bend_points.get(&key) {
+            let points = if is_rect_like(from.shape) && is_rect_like(to.shape) {
+                raw_points.get(&key).cloned().unwrap_or_else(|| {
+                    route_short_edge(from, to, positioned_nodes, is_horizontal)
+                })
+            } else if let Some(bps) = bend_points.get(&key) {
                 // Long edge: use dummy-node positions as waypoints
                 route_with_bend_points(from, to, bps, is_horizontal, positioned_nodes)
             } else {
-                // Short edge: intersect_rect endpoints + S-curve if needed
+                // Short edge: direct segment between node-boundary intersections.
                 route_short_edge(from, to, positioned_nodes, is_horizontal)
             };
 
@@ -165,6 +170,22 @@ pub fn route_edges(
             })
         })
         .collect()
+}
+
+fn is_rect_like(shape: NodeShape) -> bool {
+    matches!(
+        shape,
+        NodeShape::Rectangle
+            | NodeShape::RoundedRectangle
+            | NodeShape::Stadium
+            | NodeShape::Subroutine
+            | NodeShape::Cylinder
+            | NodeShape::Asymmetric
+            | NodeShape::Parallelogram
+            | NodeShape::ParallelogramAlt
+            | NodeShape::Trapezoid
+            | NodeShape::TrapezoidAlt
+    )
 }
 
 /// Route a long edge through its bend points (from dummy node positions).
@@ -200,68 +221,12 @@ fn route_with_bend_points(
 fn route_short_edge(
     from: &PositionedNode,
     to: &PositionedNode,
-    nodes: &[PositionedNode],
-    is_horizontal: bool,
+    _nodes: &[PositionedNode],
+    _is_horizontal: bool,
 ) -> Vec<(f64, f64)> {
     let start = intersect_shape(from, to.x, to.y);
     let end = intersect_shape(to, from.x, from.y);
-
-    let eps = 1e-6;
-
-    // Straight line for axis-aligned edges
-    let aligned = if is_horizontal {
-        (start.1 - end.1).abs() < eps
-    } else {
-        (start.0 - end.0).abs() < eps
-    };
-
-    if aligned && path_avoids_nodes(&[start, end], &from.id, &to.id, nodes) {
-        return vec![start, end];
-    }
-
-    // S-curve fallback for non-aligned short edges
-    let step = 30.0;
-    let (main_s, cross_s, main_e, cross_e) = if is_horizontal {
-        (start.0, start.1, end.0, end.1)
-    } else {
-        (start.1, start.0, end.1, end.0)
-    };
-
-    let main_dist = (main_e - main_s).abs();
-    let num_steps = (main_dist / step).ceil().max(6.0) as usize;
-
-    let offsets = [0.0, 30.0, -30.0, 60.0, -60.0, 100.0, -100.0];
-
-    for &off in &offsets {
-        let points = build_smooth_waypoints(
-            start,
-            end,
-            main_s,
-            cross_s,
-            main_e,
-            cross_e,
-            num_steps,
-            off,
-            is_horizontal,
-        );
-
-        if path_avoids_nodes(&points, &from.id, &to.id, nodes) {
-            return points;
-        }
-    }
-
-    // Last resort
-    build_smooth_waypoints(
-        start,
-        end,
-        main_s,
-        cross_s,
-        main_e,
-        cross_e,
-        num_steps,
-        0.0,
-        is_horizontal,
-    )
+    vec![start, end]
 }
 
 /// Shape-aware intersection: finds where a ray from the node's center toward
@@ -360,6 +325,7 @@ fn edge_label_anchor(points: &[(f64, f64)]) -> (f64, f64) {
 
 /// Build waypoints along a smooth curve between start and end.
 #[allow(clippy::too_many_arguments)]
+#[allow(dead_code)]
 fn build_smooth_waypoints(
     start: (f64, f64),
     end: (f64, f64),
@@ -399,6 +365,7 @@ fn build_smooth_waypoints(
     points
 }
 
+#[allow(dead_code)]
 fn path_avoids_nodes(
     points: &[(f64, f64)],
     from_id: &str,
@@ -422,6 +389,7 @@ fn path_avoids_nodes(
     true
 }
 
+#[allow(dead_code)]
 fn segment_intersects_rect(
     a: (f64, f64),
     b: (f64, f64),
@@ -597,7 +565,7 @@ mod tests {
     }
 
     // -----------------------------------------------------------------------
-    // route_short_edge S-curve fallback (non-axis-aligned)
+    // route_short_edge (direct short-edge routing)
     // -----------------------------------------------------------------------
 
     #[test]
@@ -618,16 +586,16 @@ mod tests {
 
     #[test]
     fn test_route_short_edge_non_aligned_vertical() {
-        // Two nodes NOT vertically aligned -> S-curve with more points
+        // Two nodes NOT vertically aligned but unobstructed -> direct segment
         let from = make_rect_node("A", 100.0, 50.0);
         let to = make_rect_node("B", 250.0, 200.0);
         let nodes = vec![from.clone(), to.clone()];
 
         let points = route_short_edge(&from, &to, &nodes, false);
-        // S-curve produces more than 2 points
-        assert!(
-            points.len() > 2,
-            "non-aligned edge should produce S-curve with >2 points, got {}",
+        assert_eq!(
+            points.len(),
+            2,
+            "non-aligned unobstructed edge should be direct, got {} points",
             points.len()
         );
     }
@@ -640,33 +608,34 @@ mod tests {
         let nodes = vec![from.clone(), to.clone()];
 
         let points = route_short_edge(&from, &to, &nodes, true);
-        assert!(
-            points.len() > 2,
-            "non-aligned horizontal edge should produce S-curve, got {} points",
+        assert_eq!(
+            points.len(),
+            2,
+            "non-aligned unobstructed horizontal edge should be direct, got {} points",
             points.len()
         );
     }
 
     #[test]
     fn test_route_short_edge_avoids_intermediate_node() {
-        // Place an intermediate node in the path; edge should attempt to avoid it
+        // Mermaid parity: short edges stay direct even with intermediate nodes.
         let from = make_rect_node("A", 100.0, 50.0);
         let to = make_rect_node("B", 100.0, 250.0);
         let blocker = make_rect_node("C", 100.0, 150.0);
         let nodes = vec![from.clone(), to.clone(), blocker];
 
         let points = route_short_edge(&from, &to, &nodes, false);
-        // Should produce more than 2 points because the straight line is blocked
-        assert!(
-            points.len() > 2,
-            "edge blocked by intermediate node should produce S-curve, got {} points",
+        assert_eq!(
+            points.len(),
+            2,
+            "short edge should remain direct for mermaid parity, got {} points",
             points.len()
         );
     }
 
     #[test]
     fn test_route_short_edge_last_resort() {
-        // Dense blockers so all offset attempts fail -> last resort (lines 273-282)
+        // Dense blockers do not affect short-edge direct routing.
         let from = make_rect_node("A", 50.0, 50.0);
         let to = make_rect_node("B", 250.0, 250.0);
         let blockers: Vec<PositionedNode> = (0..20)
@@ -684,9 +653,7 @@ mod tests {
         nodes.extend(blockers);
 
         let points = route_short_edge(&from, &to, &nodes, false);
-        assert!(!points.is_empty());
-        // First point is the intersection of the edge with the from-node boundary, not the center
-        assert!(points.len() >= 2);
+        assert_eq!(points.len(), 2);
     }
 
     // -----------------------------------------------------------------------
@@ -1118,6 +1085,7 @@ mod tests {
             &edges,
             false,
             &HashMap::new(),
+            &HashMap::new(),
             &label_positions,
             &label_dimensions,
         );
@@ -1153,6 +1121,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
+            &HashMap::new(),
         );
         assert_eq!(result.len(), 1);
         assert!(result[0].label_x.is_some());
@@ -1184,6 +1153,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
+            &HashMap::new(),
         );
         assert_eq!(result.len(), 1);
         assert!(result[0].label_x.is_none());
@@ -1209,6 +1179,7 @@ mod tests {
             &nodes,
             &edges,
             false,
+            &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
             &HashMap::new(),
