@@ -1,4 +1,4 @@
-use crate::ast::flowchart::{EdgeDef, NodeShape};
+use crate::ast::flowchart::{EdgeDef, EdgeSide, NodeShape};
 use crate::layout::flowchart::types::*;
 use std::collections::HashMap;
 
@@ -130,15 +130,17 @@ pub fn route_edges(
 
             let key = (edge.from.clone(), edge.to.clone());
             let points = if is_rect_like(from.shape) && is_rect_like(to.shape) {
-                raw_points.get(&key).cloned().unwrap_or_else(|| {
-                    route_short_edge(from, to, positioned_nodes, is_horizontal)
-                })
+                if let Some(raw) = raw_points.get(&key) {
+                    raw.clone()
+                } else {
+                    route_short_edge(from, to, positioned_nodes, is_horizontal, None, None)
+                }
             } else if let Some(bps) = bend_points.get(&key) {
                 // Long edge: use dummy-node positions as waypoints
-                route_with_bend_points(from, to, bps, is_horizontal, positioned_nodes)
+                route_with_bend_points(from, to, bps, is_horizontal, positioned_nodes, None, None)
             } else {
                 // Short edge: direct segment between node-boundary intersections.
-                route_short_edge(from, to, positioned_nodes, is_horizontal)
+                route_short_edge(from, to, positioned_nodes, is_horizontal, None, None)
             };
 
             // Use pre-computed label position from label dummy if available,
@@ -197,14 +199,20 @@ fn route_with_bend_points(
     bend_points: &[(f64, f64)],
     _is_horizontal: bool,
     _nodes: &[PositionedNode],
+    from_side: Option<EdgeSide>,
+    to_side: Option<EdgeSide>,
 ) -> Vec<(f64, f64)> {
     // First bend point direction determines exit angle from source
     let first_target = bend_points.first().copied().unwrap_or((to.x, to.y));
-    let start = intersect_shape(from, first_target.0, first_target.1);
+    let start = from_side
+        .map(|s| intersect_shape_with_fixed_side(from, s))
+        .unwrap_or_else(|| intersect_shape(from, first_target.0, first_target.1));
 
     // Last bend point direction determines entry angle into target
     let last_target = bend_points.last().copied().unwrap_or((from.x, from.y));
-    let end = intersect_shape(to, last_target.0, last_target.1);
+    let end = to_side
+        .map(|s| intersect_shape_with_fixed_side(to, s))
+        .unwrap_or_else(|| intersect_shape(to, last_target.0, last_target.1));
 
     // Build the waypoint sequence: start + bend points + end.
     // The B-spline curve generator handles smoothing, so we pass
@@ -223,10 +231,27 @@ fn route_short_edge(
     to: &PositionedNode,
     _nodes: &[PositionedNode],
     _is_horizontal: bool,
+    from_side: Option<EdgeSide>,
+    to_side: Option<EdgeSide>,
 ) -> Vec<(f64, f64)> {
-    let start = intersect_shape(from, to.x, to.y);
-    let end = intersect_shape(to, from.x, from.y);
+    let start = from_side
+        .map(|s| intersect_shape_with_fixed_side(from, s))
+        .unwrap_or_else(|| intersect_shape(from, to.x, to.y));
+    let end = to_side
+        .map(|s| intersect_shape_with_fixed_side(to, s))
+        .unwrap_or_else(|| intersect_shape(to, from.x, from.y));
     vec![start, end]
+}
+
+fn intersect_shape_with_fixed_side(node: &PositionedNode, side: EdgeSide) -> (f64, f64) {
+    let hw = node.width / 2.0;
+    let hh = node.height / 2.0;
+    match side {
+        EdgeSide::Top => (node.x, node.y - hh),
+        EdgeSide::Bottom => (node.x, node.y + hh),
+        EdgeSide::Left => (node.x - hw, node.y),
+        EdgeSide::Right => (node.x + hw, node.y),
+    }
 }
 
 /// Shape-aware intersection: finds where a ray from the node's center toward
@@ -424,6 +449,8 @@ fn segment_intersects_rect(
 
 #[cfg(test)]
 mod tests {
+    use crate::ast::flowchart::EdgeSide;
+
     use super::*;
     use crate::ast::flowchart::{ArrowEnd, EdgeDef, LineStyle, NodeShape};
 
@@ -575,7 +602,7 @@ mod tests {
         let to = make_rect_node("B", 100.0, 200.0);
         let nodes = vec![from.clone(), to.clone()];
 
-        let points = route_short_edge(&from, &to, &nodes, false);
+        let points = route_short_edge(&from, &to, &nodes, false, None, None);
         // Should be a simple 2-point line
         assert_eq!(points.len(), 2, "axis-aligned should produce 2 points");
         assert!(
@@ -591,7 +618,7 @@ mod tests {
         let to = make_rect_node("B", 250.0, 200.0);
         let nodes = vec![from.clone(), to.clone()];
 
-        let points = route_short_edge(&from, &to, &nodes, false);
+        let points = route_short_edge(&from, &to, &nodes, false, None, None);
         assert_eq!(
             points.len(),
             2,
@@ -607,7 +634,7 @@ mod tests {
         let to = make_rect_node("B", 200.0, 250.0);
         let nodes = vec![from.clone(), to.clone()];
 
-        let points = route_short_edge(&from, &to, &nodes, true);
+        let points = route_short_edge(&from, &to, &nodes, true, None, None);
         assert_eq!(
             points.len(),
             2,
@@ -624,7 +651,7 @@ mod tests {
         let blocker = make_rect_node("C", 100.0, 150.0);
         let nodes = vec![from.clone(), to.clone(), blocker];
 
-        let points = route_short_edge(&from, &to, &nodes, false);
+        let points = route_short_edge(&from, &to, &nodes, false, None, None);
         assert_eq!(
             points.len(),
             2,
@@ -652,8 +679,29 @@ mod tests {
         let mut nodes = vec![from.clone(), to.clone()];
         nodes.extend(blockers);
 
-        let points = route_short_edge(&from, &to, &nodes, false);
+        let points = route_short_edge(&from, &to, &nodes, false, None, None);
         assert_eq!(points.len(), 2);
+    }
+
+    #[test]
+    fn test_route_short_edge_honors_fixed_sides() {
+        let from = make_rect_node("A", 100.0, 100.0); // half-width=40, half-height=20
+        let to = make_rect_node("B", 300.0, 100.0);
+        let nodes = vec![from.clone(), to.clone()];
+
+        let points = route_short_edge(
+            &from,
+            &to,
+            &nodes,
+            false,
+            Some(EdgeSide::Right),
+            Some(EdgeSide::Left),
+        );
+        assert_eq!(points.len(), 2);
+        assert!((points[0].0 - (from.x + from.width / 2.0)).abs() < 1e-6);
+        assert!((points[0].1 - from.y).abs() < 1e-6);
+        assert!((points[1].0 - (to.x - to.width / 2.0)).abs() < 1e-6);
+        assert!((points[1].1 - to.y).abs() < 1e-6);
     }
 
     // -----------------------------------------------------------------------
@@ -1042,7 +1090,7 @@ mod tests {
         let nodes = vec![from.clone(), to.clone()];
 
         let bps = vec![(100.0, 150.0), (100.0, 250.0)];
-        let points = route_with_bend_points(&from, &to, &bps, false, &nodes);
+        let points = route_with_bend_points(&from, &to, &bps, false, &nodes, None, None);
 
         // Should start near from and end near to, passing through bend points
         assert!(points.len() > 2, "should have more than 2 points");
@@ -1054,6 +1102,31 @@ mod tests {
         // Last point should be near the edge of to
         let last = points.last().unwrap();
         assert!((last.0 - 100.0).abs() < 5.0, "end x should be near to.x");
+    }
+
+    #[test]
+    fn test_route_with_bend_points_honors_fixed_sides() {
+        let from = make_rect_node("A", 100.0, 100.0); // hh=20
+        let to = make_rect_node("B", 100.0, 300.0); // hh=20
+        let nodes = vec![from.clone(), to.clone()];
+        let bps = vec![(120.0, 180.0), (120.0, 220.0)];
+
+        let points = route_with_bend_points(
+            &from,
+            &to,
+            &bps,
+            false,
+            &nodes,
+            Some(EdgeSide::Bottom),
+            Some(EdgeSide::Top),
+        );
+        assert!(!points.is_empty());
+        let start = points.first().copied().unwrap();
+        let end = points.last().copied().unwrap();
+        assert!((start.0 - from.x).abs() < 1e-6);
+        assert!((start.1 - (from.y + from.height / 2.0)).abs() < 1e-6);
+        assert!((end.0 - to.x).abs() < 1e-6);
+        assert!((end.1 - (to.y - to.height / 2.0)).abs() < 1e-6);
     }
 
     // -----------------------------------------------------------------------
@@ -1073,6 +1146,8 @@ mod tests {
             arrow_start: ArrowEnd::None,
             arrow_end: ArrowEnd::Arrow,
             label: Some("yes".into()),
+            from_side: None,
+            to_side: None,
         }];
 
         let mut label_positions = HashMap::new();
@@ -1111,6 +1186,8 @@ mod tests {
             arrow_start: ArrowEnd::None,
             arrow_end: ArrowEnd::Arrow,
             label: Some("yes".into()),
+            from_side: None,
+            to_side: None,
         }];
 
         // No label_positions provided -> should fall back to edge_label_anchor
@@ -1144,6 +1221,8 @@ mod tests {
             arrow_start: ArrowEnd::None,
             arrow_end: ArrowEnd::Arrow,
             label: None,
+            from_side: None,
+            to_side: None,
         }];
 
         let result = route_edges(
@@ -1173,6 +1252,8 @@ mod tests {
             arrow_start: ArrowEnd::None,
             arrow_end: ArrowEnd::Arrow,
             label: None,
+            from_side: None,
+            to_side: None,
         }];
 
         let result = route_edges(
@@ -1189,6 +1270,48 @@ mod tests {
             0,
             "edge with missing node should be filtered out"
         );
+    }
+
+    #[test]
+    fn test_route_edges_raw_points_do_not_force_fixed_sides() {
+        let from = make_rect_node("A", 100.0, 100.0); // hw=40, hh=20
+        let to = make_rect_node("B", 300.0, 100.0); // hw=40, hh=20
+        let nodes = vec![from.clone(), to.clone()];
+
+        let edges = vec![EdgeDef {
+            from: "A".into(),
+            to: "B".into(),
+            line_style: LineStyle::Solid,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::Arrow,
+            label: None,
+            from_side: Some(EdgeSide::Bottom),
+            to_side: Some(EdgeSide::Top),
+        }];
+
+        let mut raw_points = HashMap::new();
+        raw_points.insert(
+            ("A".to_string(), "B".to_string()),
+            vec![(140.0, 100.0), (260.0, 100.0)],
+        );
+
+        let result = route_edges(
+            &nodes,
+            &edges,
+            false,
+            &raw_points,
+            &HashMap::new(),
+            &HashMap::new(),
+            &HashMap::new(),
+        );
+        assert_eq!(result.len(), 1);
+        let p = &result[0].points;
+        assert_eq!(p.len(), 2);
+        // For raw_points, keep dagre-provided endpoints to avoid route regressions.
+        assert!((p[0].0 - 140.0).abs() < 1e-6);
+        assert!((p[0].1 - 100.0).abs() < 1e-6);
+        assert!((p[1].0 - 260.0).abs() < 1e-6);
+        assert!((p[1].1 - 100.0).abs() < 1e-6);
     }
 
     // -----------------------------------------------------------------------

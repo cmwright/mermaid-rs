@@ -236,6 +236,8 @@ fn parse_link_chain(
             arrow_start,
             arrow_end,
             label: edge_label,
+            from_side: None,
+            to_side: None,
         });
 
         prev_id = next_id;

@@ -104,6 +104,15 @@ pub fn layout_statediagram(
         &extraction.label_dimensions,
     );
 
+    // Mermaid stateDiagram behavior: transitions that enter a composite from
+    // outside land on the composite boundary (not directly on inner [*]).
+    adjust_composite_boundary_edge_endpoints(
+        &mut positioned_edges,
+        &positioned_subgraphs,
+        &membership,
+        &kind_map,
+    );
+
     // Adjust edge labels for subgraph boundaries
     edge_routing::adjust_labels_for_subgraph_boundaries(
         &mut positioned_edges,
@@ -265,13 +274,17 @@ fn convert_to_flowchart_ast(ast: &StateDiagramAst, note_ids: &mut Vec<String>) -
 
     // Convert transitions to edges
     for t in &ast.transitions {
+        let from = resolve_composite_transition_endpoint(&t.from, true, &ast.composites);
+        let to = resolve_composite_transition_endpoint(&t.to, false, &ast.composites);
         edges.push(EdgeDef {
-            from: t.from.clone(),
-            to: t.to.clone(),
+            from,
+            to,
             line_style: LineStyle::Solid,
             arrow_start: ArrowEnd::None,
             arrow_end: ArrowEnd::Arrow,
             label: t.label.clone(),
+            from_side: None,
+            to_side: None,
         });
     }
 
@@ -368,13 +381,17 @@ fn convert_composite_to_subgraph(
     }
 
     for t in &composite.transitions {
+        let from = resolve_composite_transition_endpoint(&t.from, true, &composite.composites);
+        let to = resolve_composite_transition_endpoint(&t.to, false, &composite.composites);
         edges.push(EdgeDef {
-            from: t.from.clone(),
-            to: t.to.clone(),
+            from,
+            to,
             line_style: LineStyle::Solid,
             arrow_start: ArrowEnd::None,
             arrow_end: ArrowEnd::Arrow,
             label: t.label.clone(),
+            from_side: None,
+            to_side: None,
         });
     }
 
@@ -407,11 +424,56 @@ fn convert_composite_to_subgraph(
 
     SubgraphDef {
         id: composite.id.clone(),
-        label: composite.label.clone(),
+        label: Some(composite.label.clone().unwrap_or_else(|| composite.id.clone())),
         direction: composite.direction,
         nodes,
         edges,
         subgraphs,
+    }
+}
+
+fn resolve_composite_transition_endpoint(
+    endpoint_id: &str,
+    is_source: bool,
+    composites_in_scope: &[CompositeStateDef],
+) -> String {
+    let Some(target_composite) = composites_in_scope.iter().find(|c| c.id == endpoint_id) else {
+        return endpoint_id.to_string();
+    };
+
+    let desired_kind = if is_source {
+        StateKind::End
+    } else {
+        StateKind::Start
+    };
+
+    if let Some(id) = target_composite
+        .states
+        .iter()
+        .find(|s| s.kind == desired_kind)
+        .map(|s| s.id.clone())
+    {
+        return id;
+    }
+
+    // Mermaid-like fallback: if a composite has no explicit start/end pseudo-state,
+    // use a concrete inner state so external transitions remain routable.
+    let normal_candidates: Vec<&StateDef> = target_composite
+        .states
+        .iter()
+        .filter(|s| !matches!(s.kind, StateKind::Start | StateKind::End))
+        .collect();
+
+    if is_source {
+        normal_candidates
+            .last()
+            .map(|s| s.id.clone())
+            .unwrap_or_else(|| endpoint_id.to_string())
+    } else {
+        normal_candidates
+            .first()
+            .map(|s| s.id.clone())
+            .unwrap_or_else(|| endpoint_id.to_string())
     }
 }
 
@@ -441,6 +503,8 @@ fn convert_note_to_node_and_edge(
         arrow_start: ArrowEnd::None,
         arrow_end: ArrowEnd::None,
         label: None,
+        from_side: None,
+        to_side: None,
     });
 
     (node, edge)
@@ -707,6 +771,110 @@ fn adjust_labels_for_nodes(
     }
 }
 
+fn adjust_composite_boundary_edge_endpoints(
+    edges: &mut [flowchart::PositionedEdge],
+    subgraphs: &[flowchart::PositionedSubgraph],
+    membership: &flowchart::graph_builder::SubgraphMembership,
+    kind_map: &HashMap<String, StateKind>,
+) {
+    let subgraph_by_id: HashMap<&str, &flowchart::PositionedSubgraph> =
+        subgraphs.iter().map(|sg| (sg.id.as_str(), sg)).collect();
+
+    for edge in edges.iter_mut() {
+        if edge.points.len() < 2 {
+            continue;
+        }
+
+        // Case 1: external transition entering a composite's inner start pseudo-state.
+        let is_target_start = kind_map.get(&edge.to_id).copied() == Some(StateKind::Start);
+        if is_target_start {
+            let Some(target_path) = membership.get(&edge.to_id) else {
+                continue;
+            };
+            let Some(target_parent) = target_path.last() else {
+                continue;
+            };
+
+            let source_same_parent = membership
+                .get(&edge.from_id)
+                .and_then(|p| p.last())
+                .is_some_and(|p| p == target_parent);
+            if source_same_parent {
+                continue;
+            }
+
+            let Some(sg) = subgraph_by_id.get(target_parent.as_str()) else {
+                continue;
+            };
+            let source_point = edge.points[0];
+            let boundary_point = if source_point.1 <= sg.y {
+                (source_point.0.clamp(sg.x, sg.x + sg.width), sg.y)
+            } else {
+                intersect_subgraph_boundary_toward(sg, source_point)
+            };
+            // Use a clean two-point segment to avoid top-hook artifacts.
+            edge.points = vec![source_point, boundary_point];
+            continue;
+        }
+
+        // Case 2: external transition leaving a composite toward an end pseudo-state.
+        let is_target_end = kind_map.get(&edge.to_id).copied() == Some(StateKind::End);
+        if is_target_end {
+            let Some(source_parent) = membership.get(&edge.from_id).and_then(|p| p.last()) else {
+                continue;
+            };
+
+            let target_same_parent = membership
+                .get(&edge.to_id)
+                .and_then(|p| p.last())
+                .is_some_and(|p| p == source_parent);
+            if target_same_parent {
+                continue;
+            }
+
+            let Some(sg) = subgraph_by_id.get(source_parent.as_str()) else {
+                continue;
+            };
+            let target_point = *edge.points.last().unwrap();
+            let bottom = sg.y + sg.height;
+            let boundary_point = if target_point.1 >= bottom {
+                (target_point.0.clamp(sg.x, sg.x + sg.width), bottom)
+            } else {
+                intersect_subgraph_boundary_toward(sg, target_point)
+            };
+            edge.points = vec![boundary_point, target_point];
+        }
+    }
+}
+
+fn intersect_subgraph_boundary_toward(
+    sg: &flowchart::PositionedSubgraph,
+    toward: (f64, f64),
+) -> (f64, f64) {
+    let cx = sg.x + sg.width / 2.0;
+    let cy = sg.y + sg.height / 2.0;
+    let hw = sg.width / 2.0;
+    let hh = sg.height / 2.0;
+    let dx = toward.0 - cx;
+    let dy = toward.1 - cy;
+
+    if dx.abs() < 1e-9 && dy.abs() < 1e-9 {
+        return (cx, sg.y);
+    }
+
+    let abs_dx = dx.abs();
+    let abs_dy = dy.abs();
+    if abs_dy * hw > abs_dx * hh {
+        let y = if dy > 0.0 { cy + hh } else { cy - hh };
+        let x = if abs_dy > 1e-9 { cx + (y - cy) * dx / dy } else { cx };
+        (x, y)
+    } else {
+        let x = if dx > 0.0 { cx + hw } else { cx - hw };
+        let y = if abs_dx > 1e-9 { cy + (x - cx) * dy / dx } else { cy };
+        (x, y)
+    }
+}
+
 /// Convert the flowchart layout result back to state diagram types.
 fn convert_from_flowchart_result(
     positioned: flowchart::PositionedGraph,
@@ -781,5 +949,82 @@ fn convert_from_flowchart_result(
         width: positioned.width,
         height: positioned.height,
         direction: positioned.direction,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parser::statediagram::parse_statediagram;
+
+    #[test]
+    fn transitions_to_composite_use_inner_start_end() {
+        let source = r#"stateDiagram-v2
+    [*] --> Active
+    Active --> [*]
+    state Active {
+        [*] --> Idle
+        Idle --> [*]
+    }"#;
+        let ast = parse_statediagram(source).unwrap();
+        let mut note_ids = Vec::new();
+        let fc = convert_to_flowchart_ast(&ast, &mut note_ids);
+        let active = ast.composites.iter().find(|c| c.id == "Active").unwrap();
+        let inner_start = active
+            .states
+            .iter()
+            .find(|s| s.kind == StateKind::Start)
+            .unwrap()
+            .id
+            .clone();
+        let inner_end = active
+            .states
+            .iter()
+            .find(|s| s.kind == StateKind::End)
+            .unwrap()
+            .id
+            .clone();
+
+        assert!(
+            fc.edges
+                .iter()
+                .any(|e| e.from.starts_with("__start_") && e.to == inner_start),
+            "expected external->composite transition to target inner start"
+        );
+        assert!(
+            fc.edges
+                .iter()
+                .any(|e| e.from == inner_end && e.to.starts_with("__end_")),
+            "expected composite->external transition to source inner end"
+        );
+        assert!(
+            !fc.edges.iter().any(|e| e.from == "Active" || e.to == "Active"),
+            "composite id should not be used as flowchart edge endpoint when inner start/end exist"
+        );
+    }
+
+    #[test]
+    fn transition_from_composite_without_inner_end_falls_back_to_inner_state() {
+        let source = r#"stateDiagram-v2
+    Active --> [*]
+    state Active {
+        [*] --> Idle
+        Idle --> Processing
+        Processing --> Error
+    }"#;
+        let ast = parse_statediagram(source).unwrap();
+        let mut note_ids = Vec::new();
+        let fc = convert_to_flowchart_ast(&ast, &mut note_ids);
+
+        // No explicit inner end exists, so edge should not keep composite id as source.
+        let exit_edge = fc
+            .edges
+            .iter()
+            .find(|e| e.to.starts_with("__end_"))
+            .expect("expected top-level exit edge");
+        assert_ne!(
+            exit_edge.from, "Active",
+            "composite exit should resolve to a concrete inner state"
+        );
     }
 }

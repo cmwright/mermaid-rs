@@ -71,6 +71,15 @@ pub enum ArrowEnd {
     Cross,
 }
 
+/// Optional fixed side for an edge endpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EdgeSide {
+    Top,
+    Bottom,
+    Left,
+    Right,
+}
+
 /// An edge connecting two nodes.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EdgeDef {
@@ -80,6 +89,8 @@ pub struct EdgeDef {
     pub arrow_start: ArrowEnd,
     pub arrow_end: ArrowEnd,
     pub label: Option<String>,
+    pub from_side: Option<EdgeSide>,
+    pub to_side: Option<EdgeSide>,
 }
 
 /// Legacy edge type enum — kept for backward compatibility with tests.

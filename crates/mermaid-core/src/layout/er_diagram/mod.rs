@@ -223,6 +223,8 @@ fn convert_to_flowchart_ast(ast: &ErDiagramAst) -> FlowchartAst {
             arrow_start: ArrowEnd::None,
             arrow_end: ArrowEnd::None,
             label: rel.label.clone(),
+            from_side: None,
+            to_side: None,
         });
     }
 

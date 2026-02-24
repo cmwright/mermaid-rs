@@ -42,6 +42,9 @@ pub fn parse_statediagram(source: &str) -> Result<StateDiagramAst> {
     for composite in &mut ast.composites {
         disambiguate_composite(composite, &mut counter);
     }
+    // If a composite and a state share the same ID in a scope (e.g. `state X { ... }`
+    // plus transition-created implicit state `X`), keep the composite and drop the state.
+    prune_state_composite_id_collisions(&mut ast.states, &mut ast.composites);
 
     Ok(ast)
 }
@@ -288,17 +291,6 @@ fn parse_composite_state(pair: pest::iterators::Pair<'_, Rule>) -> Result<Compos
         }
     }
 
-    // Disambiguate [*] in composite scope
-    let mut counter_base = 0;
-    disambiguate_scope(
-        &mut composite.states,
-        &mut composite.transitions,
-        &mut counter_base,
-    );
-    for nested in &mut composite.composites {
-        disambiguate_composite(nested, &mut counter_base);
-    }
-
     Ok(composite)
 }
 
@@ -503,6 +495,20 @@ fn disambiguate_composite(composite: &mut CompositeStateDef, counter: &mut usize
     disambiguate_scope(&mut composite.states, &mut composite.transitions, counter);
     for nested in &mut composite.composites {
         disambiguate_composite(nested, counter);
+    }
+}
+
+fn prune_state_composite_id_collisions(
+    states: &mut Vec<StateDef>,
+    composites: &mut [CompositeStateDef],
+) {
+    use std::collections::HashSet;
+
+    let composite_ids: HashSet<String> = composites.iter().map(|c| c.id.clone()).collect();
+    states.retain(|s| !composite_ids.contains(&s.id));
+
+    for composite in composites.iter_mut() {
+        prune_state_composite_id_collisions(&mut composite.states, &mut composite.composites);
     }
 }
 
@@ -736,6 +742,63 @@ mod tests {
         let has_end = comp.states.iter().any(|s| s.kind == StateKind::End);
         assert!(has_start);
         assert!(has_end);
+    }
+
+    #[test]
+    fn test_unique_start_end_ids_across_top_level_and_composite() {
+        let source = "stateDiagram-v2\n    [*] --> Active\n    Active --> [*]\n    state Active {\n        [*] --> Idle\n        Idle --> [*]\n    }";
+        let ast = parse_statediagram(source).unwrap();
+
+        let mut all_ids: Vec<String> = ast
+            .states
+            .iter()
+            .map(|s| s.id.clone())
+            .collect();
+        let comp = ast.composites.iter().find(|c| c.id == "Active").unwrap();
+        all_ids.extend(comp.states.iter().map(|s| s.id.clone()));
+
+        let starts: Vec<&str> = all_ids
+            .iter()
+            .filter(|id| id.starts_with("__start_"))
+            .map(|id| id.as_str())
+            .collect();
+        let ends: Vec<&str> = all_ids
+            .iter()
+            .filter(|id| id.starts_with("__end_"))
+            .map(|id| id.as_str())
+            .collect();
+
+        assert!(
+            starts.len() >= 2,
+            "expected separate start nodes for top/composite scopes, got {starts:?}"
+        );
+        assert!(
+            ends.len() >= 2,
+            "expected separate end nodes for top/composite scopes, got {ends:?}"
+        );
+
+        let mut unique_ids = std::collections::HashSet::new();
+        for id in all_ids {
+            assert!(
+                unique_ids.insert(id.clone()),
+                "duplicate state id across scopes: {id}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_composite_id_does_not_remain_as_normal_state() {
+        let source = "stateDiagram-v2\n    [*] --> Active\n    Active --> [*]\n    state Active {\n        [*] --> Idle\n    }";
+        let ast = parse_statediagram(source).unwrap();
+
+        assert!(
+            ast.composites.iter().any(|c| c.id == "Active"),
+            "expected composite Active"
+        );
+        assert!(
+            !ast.states.iter().any(|s| s.id == "Active"),
+            "composite id should not also exist as a normal state"
+        );
     }
 
     #[test]

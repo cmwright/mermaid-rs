@@ -339,6 +339,8 @@ mod tests {
                 arrow_start: crate::ast::flowchart::ArrowEnd::None,
                 arrow_end: crate::ast::flowchart::ArrowEnd::Arrow,
                 label: None,
+                from_side: None,
+                to_side: None,
             }],
             subgraphs: vec![],
         }];

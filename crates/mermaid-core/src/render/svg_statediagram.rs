@@ -268,10 +268,23 @@ fn render_composite(svg: &mut String, composite: &PositionedComposite, theme: &T
     );
     svg.push('\n');
 
+    // Title separator + label (stateDiagram-v2 style)
+    let header_h = 24.0;
+    let _ = write!(
+        svg,
+        r#"<line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="1"/>"#,
+        composite.x,
+        composite.y + header_h,
+        composite.x + composite.width,
+        composite.y + header_h,
+        stroke,
+    );
+    svg.push('\n');
+
     // Title label
     if let Some(label) = &composite.label {
         let label_x = composite.x + composite.width / 2.0;
-        let label_y = composite.y + 18.0;
+        let label_y = composite.y + header_h / 2.0;
         let _ = write!(
             svg,
             r#"<text x="{}" y="{}" text-anchor="middle" font-family="{}" font-size="{}" font-weight="bold" fill="{}">{}</text>"#,

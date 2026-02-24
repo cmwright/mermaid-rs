@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use super::flowchart::{
-    ArrowEnd, Direction, EdgeDef, FlowchartAst, LineStyle, NodeDef, NodeShape, SubgraphDef,
+    ArrowEnd, Direction, EdgeDef, EdgeSide, FlowchartAst, LineStyle, NodeDef, NodeShape,
+    SubgraphDef,
 };
 
 
@@ -69,6 +70,18 @@ impl ArchitectureAst {
                     ArrowEnd::None
                 },
                 label: None,
+                from_side: Some(match e.from.side {
+                    PortSide::Top => EdgeSide::Top,
+                    PortSide::Bottom => EdgeSide::Bottom,
+                    PortSide::Left => EdgeSide::Left,
+                    PortSide::Right => EdgeSide::Right,
+                }),
+                to_side: Some(match e.to.side {
+                    PortSide::Top => EdgeSide::Top,
+                    PortSide::Bottom => EdgeSide::Bottom,
+                    PortSide::Left => EdgeSide::Left,
+                    PortSide::Right => EdgeSide::Right,
+                }),
             })
             .collect();
 
@@ -212,7 +225,7 @@ pub enum PortSide {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ast::flowchart::{ArrowEnd, Direction, LineStyle, NodeShape};
+    use crate::ast::flowchart::{ArrowEnd, Direction, EdgeSide, LineStyle, NodeShape};
 
     fn make_service(id: &str, icon: Option<&str>, label: &str, parent: Option<&str>) -> ServiceDef {
         ServiceDef {
@@ -395,5 +408,34 @@ mod tests {
         let ast = ArchitectureAst::default();
         let fc = ast.to_flowchart_ast();
         assert_eq!(fc.direction, Direction::LeftToRight);
+    }
+
+    #[test]
+    fn endpoint_port_sides_are_preserved_in_flowchart_edges() {
+        let ast = ArchitectureAst {
+            services: vec![
+                make_service("a", None, "A", None),
+                make_service("b", None, "B", None),
+            ],
+            edges: vec![ArchEdge {
+                from: EdgeEndpoint {
+                    id: "a".to_string(),
+                    group_modifier: false,
+                    side: PortSide::Bottom,
+                },
+                to: EdgeEndpoint {
+                    id: "b".to_string(),
+                    group_modifier: false,
+                    side: PortSide::Top,
+                },
+                arrow_start: false,
+                arrow_end: true,
+            }],
+            ..Default::default()
+        };
+        let fc = ast.to_flowchart_ast();
+        assert_eq!(fc.edges.len(), 1);
+        assert_eq!(fc.edges[0].from_side, Some(EdgeSide::Bottom));
+        assert_eq!(fc.edges[0].to_side, Some(EdgeSide::Top));
     }
 }
