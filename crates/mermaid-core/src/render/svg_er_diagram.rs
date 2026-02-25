@@ -427,6 +427,7 @@ fn draw_zero_circle(
 /// Draw a crow's foot (two lines forming a V) pointing toward the entity.
 /// `tip_offset`: how far from entity edge the tips of the V are
 /// `base_offset`: how far from entity edge the convergence point is
+#[allow(clippy::too_many_arguments)]
 fn draw_crows_foot(
     svg: &mut String,
     ex: f64,
@@ -469,4 +470,438 @@ fn draw_crows_foot(
         bx, by, bot_x, bot_y, color, stroke_width,
     );
     svg.push('\n');
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::er_diagram::{Attribute, AttributeKey, Cardinality, RelationType};
+    use crate::layout::er_diagram::types::{
+        PositionedEntity, PositionedErDiagram, PositionedRelationship,
+    };
+    use crate::render::theme::Theme;
+
+    fn make_entity(id: &str, attributes: Vec<Attribute>) -> PositionedEntity {
+        PositionedEntity {
+            id: id.to_string(),
+            alias: None,
+            attributes,
+            x: 100.0,
+            y: 100.0,
+            width: 150.0,
+            height: 80.0,
+            header_height: 30.0,
+            col_widths: [40.0, 50.0, 20.0, 0.0],
+        }
+    }
+
+    fn make_relationship(
+        from: &str,
+        to: &str,
+        card_from: Cardinality,
+        card_to: Cardinality,
+        rel_type: RelationType,
+        label: Option<&str>,
+    ) -> PositionedRelationship {
+        PositionedRelationship {
+            from_id: from.to_string(),
+            to_id: to.to_string(),
+            cardinality_from: card_from,
+            cardinality_to: card_to,
+            relation_type: rel_type,
+            label: label.map(|s| s.to_string()),
+            label_x: label.map(|_| 150.0),
+            label_y: label.map(|_| 150.0),
+            label_width: label.map(|_| 60.0),
+            label_height: label.map(|_| 20.0),
+            points: vec![(100.0, 100.0), (200.0, 100.0)],
+        }
+    }
+
+    fn make_diagram(
+        entities: Vec<PositionedEntity>,
+        relationships: Vec<PositionedRelationship>,
+    ) -> PositionedErDiagram {
+        PositionedErDiagram {
+            entities,
+            relationships,
+            width: 400.0,
+            height: 300.0,
+        }
+    }
+
+    #[test]
+    fn render_svg_produces_valid_svg_wrapper() {
+        let diagram = make_diagram(vec![], vec![]);
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(svg.starts_with("<svg "));
+        assert!(svg.contains("xmlns=\"http://www.w3.org/2000/svg\""));
+        assert!(svg.contains("viewBox="));
+        assert!(svg.ends_with("</svg>\n"));
+    }
+
+    #[test]
+    fn render_svg_includes_style_block() {
+        let diagram = make_diagram(vec![], vec![]);
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(svg.contains("<style>"));
+        assert!(svg.contains(".er-entity-text"));
+        assert!(svg.contains(".er-attr-text"));
+        assert!(svg.contains(".er-edge-label"));
+    }
+
+    #[test]
+    fn render_entity_shows_entity_name() {
+        let entity = make_entity("Customer", vec![]);
+        let diagram = make_diagram(vec![entity], vec![]);
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(svg.contains("Customer"), "SVG should contain entity name");
+    }
+
+    #[test]
+    fn render_entity_with_attributes_shows_type_and_name() {
+        let entity = make_entity(
+            "User",
+            vec![
+                Attribute {
+                    type_name: "int".into(),
+                    name: "id".into(),
+                    key: AttributeKey::PK,
+                    comment: None,
+                },
+                Attribute {
+                    type_name: "string".into(),
+                    name: "email".into(),
+                    key: AttributeKey::None,
+                    comment: Some("user email".into()),
+                },
+            ],
+        );
+        let diagram = make_diagram(vec![entity], vec![]);
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(svg.contains("int"), "should contain type name 'int'");
+        assert!(svg.contains("id"), "should contain attr name 'id'");
+        assert!(svg.contains("PK"), "should show PK key marker");
+        assert!(svg.contains("string"), "should contain type name 'string'");
+        assert!(svg.contains("email"), "should contain attr name 'email'");
+        assert!(svg.contains("user email"), "should contain comment");
+    }
+
+    #[test]
+    fn render_entity_shows_fk_and_uk_keys() {
+        let entity = make_entity(
+            "Order",
+            vec![
+                Attribute {
+                    type_name: "int".into(),
+                    name: "customer_id".into(),
+                    key: AttributeKey::FK,
+                    comment: None,
+                },
+                Attribute {
+                    type_name: "string".into(),
+                    name: "order_num".into(),
+                    key: AttributeKey::UK,
+                    comment: None,
+                },
+            ],
+        );
+        let diagram = make_diagram(vec![entity], vec![]);
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(svg.contains("FK"), "should show FK key marker");
+        assert!(svg.contains("UK"), "should show UK key marker");
+    }
+
+    #[test]
+    fn render_entity_has_header_divider_line() {
+        let entity = make_entity(
+            "Product",
+            vec![Attribute {
+                type_name: "int".into(),
+                name: "id".into(),
+                key: AttributeKey::PK,
+                comment: None,
+            }],
+        );
+        let diagram = make_diagram(vec![entity], vec![]);
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        // Divider line between header and attributes
+        assert!(
+            svg.contains("<line"),
+            "should have a divider line after header"
+        );
+    }
+
+    #[test]
+    fn render_entity_no_attributes_no_divider() {
+        let entity = make_entity("EmptyEntity", vec![]);
+        let diagram = make_diagram(vec![entity], vec![]);
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        // Count <line elements - there should be none from entities without attributes
+        // (relationships may add lines for cardinality markers, but empty diagram has none)
+        let entity_group = svg
+            .split("EmptyEntity")
+            .nth(1)
+            .unwrap_or("")
+            .split("</g>")
+            .next()
+            .unwrap_or("");
+        assert!(
+            !entity_group.contains("<line"),
+            "entity without attributes should not have divider line"
+        );
+    }
+
+    #[test]
+    fn render_relationship_identifying_solid_line() {
+        let rel = make_relationship(
+            "A",
+            "B",
+            Cardinality::OnlyOne,
+            Cardinality::ZeroOrMore,
+            RelationType::Identifying,
+            None,
+        );
+        let diagram = make_diagram(vec![], vec![rel]);
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(svg.contains("<path"), "should have path element for edge");
+        assert!(
+            !svg.contains("stroke-dasharray"),
+            "identifying relationship should have solid line"
+        );
+    }
+
+    #[test]
+    fn render_relationship_non_identifying_dashed_line() {
+        let rel = make_relationship(
+            "A",
+            "B",
+            Cardinality::OnlyOne,
+            Cardinality::ZeroOrOne,
+            RelationType::NonIdentifying,
+            None,
+        );
+        let diagram = make_diagram(vec![], vec![rel]);
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(
+            svg.contains("stroke-dasharray"),
+            "non-identifying relationship should have dashed line"
+        );
+    }
+
+    #[test]
+    fn render_relationship_with_label() {
+        let rel = make_relationship(
+            "A",
+            "B",
+            Cardinality::OnlyOne,
+            Cardinality::OneOrMore,
+            RelationType::Identifying,
+            Some("places"),
+        );
+        let diagram = make_diagram(vec![], vec![rel]);
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(svg.contains("places"), "should contain relationship label");
+        // Label should have a background rect
+        assert!(
+            svg.contains("rgba(232,232,232,0.8)"),
+            "label should have a background"
+        );
+    }
+
+    #[test]
+    fn render_relationship_without_label_no_label_text() {
+        let rel = make_relationship(
+            "A",
+            "B",
+            Cardinality::OnlyOne,
+            Cardinality::OnlyOne,
+            RelationType::Identifying,
+            None,
+        );
+        let diagram = make_diagram(vec![], vec![rel]);
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        // The class exists in the style block, but no <text class="er-edge-label"> should appear
+        // in the rendered content area
+        let content_after_style = svg.split("</style>").nth(1).unwrap_or("");
+        assert!(
+            !content_after_style.contains("er-edge-label"),
+            "no label text element should be rendered when relationship has no label"
+        );
+    }
+
+    #[test]
+    fn render_relationship_skips_empty_points() {
+        let rel = PositionedRelationship {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            cardinality_from: Cardinality::OnlyOne,
+            cardinality_to: Cardinality::OnlyOne,
+            relation_type: RelationType::Identifying,
+            label: None,
+            label_x: None,
+            label_y: None,
+            label_width: None,
+            label_height: None,
+            points: vec![], // less than 2 points
+        };
+        let diagram = make_diagram(vec![], vec![rel]);
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        // Should not crash, and should not contain a path element for this edge
+        assert!(
+            !svg.contains("<path"),
+            "should skip rendering relationship with < 2 points"
+        );
+    }
+
+    #[test]
+    fn cardinality_only_one_draws_two_perpendicular_lines() {
+        let rel = make_relationship(
+            "A",
+            "B",
+            Cardinality::OnlyOne,
+            Cardinality::OnlyOne,
+            RelationType::Identifying,
+            None,
+        );
+        let diagram = make_diagram(vec![], vec![rel]);
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        // OnlyOne (||) should draw perpendicular lines (via <line> elements)
+        let line_count = svg.matches("<line").count();
+        // Each end draws 2 lines for OnlyOne = 4 total
+        assert!(
+            line_count >= 4,
+            "OnlyOne cardinality on both ends should produce at least 4 <line> elements, got {}",
+            line_count
+        );
+    }
+
+    #[test]
+    fn cardinality_zero_or_one_draws_circle() {
+        let rel = make_relationship(
+            "A",
+            "B",
+            Cardinality::ZeroOrOne,
+            Cardinality::OnlyOne,
+            RelationType::Identifying,
+            None,
+        );
+        let diagram = make_diagram(vec![], vec![rel]);
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(
+            svg.contains("<circle"),
+            "ZeroOrOne should render a circle element"
+        );
+    }
+
+    #[test]
+    fn cardinality_zero_or_more_draws_circle_and_crows_foot() {
+        let rel = make_relationship(
+            "A",
+            "B",
+            Cardinality::ZeroOrMore,
+            Cardinality::OnlyOne,
+            RelationType::Identifying,
+            None,
+        );
+        let diagram = make_diagram(vec![], vec![rel]);
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(
+            svg.contains("<circle"),
+            "ZeroOrMore should render a circle element"
+        );
+        // Crow's foot draws 2 line elements (the V prongs)
+        let line_count = svg.matches("<line").count();
+        assert!(
+            line_count >= 4,
+            "ZeroOrMore + OnlyOne should produce at least 4 line elements, got {}",
+            line_count
+        );
+    }
+
+    #[test]
+    fn render_entity_escapes_xml_in_name() {
+        let entity = make_entity("Entity<A>", vec![]);
+        let diagram = make_diagram(vec![entity], vec![]);
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(
+            svg.contains("Entity&lt;A&gt;"),
+            "entity name should be XML-escaped"
+        );
+        assert!(
+            !svg.contains("Entity<A>"),
+            "raw angle brackets should not appear in XML text"
+        );
+    }
+
+    #[test]
+    fn render_alternating_row_backgrounds() {
+        let entity = make_entity(
+            "Multi",
+            vec![
+                Attribute {
+                    type_name: "int".into(),
+                    name: "a".into(),
+                    key: AttributeKey::None,
+                    comment: None,
+                },
+                Attribute {
+                    type_name: "string".into(),
+                    name: "b".into(),
+                    key: AttributeKey::None,
+                    comment: None,
+                },
+                Attribute {
+                    type_name: "bool".into(),
+                    name: "c".into(),
+                    key: AttributeKey::None,
+                    comment: None,
+                },
+            ],
+        );
+        let diagram = make_diagram(vec![entity], vec![]);
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        // Count rect elements in the entity group:
+        // 1 outer rect + 1 header bg + alternating row bg for odd rows (index 1 = "b")
+        let rect_count = svg.matches("<rect").count();
+        assert!(
+            rect_count >= 3,
+            "should have outer rect, header bg, and at least one alternating row bg, got {}",
+            rect_count
+        );
+    }
 }

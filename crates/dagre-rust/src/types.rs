@@ -360,3 +360,145 @@ impl Default for EdgeLabel {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rankdir_from_str_loose() {
+        assert_eq!(RankDir::from_str_loose("tb"), RankDir::TB);
+        assert_eq!(RankDir::from_str_loose("TB"), RankDir::TB);
+        assert_eq!(RankDir::from_str_loose("bt"), RankDir::BT);
+        assert_eq!(RankDir::from_str_loose("BT"), RankDir::BT);
+        assert_eq!(RankDir::from_str_loose("lr"), RankDir::LR);
+        assert_eq!(RankDir::from_str_loose("LR"), RankDir::LR);
+        assert_eq!(RankDir::from_str_loose("rl"), RankDir::RL);
+        assert_eq!(RankDir::from_str_loose("RL"), RankDir::RL);
+        assert_eq!(RankDir::from_str_loose("unknown"), RankDir::TB);
+    }
+
+    #[test]
+    fn rankdir_is_lr_or_rl() {
+        assert!(RankDir::LR.is_lr_or_rl());
+        assert!(RankDir::RL.is_lr_or_rl());
+        assert!(!RankDir::TB.is_lr_or_rl());
+        assert!(!RankDir::BT.is_lr_or_rl());
+    }
+
+    #[test]
+    fn rankdir_is_bt_or_rl() {
+        assert!(RankDir::BT.is_bt_or_rl());
+        assert!(RankDir::RL.is_bt_or_rl());
+        assert!(!RankDir::TB.is_bt_or_rl());
+        assert!(!RankDir::LR.is_bt_or_rl());
+    }
+
+    #[test]
+    fn labelpos_from_str_loose() {
+        assert_eq!(LabelPos::from_str_loose("l"), LabelPos::Left);
+        assert_eq!(LabelPos::from_str_loose("L"), LabelPos::Left);
+        assert_eq!(LabelPos::from_str_loose("c"), LabelPos::Center);
+        assert_eq!(LabelPos::from_str_loose("C"), LabelPos::Center);
+        assert_eq!(LabelPos::from_str_loose("r"), LabelPos::Right);
+        assert_eq!(LabelPos::from_str_loose("anything"), LabelPos::Right);
+    }
+
+    #[test]
+    fn ranker_from_str_loose() {
+        assert_eq!(
+            Ranker::from_str_loose("network_simplex"),
+            Ranker::NetworkSimplex
+        );
+        assert_eq!(
+            Ranker::from_str_loose("network-simplex"),
+            Ranker::NetworkSimplex
+        );
+        assert_eq!(Ranker::from_str_loose("tight_tree"), Ranker::TightTree);
+        assert_eq!(Ranker::from_str_loose("tight-tree"), Ranker::TightTree);
+        assert_eq!(Ranker::from_str_loose("longest_path"), Ranker::LongestPath);
+        assert_eq!(Ranker::from_str_loose("longest-path"), Ranker::LongestPath);
+        assert_eq!(Ranker::from_str_loose("unknown"), Ranker::NetworkSimplex);
+    }
+
+    #[test]
+    fn align_from_str_loose() {
+        assert_eq!(Align::from_str_loose("ul"), Some(Align::UL));
+        assert_eq!(Align::from_str_loose("UL"), Some(Align::UL));
+        assert_eq!(Align::from_str_loose("ur"), Some(Align::UR));
+        assert_eq!(Align::from_str_loose("dl"), Some(Align::DL));
+        assert_eq!(Align::from_str_loose("dr"), Some(Align::DR));
+        assert_eq!(Align::from_str_loose("invalid"), None);
+    }
+
+    #[test]
+    fn rankalign_from_str_loose() {
+        assert_eq!(RankAlign::from_str_loose("top"), RankAlign::Top);
+        assert_eq!(RankAlign::from_str_loose("TOP"), RankAlign::Top);
+        assert_eq!(RankAlign::from_str_loose("bottom"), RankAlign::Bottom);
+        assert_eq!(RankAlign::from_str_loose("center"), RankAlign::Center);
+        assert_eq!(RankAlign::from_str_loose("unknown"), RankAlign::Center);
+    }
+
+    #[test]
+    fn graph_label_default() {
+        let gl = GraphLabel::default();
+        assert_eq!(gl.ranksep, 50.0);
+        assert_eq!(gl.edgesep, 20.0);
+        assert_eq!(gl.nodesep, 50.0);
+        assert_eq!(gl.rankdir, RankDir::TB);
+        assert!(!gl.rankdir_explicit);
+        assert!(gl.align.is_none());
+        assert_eq!(gl.rankalign, RankAlign::Center);
+        assert_eq!(gl.ranker, Ranker::NetworkSimplex);
+        assert!(gl.nesting_root.is_none());
+        assert!(gl.dummy_chains.is_empty());
+    }
+
+    #[test]
+    fn node_label_default() {
+        let nl = NodeLabel::default();
+        assert_eq!(nl.width, 0.0);
+        assert_eq!(nl.height, 0.0);
+        assert!(nl.rank.is_none());
+        assert!(nl.order.is_none());
+        assert!(nl.x.is_none());
+        assert!(nl.y.is_none());
+        assert!(nl.dummy.is_none());
+        assert!(nl.self_edges.is_empty());
+    }
+
+    #[test]
+    fn edge_label_default() {
+        let el = EdgeLabel::default();
+        assert_eq!(el.weight, 1.0);
+        assert_eq!(el.minlen, 1.0);
+        assert_eq!(el.width, 0.0);
+        assert_eq!(el.height, 0.0);
+        assert_eq!(el.labeloffset, 10.0);
+        assert_eq!(el.labelpos, LabelPos::Right);
+        assert!(!el.reversed);
+        assert!(!el.nesting_edge);
+        assert!(el.points.is_empty());
+    }
+
+    #[test]
+    fn rankdir_default_is_tb() {
+        assert_eq!(RankDir::default(), RankDir::TB);
+    }
+
+    #[test]
+    fn labelpos_default_is_right() {
+        assert_eq!(LabelPos::default(), LabelPos::Right);
+    }
+
+    #[test]
+    fn ranker_default_is_network_simplex() {
+        assert_eq!(Ranker::default(), Ranker::NetworkSimplex);
+    }
+
+    #[test]
+    fn rankalign_default_is_center() {
+        assert_eq!(RankAlign::default(), RankAlign::Center);
+    }
+}

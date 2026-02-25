@@ -305,3 +305,374 @@ fn convert_from_flowchart_result(
         height,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::font::FontProvider;
+    use crate::layout::text_measure::TextMeasurer;
+
+    fn make_measurer(provider: &FontProvider) -> TextMeasurer<'_> {
+        let font = provider.font_ref().unwrap();
+        TextMeasurer::new(font, 14.0)
+    }
+
+    fn make_simple_ast() -> ErDiagramAst {
+        ErDiagramAst {
+            entities: vec![
+                EntityDef {
+                    id: "Customer".into(),
+                    alias: None,
+                    attributes: vec![Attribute {
+                        type_name: "int".into(),
+                        name: "id".into(),
+                        key: AttributeKey::PK,
+                        comment: None,
+                    }],
+                },
+                EntityDef {
+                    id: "Order".into(),
+                    alias: None,
+                    attributes: vec![
+                        Attribute {
+                            type_name: "int".into(),
+                            name: "id".into(),
+                            key: AttributeKey::PK,
+                            comment: None,
+                        },
+                        Attribute {
+                            type_name: "int".into(),
+                            name: "customer_id".into(),
+                            key: AttributeKey::FK,
+                            comment: Some("ref".into()),
+                        },
+                    ],
+                },
+            ],
+            relationships: vec![RelationshipDef {
+                entity_a: "Customer".into(),
+                cardinality_a: Cardinality::OnlyOne,
+                relation_type: RelationType::Identifying,
+                cardinality_b: Cardinality::ZeroOrMore,
+                entity_b: "Order".into(),
+                label: Some("places".into()),
+            }],
+        }
+    }
+
+    #[test]
+    fn convert_to_flowchart_ast_creates_nodes_for_entities() {
+        let ast = make_simple_ast();
+        let fc = convert_to_flowchart_ast(&ast);
+
+        assert_eq!(fc.nodes.len(), 2);
+        assert!(fc.nodes.iter().any(|n| n.id == "Customer"));
+        assert!(fc.nodes.iter().any(|n| n.id == "Order"));
+        // All nodes should be rectangles
+        for node in &fc.nodes {
+            assert_eq!(node.shape, NodeShape::Rectangle);
+        }
+    }
+
+    #[test]
+    fn convert_to_flowchart_ast_creates_edges_for_relationships() {
+        let ast = make_simple_ast();
+        let fc = convert_to_flowchart_ast(&ast);
+
+        assert_eq!(fc.edges.len(), 1);
+        assert_eq!(fc.edges[0].from, "Customer");
+        assert_eq!(fc.edges[0].to, "Order");
+        assert_eq!(fc.edges[0].label, Some("places".into()));
+        // ER edges have no arrows (cardinality handled in rendering)
+        assert_eq!(fc.edges[0].arrow_start, ArrowEnd::None);
+        assert_eq!(fc.edges[0].arrow_end, ArrowEnd::None);
+    }
+
+    #[test]
+    fn convert_to_flowchart_ast_identifying_is_solid() {
+        let ast = ErDiagramAst {
+            entities: vec![],
+            relationships: vec![RelationshipDef {
+                entity_a: "A".into(),
+                cardinality_a: Cardinality::OnlyOne,
+                relation_type: RelationType::Identifying,
+                cardinality_b: Cardinality::OnlyOne,
+                entity_b: "B".into(),
+                label: None,
+            }],
+        };
+        let fc = convert_to_flowchart_ast(&ast);
+        assert_eq!(fc.edges[0].line_style, LineStyle::Solid);
+    }
+
+    #[test]
+    fn convert_to_flowchart_ast_non_identifying_is_dotted() {
+        let ast = ErDiagramAst {
+            entities: vec![],
+            relationships: vec![RelationshipDef {
+                entity_a: "A".into(),
+                cardinality_a: Cardinality::OnlyOne,
+                relation_type: RelationType::NonIdentifying,
+                cardinality_b: Cardinality::OnlyOne,
+                entity_b: "B".into(),
+                label: None,
+            }],
+        };
+        let fc = convert_to_flowchart_ast(&ast);
+        assert_eq!(fc.edges[0].line_style, LineStyle::Dotted);
+    }
+
+    #[test]
+    fn convert_to_flowchart_ast_defaults() {
+        let ast = make_simple_ast();
+        let fc = convert_to_flowchart_ast(&ast);
+
+        assert_eq!(fc.direction, Direction::TopToBottom);
+        assert!(fc.subgraphs.is_empty());
+        assert!(fc.class_defs.is_empty());
+        assert!(fc.class_assignments.is_empty());
+        assert!(fc.style_overrides.is_empty());
+    }
+
+    #[test]
+    fn compute_entity_sizes_basic() {
+        let ast = ErDiagramAst {
+            entities: vec![EntityDef {
+                id: "User".into(),
+                alias: None,
+                attributes: vec![
+                    Attribute {
+                        type_name: "int".into(),
+                        name: "id".into(),
+                        key: AttributeKey::PK,
+                        comment: None,
+                    },
+                    Attribute {
+                        type_name: "varchar".into(),
+                        name: "email".into(),
+                        key: AttributeKey::None,
+                        comment: Some("user email".into()),
+                    },
+                ],
+            }],
+            relationships: vec![],
+        };
+        let provider = FontProvider::default();
+        let measurer = make_measurer(&provider);
+        let sizes = compute_entity_sizes(&ast, &measurer);
+
+        assert!(sizes.contains_key("User"));
+        let size = &sizes["User"];
+        assert!(size.width >= 60.0, "entity should have minimum width of 60");
+        assert!(size.height > 0.0, "entity should have positive height");
+        assert!(
+            size.header_height > 0.0,
+            "header should have positive height"
+        );
+        // type column should be wide enough for "varchar"
+        assert!(size.col_widths[0] > 0.0, "type column should have width");
+        // name column should be wide enough for "email"
+        assert!(size.col_widths[1] > 0.0, "name column should have width");
+        // comment column should be wide enough
+        assert!(size.col_widths[3] > 0.0, "comment column should have width");
+    }
+
+    #[test]
+    fn compute_entity_sizes_no_attributes() {
+        let ast = ErDiagramAst {
+            entities: vec![EntityDef {
+                id: "Empty".into(),
+                alias: None,
+                attributes: vec![],
+            }],
+            relationships: vec![],
+        };
+        let provider = FontProvider::default();
+        let measurer = make_measurer(&provider);
+        let sizes = compute_entity_sizes(&ast, &measurer);
+
+        let size = &sizes["Empty"];
+        // Height should just be the header height
+        assert_eq!(size.height, size.header_height);
+    }
+
+    #[test]
+    fn compute_entity_sizes_minimum_width() {
+        let ast = ErDiagramAst {
+            entities: vec![EntityDef {
+                id: "X".into(), // very short name
+                alias: None,
+                attributes: vec![],
+            }],
+            relationships: vec![],
+        };
+        let provider = FontProvider::default();
+        let measurer = make_measurer(&provider);
+        let sizes = compute_entity_sizes(&ast, &measurer);
+
+        assert!(
+            sizes["X"].width >= 60.0,
+            "entity width should be at least 60.0"
+        );
+    }
+
+    #[test]
+    fn layout_er_diagram_basic() {
+        let ast = make_simple_ast();
+        let provider = FontProvider::default();
+        let measurer = make_measurer(&provider);
+        let result = layout_er_diagram(&ast, &measurer).unwrap();
+
+        assert_eq!(result.entities.len(), 2, "should have 2 entities");
+        assert_eq!(result.relationships.len(), 1, "should have 1 relationship");
+        assert!(result.width > 0.0, "width should be positive");
+        assert!(result.height > 0.0, "height should be positive");
+
+        // Check that entities have correct IDs
+        let ids: Vec<&str> = result.entities.iter().map(|e| e.id.as_str()).collect();
+        assert!(ids.contains(&"Customer"));
+        assert!(ids.contains(&"Order"));
+    }
+
+    #[test]
+    fn layout_er_diagram_preserves_cardinality() {
+        let ast = make_simple_ast();
+        let provider = FontProvider::default();
+        let measurer = make_measurer(&provider);
+        let result = layout_er_diagram(&ast, &measurer).unwrap();
+
+        let rel = &result.relationships[0];
+        assert_eq!(rel.cardinality_from, Cardinality::OnlyOne);
+        assert_eq!(rel.cardinality_to, Cardinality::ZeroOrMore);
+        assert_eq!(rel.relation_type, RelationType::Identifying);
+        assert_eq!(rel.label, Some("places".into()));
+    }
+
+    #[test]
+    fn layout_er_diagram_preserves_attributes() {
+        let ast = make_simple_ast();
+        let provider = FontProvider::default();
+        let measurer = make_measurer(&provider);
+        let result = layout_er_diagram(&ast, &measurer).unwrap();
+
+        let order = result
+            .entities
+            .iter()
+            .find(|e| e.id == "Order")
+            .expect("should find Order entity");
+        assert_eq!(order.attributes.len(), 2);
+        assert_eq!(order.attributes[0].key, AttributeKey::PK);
+        assert_eq!(order.attributes[1].key, AttributeKey::FK);
+    }
+
+    #[test]
+    fn layout_er_diagram_entities_have_positive_dimensions() {
+        let ast = make_simple_ast();
+        let provider = FontProvider::default();
+        let measurer = make_measurer(&provider);
+        let result = layout_er_diagram(&ast, &measurer).unwrap();
+
+        for entity in &result.entities {
+            assert!(
+                entity.width > 0.0,
+                "entity {} should have positive width",
+                entity.id
+            );
+            assert!(
+                entity.height > 0.0,
+                "entity {} should have positive height",
+                entity.id
+            );
+            assert!(
+                entity.header_height > 0.0,
+                "entity {} should have positive header height",
+                entity.id
+            );
+        }
+    }
+
+    #[test]
+    fn layout_er_diagram_relationships_have_points() {
+        let ast = make_simple_ast();
+        let provider = FontProvider::default();
+        let measurer = make_measurer(&provider);
+        let result = layout_er_diagram(&ast, &measurer).unwrap();
+
+        for rel in &result.relationships {
+            assert!(
+                rel.points.len() >= 2,
+                "relationship {}->{} should have at least 2 points",
+                rel.from_id,
+                rel.to_id
+            );
+        }
+    }
+
+    #[test]
+    fn layout_er_diagram_empty_inputs() {
+        // Empty AST with no entities or relationships should still produce a result
+        // (dagre requires at least some structure, so we just verify no panic
+        // when there are entities but no relationships)
+        let ast = ErDiagramAst {
+            entities: vec![EntityDef {
+                id: "Lone".into(),
+                alias: None,
+                attributes: vec![],
+            }],
+            relationships: vec![],
+        };
+        let provider = FontProvider::default();
+        let measurer = make_measurer(&provider);
+        let result = layout_er_diagram(&ast, &measurer).unwrap();
+
+        assert_eq!(result.entities.len(), 1);
+        assert!(result.relationships.is_empty());
+    }
+
+    #[test]
+    fn layout_er_diagram_multiple_relationships() {
+        let ast = ErDiagramAst {
+            entities: vec![
+                EntityDef {
+                    id: "A".into(),
+                    alias: None,
+                    attributes: vec![],
+                },
+                EntityDef {
+                    id: "B".into(),
+                    alias: None,
+                    attributes: vec![],
+                },
+                EntityDef {
+                    id: "C".into(),
+                    alias: None,
+                    attributes: vec![],
+                },
+            ],
+            relationships: vec![
+                RelationshipDef {
+                    entity_a: "A".into(),
+                    cardinality_a: Cardinality::OnlyOne,
+                    relation_type: RelationType::Identifying,
+                    cardinality_b: Cardinality::OneOrMore,
+                    entity_b: "B".into(),
+                    label: Some("has".into()),
+                },
+                RelationshipDef {
+                    entity_a: "B".into(),
+                    cardinality_a: Cardinality::ZeroOrOne,
+                    relation_type: RelationType::NonIdentifying,
+                    cardinality_b: Cardinality::ZeroOrMore,
+                    entity_b: "C".into(),
+                    label: None,
+                },
+            ],
+        };
+        let provider = FontProvider::default();
+        let measurer = make_measurer(&provider);
+        let result = layout_er_diagram(&ast, &measurer).unwrap();
+
+        assert_eq!(result.entities.len(), 3);
+        assert_eq!(result.relationships.len(), 2);
+    }
+}

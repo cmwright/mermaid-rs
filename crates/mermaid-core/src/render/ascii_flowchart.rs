@@ -416,4 +416,339 @@ mod tests {
         assert_eq!(truncate_label("Hello World", 5), "Hell…");
         assert_eq!(truncate_label("Hi", 2), "Hi");
     }
+
+    #[test]
+    fn test_truncate_label_zero_width() {
+        assert_eq!(truncate_label("Hello", 0), "");
+    }
+
+    #[test]
+    fn test_truncate_label_very_short_max() {
+        assert_eq!(truncate_label("Hello", 3), "Hel");
+        assert_eq!(truncate_label("Hello", 1), "H");
+    }
+
+    #[test]
+    fn test_wrap_text_simple() {
+        let result = wrap_text("Hello", 10);
+        assert_eq!(result, vec!["Hello"]);
+    }
+
+    #[test]
+    fn test_wrap_text_wraps_long_line() {
+        let result = wrap_text("HelloWorld", 5);
+        assert_eq!(result, vec!["Hello", "World"]);
+    }
+
+    #[test]
+    fn test_wrap_text_preserves_newlines() {
+        let result = wrap_text("Hi\nBye", 10);
+        assert_eq!(result, vec!["Hi", "Bye"]);
+    }
+
+    #[test]
+    fn test_wrap_text_zero_width() {
+        let result = wrap_text("Hello", 0);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn test_strip_html_basic_nested() {
+        assert_eq!(strip_html_basic("<div><b>inner</b></div>"), "inner");
+    }
+
+    #[test]
+    fn test_strip_html_basic_no_tags() {
+        assert_eq!(strip_html_basic("no tags here"), "no tags here");
+    }
+
+    #[test]
+    fn test_infer_arrow_direction_right() {
+        let dir = infer_arrow_direction((0.0, 0.0), (100.0, 0.0), Direction::TopToBottom);
+        assert_eq!(dir, ArrowDirection::Right);
+    }
+
+    #[test]
+    fn test_infer_arrow_direction_left() {
+        let dir = infer_arrow_direction((100.0, 0.0), (0.0, 0.0), Direction::TopToBottom);
+        assert_eq!(dir, ArrowDirection::Left);
+    }
+
+    #[test]
+    fn test_infer_arrow_direction_down() {
+        let dir = infer_arrow_direction((0.0, 0.0), (0.0, 100.0), Direction::TopToBottom);
+        assert_eq!(dir, ArrowDirection::Down);
+    }
+
+    #[test]
+    fn test_infer_arrow_direction_up() {
+        let dir = infer_arrow_direction((0.0, 100.0), (0.0, 0.0), Direction::TopToBottom);
+        assert_eq!(dir, ArrowDirection::Up);
+    }
+
+    #[test]
+    fn test_infer_arrow_direction_same_point_uses_default() {
+        let dir = infer_arrow_direction((50.0, 50.0), (50.0, 50.0), Direction::LeftToRight);
+        assert_eq!(dir, ArrowDirection::Right);
+        let dir = infer_arrow_direction((50.0, 50.0), (50.0, 50.0), Direction::BottomToTop);
+        assert_eq!(dir, ArrowDirection::Up);
+        let dir = infer_arrow_direction((50.0, 50.0), (50.0, 50.0), Direction::RightToLeft);
+        assert_eq!(dir, ArrowDirection::Left);
+    }
+
+    #[test]
+    fn test_render_diamond_node() {
+        let graph = PositionedGraph {
+            width: 200.0,
+            height: 200.0,
+            direction: Direction::TopToBottom,
+            subgraphs: vec![],
+            nodes: vec![PositionedNode {
+                id: "D".to_string(),
+                label: "Yes?".to_string(),
+                shape: NodeShape::Diamond,
+                style: StyleProperties::default(),
+                x: 100.0,
+                y: 100.0,
+                width: 80.0,
+                height: 60.0,
+            }],
+            edges: vec![],
+        };
+        let result = render_ascii(&graph).unwrap();
+        assert!(result.contains("Yes?"));
+    }
+
+    #[test]
+    fn test_render_various_node_shapes() {
+        let shapes = vec![
+            NodeShape::Circle,
+            NodeShape::Hexagon,
+            NodeShape::Cylinder,
+            NodeShape::Subroutine,
+            NodeShape::Asymmetric,
+            NodeShape::Parallelogram,
+            NodeShape::Trapezoid,
+            NodeShape::Stadium,
+        ];
+        for shape in shapes {
+            let graph = PositionedGraph {
+                width: 200.0,
+                height: 100.0,
+                direction: Direction::TopToBottom,
+                subgraphs: vec![],
+                nodes: vec![PositionedNode {
+                    id: "N".to_string(),
+                    label: "Test".to_string(),
+                    shape,
+                    style: StyleProperties::default(),
+                    x: 100.0,
+                    y: 50.0,
+                    width: 80.0,
+                    height: 40.0,
+                }],
+                edges: vec![],
+            };
+            let result = render_ascii(&graph).unwrap();
+            assert!(!result.is_empty(), "shape {:?} should render", shape);
+        }
+    }
+
+    #[test]
+    fn test_render_dotted_edge() {
+        let graph = PositionedGraph {
+            width: 200.0,
+            height: 200.0,
+            direction: Direction::TopToBottom,
+            subgraphs: vec![],
+            nodes: vec![],
+            edges: vec![PositionedEdge {
+                from_id: "A".to_string(),
+                to_id: "B".to_string(),
+                line_style: LineStyle::Dotted,
+                arrow_start: ArrowEnd::None,
+                arrow_end: ArrowEnd::Arrow,
+                label: None,
+                label_x: None,
+                label_y: None,
+                label_width: None,
+                label_height: None,
+                points: vec![(100.0, 20.0), (100.0, 180.0)],
+            }],
+        };
+        let result = render_ascii(&graph).unwrap();
+        assert!(
+            result.contains('╎') || result.contains('╌'),
+            "dotted edge should use dash chars"
+        );
+    }
+
+    #[test]
+    fn test_render_thick_edge() {
+        let graph = PositionedGraph {
+            width: 200.0,
+            height: 200.0,
+            direction: Direction::TopToBottom,
+            subgraphs: vec![],
+            nodes: vec![],
+            edges: vec![PositionedEdge {
+                from_id: "A".to_string(),
+                to_id: "B".to_string(),
+                line_style: LineStyle::Thick,
+                arrow_start: ArrowEnd::None,
+                arrow_end: ArrowEnd::Arrow,
+                label: None,
+                label_x: None,
+                label_y: None,
+                label_width: None,
+                label_height: None,
+                points: vec![(100.0, 20.0), (100.0, 180.0)],
+            }],
+        };
+        let result = render_ascii(&graph).unwrap();
+        assert!(
+            result.contains('┃') || result.contains('━'),
+            "thick edge should use thick chars"
+        );
+    }
+
+    #[test]
+    fn test_render_invisible_edge() {
+        let graph = PositionedGraph {
+            width: 200.0,
+            height: 200.0,
+            direction: Direction::TopToBottom,
+            subgraphs: vec![],
+            nodes: vec![],
+            edges: vec![PositionedEdge {
+                from_id: "A".to_string(),
+                to_id: "B".to_string(),
+                line_style: LineStyle::Invisible,
+                arrow_start: ArrowEnd::None,
+                arrow_end: ArrowEnd::Arrow,
+                label: None,
+                label_x: None,
+                label_y: None,
+                label_width: None,
+                label_height: None,
+                points: vec![(100.0, 20.0), (100.0, 180.0)],
+            }],
+        };
+        let result = render_ascii(&graph).unwrap();
+        // Invisible edge should not draw any line characters
+        assert!(!result.contains('│') && !result.contains('─'));
+    }
+
+    #[test]
+    fn test_render_bidirectional_edge() {
+        let graph = PositionedGraph {
+            width: 300.0,
+            height: 100.0,
+            direction: Direction::LeftToRight,
+            subgraphs: vec![],
+            nodes: vec![],
+            edges: vec![PositionedEdge {
+                from_id: "A".to_string(),
+                to_id: "B".to_string(),
+                line_style: LineStyle::Solid,
+                arrow_start: ArrowEnd::Arrow,
+                arrow_end: ArrowEnd::Arrow,
+                label: None,
+                label_x: None,
+                label_y: None,
+                label_width: None,
+                label_height: None,
+                points: vec![(20.0, 50.0), (280.0, 50.0)],
+            }],
+        };
+        let result = render_ascii(&graph).unwrap();
+        // Should have arrows at both ends
+        assert!(result.contains('▶') || result.contains('◀'));
+    }
+
+    #[test]
+    fn test_render_edge_with_label() {
+        let graph = PositionedGraph {
+            width: 300.0,
+            height: 200.0,
+            direction: Direction::TopToBottom,
+            subgraphs: vec![],
+            nodes: vec![],
+            edges: vec![PositionedEdge {
+                from_id: "A".to_string(),
+                to_id: "B".to_string(),
+                line_style: LineStyle::Solid,
+                arrow_start: ArrowEnd::None,
+                arrow_end: ArrowEnd::Arrow,
+                label: Some("yes".to_string()),
+                label_x: Some(150.0),
+                label_y: Some(100.0),
+                label_width: None,
+                label_height: None,
+                points: vec![(150.0, 20.0), (150.0, 180.0)],
+            }],
+        };
+        let result = render_ascii(&graph).unwrap();
+        assert!(result.contains("yes"), "edge label should be rendered");
+    }
+
+    #[test]
+    fn test_render_circle_and_cross_arrows() {
+        for (arrow, expected) in [(ArrowEnd::Circle, '●'), (ArrowEnd::Cross, '✕')] {
+            let graph = PositionedGraph {
+                width: 200.0,
+                height: 200.0,
+                direction: Direction::TopToBottom,
+                subgraphs: vec![],
+                nodes: vec![],
+                edges: vec![PositionedEdge {
+                    from_id: "A".to_string(),
+                    to_id: "B".to_string(),
+                    line_style: LineStyle::Solid,
+                    arrow_start: ArrowEnd::None,
+                    arrow_end: arrow,
+                    label: None,
+                    label_x: None,
+                    label_y: None,
+                    label_width: None,
+                    label_height: None,
+                    points: vec![(100.0, 20.0), (100.0, 180.0)],
+                }],
+            };
+            let result = render_ascii(&graph).unwrap();
+            assert!(
+                result.contains(expected),
+                "should contain {:?} for {:?}",
+                expected,
+                arrow
+            );
+        }
+    }
+
+    #[test]
+    fn test_render_subgraph_with_label() {
+        use crate::layout::flowchart::types::PositionedSubgraph;
+        let graph = PositionedGraph {
+            width: 300.0,
+            height: 200.0,
+            direction: Direction::TopToBottom,
+            subgraphs: vec![PositionedSubgraph {
+                id: "sg1".to_string(),
+                label: Some("Group".to_string()),
+                x: 10.0,
+                y: 10.0,
+                width: 200.0,
+                height: 150.0,
+                style: StyleProperties::default(),
+            }],
+            nodes: vec![],
+            edges: vec![],
+        };
+        let result = render_ascii(&graph).unwrap();
+        assert!(
+            result.contains("Group"),
+            "subgraph label should be rendered"
+        );
+        assert!(result.contains('┌'), "subgraph should have box");
+    }
 }

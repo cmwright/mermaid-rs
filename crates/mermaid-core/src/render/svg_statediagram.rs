@@ -440,3 +440,470 @@ fn render_transition(svg: &mut String, transition: &PositionedTransition, theme:
         svg.push('\n');
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ast::flowchart::{ArrowEnd, Direction, LineStyle};
+    use crate::ast::statediagram::StateKind;
+    use crate::layout::statediagram::types::{
+        PositionedComposite, PositionedNote, PositionedState, PositionedStateDiagram,
+        PositionedTransition,
+    };
+    use crate::render::theme::Theme;
+
+    fn make_state(id: &str, label: &str, kind: StateKind) -> PositionedState {
+        PositionedState {
+            id: id.to_string(),
+            label: label.to_string(),
+            kind,
+            style: Default::default(),
+            x: 100.0,
+            y: 100.0,
+            width: 80.0,
+            height: 40.0,
+        }
+    }
+
+    fn make_transition(from: &str, to: &str, label: Option<&str>) -> PositionedTransition {
+        PositionedTransition {
+            from_id: from.to_string(),
+            to_id: to.to_string(),
+            line_style: LineStyle::Solid,
+            arrow_end: ArrowEnd::Arrow,
+            label: label.map(|s| s.to_string()),
+            label_x: label.map(|_| 150.0),
+            label_y: label.map(|_| 75.0),
+            label_width: label.map(|_| 50.0),
+            label_height: label.map(|_| 20.0),
+            points: vec![(50.0, 100.0), (150.0, 100.0)],
+            raw_path_d: None,
+        }
+    }
+
+    fn empty_diagram() -> PositionedStateDiagram {
+        PositionedStateDiagram {
+            states: vec![],
+            transitions: vec![],
+            composites: vec![],
+            notes: vec![],
+            width: 300.0,
+            height: 200.0,
+            direction: Direction::TopToBottom,
+        }
+    }
+
+    #[test]
+    fn render_svg_produces_valid_svg() {
+        let diagram = empty_diagram();
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(svg.starts_with("<svg "));
+        assert!(svg.contains("xmlns=\"http://www.w3.org/2000/svg\""));
+        assert!(svg.ends_with("</svg>\n"));
+    }
+
+    #[test]
+    fn render_svg_includes_style_and_defs() {
+        let diagram = empty_diagram();
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(svg.contains("<style>"));
+        assert!(svg.contains(".node-text"));
+        assert!(svg.contains(".edge-label"));
+        assert!(svg.contains("<defs>"));
+        assert!(svg.contains("arrowhead"));
+    }
+
+    #[test]
+    fn render_normal_state_with_label() {
+        let mut diagram = empty_diagram();
+        diagram
+            .states
+            .push(make_state("idle", "Idle", StateKind::Normal));
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(svg.contains("Idle"), "should contain state label");
+        assert!(
+            svg.contains("<rect"),
+            "normal state should render as rounded rect"
+        );
+        assert!(
+            svg.contains("rx="),
+            "normal state rect should have rounded corners"
+        );
+    }
+
+    #[test]
+    fn render_start_state_as_filled_circle() {
+        let mut diagram = empty_diagram();
+        diagram
+            .states
+            .push(make_state("start", "", StateKind::Start));
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(svg.contains("<circle"), "start state should be a circle");
+        assert!(
+            svg.contains("stroke=\"none\""),
+            "start state circle should have no stroke"
+        );
+    }
+
+    #[test]
+    fn render_end_state_as_donut() {
+        let mut diagram = empty_diagram();
+        diagram.states.push(make_state("end", "", StateKind::End));
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        let circle_count = svg.matches("<circle").count();
+        assert!(
+            circle_count >= 2,
+            "end state should have outer + inner circle (donut), got {} circles",
+            circle_count
+        );
+    }
+
+    #[test]
+    fn render_fork_join_as_bar() {
+        for kind in [StateKind::Fork, StateKind::Join] {
+            let mut diagram = empty_diagram();
+            diagram.states.push(make_state("fj", "", kind));
+            let theme = Theme::default();
+            let svg = render_svg(&diagram, &theme).unwrap();
+
+            assert!(
+                svg.contains("<rect"),
+                "{:?} should render as a rectangle bar",
+                kind
+            );
+        }
+    }
+
+    #[test]
+    fn render_transition_without_label_no_label_elements() {
+        let mut diagram = empty_diagram();
+        diagram.transitions.push(make_transition("A", "B", None));
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        // The class exists in the style block, but no <text class="edge-label"> should appear
+        // in the rendered content
+        let content_after_style = svg.split("</style>").nth(1).unwrap_or("");
+        assert!(
+            !content_after_style.contains("edge-label"),
+            "no label text should be rendered when transition has no label"
+        );
+    }
+
+    #[test]
+    fn render_transition_with_arrow_marker() {
+        let mut diagram = empty_diagram();
+        diagram.transitions.push(make_transition("A", "B", None));
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(svg.contains("<path"), "should have path for transition");
+        assert!(
+            svg.contains("marker-end=\"url(#arrowhead)\""),
+            "should have arrowhead marker"
+        );
+    }
+
+    #[test]
+    fn render_transition_with_label_shows_text_and_bg() {
+        let mut diagram = empty_diagram();
+        diagram
+            .transitions
+            .push(make_transition("A", "B", Some("go")));
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(svg.contains("go"), "should contain transition label text");
+        assert!(
+            svg.contains("rgba(232,232,232,0.8)"),
+            "should have label background rect"
+        );
+    }
+
+    #[test]
+    fn render_transition_dotted_line_style() {
+        let mut diagram = empty_diagram();
+        diagram.transitions.push(PositionedTransition {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            line_style: LineStyle::Dotted,
+            arrow_end: ArrowEnd::Arrow,
+            label: None,
+            label_x: None,
+            label_y: None,
+            label_width: None,
+            label_height: None,
+            points: vec![(0.0, 0.0), (100.0, 100.0)],
+            raw_path_d: None,
+        });
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(
+            svg.contains("stroke-dasharray"),
+            "dotted line style should produce stroke-dasharray"
+        );
+    }
+
+    #[test]
+    fn render_transition_no_arrow_end() {
+        let mut diagram = empty_diagram();
+        diagram.transitions.push(PositionedTransition {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            line_style: LineStyle::Solid,
+            arrow_end: ArrowEnd::None,
+            label: None,
+            label_x: None,
+            label_y: None,
+            label_width: None,
+            label_height: None,
+            points: vec![(0.0, 0.0), (100.0, 100.0)],
+            raw_path_d: None,
+        });
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(
+            !svg.contains("marker-end"),
+            "ArrowEnd::None should not produce marker-end"
+        );
+    }
+
+    #[test]
+    fn render_transition_with_raw_path_d() {
+        let mut diagram = empty_diagram();
+        diagram.transitions.push(PositionedTransition {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            line_style: LineStyle::Solid,
+            arrow_end: ArrowEnd::Arrow,
+            label: None,
+            label_x: None,
+            label_y: None,
+            label_width: None,
+            label_height: None,
+            points: vec![(0.0, 0.0), (50.0, 30.0), (100.0, 0.0)],
+            raw_path_d: Some("M 0 0 C 33 30 67 30 100 0".into()),
+        });
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(
+            svg.contains("M 0 0 C 33 30 67 30 100 0"),
+            "should use raw_path_d when provided"
+        );
+    }
+
+    #[test]
+    fn render_transition_skips_when_too_few_points() {
+        let mut diagram = empty_diagram();
+        diagram.transitions.push(PositionedTransition {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            line_style: LineStyle::Solid,
+            arrow_end: ArrowEnd::Arrow,
+            label: None,
+            label_x: None,
+            label_y: None,
+            label_width: None,
+            label_height: None,
+            points: vec![(0.0, 0.0)], // only 1 point
+            raw_path_d: None,
+        });
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        // The defs block has a <path> for the arrowhead marker, but the content
+        // area should not contain any additional path for this transition
+        let content_after_defs = svg.split("</defs>").nth(1).unwrap_or("");
+        assert!(
+            !content_after_defs.contains("<path"),
+            "should not render path element for transition with < 2 points"
+        );
+    }
+
+    #[test]
+    fn render_composite_with_label() {
+        let mut diagram = empty_diagram();
+        diagram.composites.push(PositionedComposite {
+            id: "active".into(),
+            label: Some("Active".into()),
+            x: 20.0,
+            y: 20.0,
+            width: 200.0,
+            height: 150.0,
+            style: Default::default(),
+        });
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(svg.contains("Active"), "composite should show its label");
+        assert!(
+            svg.contains("<rect"),
+            "composite should have background rect"
+        );
+        assert!(
+            svg.contains("<line"),
+            "composite should have header separator line"
+        );
+        assert!(
+            svg.contains("font-weight=\"bold\""),
+            "composite title should be bold"
+        );
+    }
+
+    #[test]
+    fn render_composite_without_label() {
+        let mut diagram = empty_diagram();
+        diagram.composites.push(PositionedComposite {
+            id: "comp".into(),
+            label: None,
+            x: 20.0,
+            y: 20.0,
+            width: 200.0,
+            height: 150.0,
+            style: Default::default(),
+        });
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        // Should still render the rect and line, just no text
+        assert!(svg.contains("<rect"));
+        assert!(svg.contains("<line"));
+    }
+
+    #[test]
+    fn render_note_with_fold() {
+        let mut diagram = empty_diagram();
+        diagram.notes.push(PositionedNote {
+            id: "n1".into(),
+            text: "Important note".into(),
+            x: 200.0,
+            y: 100.0,
+            width: 120.0,
+            height: 50.0,
+        });
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(svg.contains("Important note"), "should show note text");
+        // Note has two path elements: body and fold triangle
+        let path_count = svg.matches("<path").count();
+        assert!(
+            path_count >= 2,
+            "note should have body path and fold triangle, got {} paths",
+            path_count
+        );
+    }
+
+    #[test]
+    fn render_multiline_note() {
+        let mut diagram = empty_diagram();
+        diagram.notes.push(PositionedNote {
+            id: "n1".into(),
+            text: "Line one\nLine two\nLine three".into(),
+            x: 200.0,
+            y: 100.0,
+            width: 120.0,
+            height: 60.0,
+        });
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        let tspan_count = svg.matches("<tspan").count();
+        assert_eq!(
+            tspan_count, 3,
+            "three-line note should produce 3 <tspan> elements"
+        );
+        assert!(svg.contains("Line one"));
+        assert!(svg.contains("Line two"));
+        assert!(svg.contains("Line three"));
+    }
+
+    #[test]
+    fn render_multiline_normal_state_label() {
+        let mut diagram = empty_diagram();
+        diagram.states.push(PositionedState {
+            id: "s1".into(),
+            label: "First\nSecond".into(),
+            kind: StateKind::Normal,
+            style: Default::default(),
+            x: 100.0,
+            y: 100.0,
+            width: 100.0,
+            height: 50.0,
+        });
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        let tspan_count = svg.matches("<tspan").count();
+        assert_eq!(
+            tspan_count, 2,
+            "two-line state label should produce 2 <tspan> elements"
+        );
+    }
+
+    #[test]
+    fn render_normal_state_custom_style() {
+        let mut diagram = empty_diagram();
+        diagram.states.push(PositionedState {
+            id: "styled".into(),
+            label: "Styled".into(),
+            kind: StateKind::Normal,
+            style: crate::ast::common::StyleProperties {
+                fill: Some(crate::ast::common::Color::Hex("#ff0000".into())),
+                stroke: Some(crate::ast::common::Color::Hex("#00ff00".into())),
+                color: Some(crate::ast::common::Color::Hex("#0000ff".into())),
+                stroke_width: Some(3.0),
+                ..Default::default()
+            },
+            x: 100.0,
+            y: 100.0,
+            width: 80.0,
+            height: 40.0,
+        });
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        assert!(svg.contains("#ff0000"), "custom fill color should appear");
+        assert!(svg.contains("#00ff00"), "custom stroke color should appear");
+        assert!(svg.contains("#0000ff"), "custom text color should appear");
+    }
+
+    #[test]
+    fn render_order_composites_before_states() {
+        let mut diagram = empty_diagram();
+        diagram.composites.push(PositionedComposite {
+            id: "comp".into(),
+            label: Some("Comp".into()),
+            x: 0.0,
+            y: 0.0,
+            width: 200.0,
+            height: 200.0,
+            style: Default::default(),
+        });
+        diagram
+            .states
+            .push(make_state("inner", "Inner", StateKind::Normal));
+        let theme = Theme::default();
+        let svg = render_svg(&diagram, &theme).unwrap();
+
+        let comp_pos = svg.find("Comp").unwrap();
+        let state_pos = svg.find("Inner").unwrap();
+        assert!(
+            comp_pos < state_pos,
+            "composite should be rendered before states (background)"
+        );
+    }
+}

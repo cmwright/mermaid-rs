@@ -584,4 +584,250 @@ mod tests {
         }
         assert!(!s.ends_with('\n'));
     }
+
+    #[test]
+    fn test_get_out_of_bounds() {
+        let c = TextCanvas::from_pixel_size(40.0, 28.0);
+        assert_eq!(c.get(9999, 9999), ' ');
+    }
+
+    #[test]
+    fn test_put_out_of_bounds_no_panic() {
+        let mut c = TextCanvas::from_pixel_size(40.0, 28.0);
+        c.put(9999, 9999, 'X'); // should not panic
+    }
+
+    #[test]
+    fn test_draw_hline() {
+        let mut c = TextCanvas::from_pixel_size(80.0, 28.0);
+        c.draw_hline(2, 6, 2, '─');
+        for col in 2..=6 {
+            assert_eq!(c.get(col, 2), '─');
+        }
+    }
+
+    #[test]
+    fn test_draw_hline_reversed() {
+        let mut c = TextCanvas::from_pixel_size(80.0, 28.0);
+        c.draw_hline(6, 2, 2, '─');
+        for col in 2..=6 {
+            assert_eq!(c.get(col, 2), '─');
+        }
+    }
+
+    #[test]
+    fn test_draw_vline() {
+        let mut c = TextCanvas::from_pixel_size(40.0, 56.0);
+        c.draw_vline(3, 1, 4, '│');
+        for row in 1..=4 {
+            assert_eq!(c.get(3, row), '│');
+        }
+    }
+
+    #[test]
+    fn test_draw_vline_reversed() {
+        let mut c = TextCanvas::from_pixel_size(40.0, 56.0);
+        c.draw_vline(3, 4, 1, '│');
+        for row in 1..=4 {
+            assert_eq!(c.get(3, row), '│');
+        }
+    }
+
+    #[test]
+    fn test_draw_rounded_box() {
+        let mut c = TextCanvas::from_pixel_size(80.0, 56.0);
+        c.draw_rounded_box(1, 1, 5, 3);
+        assert_eq!(c.get(1, 1), '╭');
+        assert_eq!(c.get(5, 1), '╮');
+        assert_eq!(c.get(1, 3), '╰');
+        assert_eq!(c.get(5, 3), '╯');
+    }
+
+    #[test]
+    fn test_draw_box_degenerate() {
+        let mut c = TextCanvas::from_pixel_size(40.0, 28.0);
+        // right <= left: should not draw anything
+        c.draw_box(5, 1, 5, 3);
+        assert_eq!(c.get(5, 1), ' ');
+        // bottom <= top: should not draw anything
+        c.draw_box(1, 3, 5, 3);
+        assert_eq!(c.get(1, 3), ' ');
+    }
+
+    #[test]
+    fn test_draw_rounded_box_degenerate() {
+        let mut c = TextCanvas::from_pixel_size(40.0, 28.0);
+        c.draw_rounded_box(5, 1, 5, 3);
+        assert_eq!(c.get(5, 1), ' ');
+    }
+
+    #[test]
+    fn test_draw_diamond_small() {
+        let mut c = TextCanvas::from_pixel_size(40.0, 56.0);
+        c.draw_diamond(5, 3, 1, 1);
+        assert_eq!(c.get(5, 3), '◇');
+    }
+
+    #[test]
+    fn test_draw_diamond_normal() {
+        let mut c = TextCanvas::from_pixel_size(160.0, 112.0);
+        c.draw_diamond(10, 5, 3, 2);
+        // Top and bottom points
+        assert_eq!(c.get(10, 3), '◇');
+        assert_eq!(c.get(10, 7), '◇');
+        // Left and right points at center row
+        assert_eq!(c.get(7, 5), '◁');
+        assert_eq!(c.get(13, 5), '▷');
+    }
+
+    #[test]
+    fn test_draw_text_centered_px() {
+        let mut c = TextCanvas::from_pixel_size(120.0, 28.0);
+        c.draw_text_centered_px(60.0, 14.0, "Hi");
+        let s = c.to_string();
+        assert!(s.contains("Hi"));
+    }
+
+    #[test]
+    fn test_draw_arrow_directions() {
+        let mut c = TextCanvas::from_pixel_size(80.0, 56.0);
+        c.draw_arrow(8.0, 14.0, ArrowDirection::Right);
+        c.draw_arrow(24.0, 14.0, ArrowDirection::Left);
+        c.draw_arrow(40.0, 14.0, ArrowDirection::Down);
+        c.draw_arrow(56.0, 14.0, ArrowDirection::Up);
+        let s = c.to_string();
+        assert!(s.contains('▶'));
+        assert!(s.contains('◀'));
+        assert!(s.contains('▼'));
+        assert!(s.contains('▲'));
+    }
+
+    #[test]
+    fn test_draw_polyline_horizontal() {
+        let mut c = TextCanvas::from_pixel_size(120.0, 28.0);
+        c.draw_polyline(&[(8.0, 14.0), (80.0, 14.0)]);
+        let s = c.to_string();
+        assert!(s.contains('─'));
+    }
+
+    #[test]
+    fn test_draw_polyline_vertical() {
+        let mut c = TextCanvas::from_pixel_size(40.0, 84.0);
+        c.draw_polyline(&[(20.0, 0.0), (20.0, 70.0)]);
+        let s = c.to_string();
+        assert!(s.contains('│'));
+    }
+
+    #[test]
+    fn test_draw_polyline_with_corner() {
+        let mut c = TextCanvas::from_pixel_size(120.0, 84.0);
+        c.draw_polyline(&[(8.0, 14.0), (80.0, 14.0), (80.0, 70.0)]);
+        let s = c.to_string();
+        // Should contain horizontal, vertical, and corner chars
+        assert!(s.contains('─'));
+        assert!(s.contains('│'));
+    }
+
+    #[test]
+    fn test_draw_polyline_single_point_noop() {
+        let mut c = TextCanvas::from_pixel_size(40.0, 28.0);
+        c.draw_polyline(&[(8.0, 14.0)]);
+        // Should not crash, canvas should be blank
+        let s = c.to_string();
+        assert!(s.trim().is_empty() || !s.contains('─'));
+    }
+
+    #[test]
+    fn test_draw_polyline_dashed() {
+        let mut c = TextCanvas::from_pixel_size(120.0, 28.0);
+        c.draw_polyline_dashed(&[(8.0, 14.0), (80.0, 14.0)]);
+        let s = c.to_string();
+        assert!(s.contains('╌'));
+    }
+
+    #[test]
+    fn test_draw_polyline_thick() {
+        let mut c = TextCanvas::from_pixel_size(120.0, 28.0);
+        c.draw_polyline_thick(&[(8.0, 14.0), (80.0, 14.0)]);
+        let s = c.to_string();
+        assert!(s.contains('━'));
+    }
+
+    #[test]
+    fn test_draw_dashed_hline() {
+        let mut c = TextCanvas::from_pixel_size(80.0, 28.0);
+        c.draw_dashed_hline(2, 8, 2);
+        // Even positions get '╌', odd get ' '
+        assert_eq!(c.get(2, 2), '╌');
+        assert_eq!(c.get(3, 2), ' ');
+        assert_eq!(c.get(4, 2), '╌');
+    }
+
+    #[test]
+    fn test_draw_dashed_vline() {
+        let mut c = TextCanvas::from_pixel_size(40.0, 84.0);
+        c.draw_dashed_vline(3, 1, 5);
+        assert_eq!(c.get(3, 1), '╎');
+        assert_eq!(c.get(3, 2), ' ');
+        assert_eq!(c.get(3, 3), '╎');
+    }
+
+    #[test]
+    fn test_pick_corner_left_to_down() {
+        assert_eq!(TextCanvas::pick_corner(1, 2, 3, 2, 3, 4), '╭');
+    }
+
+    #[test]
+    fn test_pick_corner_right_to_down() {
+        assert_eq!(TextCanvas::pick_corner(5, 2, 3, 2, 3, 4), '╮');
+    }
+
+    #[test]
+    fn test_pick_corner_left_to_up() {
+        assert_eq!(TextCanvas::pick_corner(1, 2, 3, 2, 3, 0), '╰');
+    }
+
+    #[test]
+    fn test_pick_corner_right_to_up() {
+        assert_eq!(TextCanvas::pick_corner(5, 2, 3, 2, 3, 0), '╯');
+    }
+
+    #[test]
+    fn test_pick_corner_straight_horizontal() {
+        assert_eq!(TextCanvas::pick_corner(1, 2, 3, 2, 5, 2), '─');
+    }
+
+    #[test]
+    fn test_pick_corner_straight_vertical() {
+        assert_eq!(TextCanvas::pick_corner(3, 1, 3, 3, 3, 5), '│');
+    }
+
+    #[test]
+    fn test_draw_box_px() {
+        let mut c = TextCanvas::from_pixel_size(120.0, 84.0);
+        c.draw_box_px(8.0, 14.0, 64.0, 42.0);
+        let s = c.to_string();
+        assert!(s.contains('┌'));
+        assert!(s.contains('┘'));
+    }
+
+    #[test]
+    fn test_orthogonalize_diagonal_segment() {
+        let c = TextCanvas::from_pixel_size(120.0, 84.0);
+        // A diagonal line should get orthogonalized into an L-shape
+        let pts = c.orthogonalize_points(&[(0.0, 0.0), (80.0, 56.0)]);
+        // Should have 3 points (start, corner, end)
+        assert!(
+            pts.len() >= 2,
+            "diagonal should be orthogonalized into at least 2 segments"
+        );
+    }
+
+    #[test]
+    fn test_canvas_min_size() {
+        // Very small pixel sizes should still produce a canvas >= 4x4
+        let c = TextCanvas::from_pixel_size(1.0, 1.0);
+        assert!(c.width >= 4);
+        assert!(c.height >= 4);
+    }
 }

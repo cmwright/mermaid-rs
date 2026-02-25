@@ -304,4 +304,297 @@ mod tests {
             "Solid branch line SVG should not contain stroke-dasharray"
         );
     }
+
+    #[test]
+    fn test_render_svg_produces_valid_svg() {
+        let layout = minimal_layout(vec![]);
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(svg.starts_with("<svg "));
+        assert!(svg.contains("xmlns=\"http://www.w3.org/2000/svg\""));
+        assert!(svg.ends_with("</svg>\n"));
+    }
+
+    #[test]
+    fn test_render_svg_includes_style_block() {
+        let layout = minimal_layout(vec![]);
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(svg.contains("<style>"));
+        assert!(svg.contains(".git-label"));
+        assert!(svg.contains(".git-hash"));
+        assert!(svg.contains(".git-tag"));
+    }
+
+    #[test]
+    fn test_get_color_wraps_around() {
+        assert_eq!(get_color(0), BRANCH_COLORS[0]);
+        assert_eq!(get_color(7), BRANCH_COLORS[7]);
+        assert_eq!(get_color(8), BRANCH_COLORS[0]); // wraps around
+        assert_eq!(get_color(9), BRANCH_COLORS[1]);
+    }
+
+    #[test]
+    fn test_render_normal_commit() {
+        let layout = GitGraphLayout {
+            width: 400.0,
+            height: 200.0,
+            branch_labels: vec![],
+            branch_lines: vec![],
+            commits: vec![PositionedCommit {
+                id: "abc1234".into(),
+                x: 100.0,
+                y: 50.0,
+                commit_type: CommitType::Normal,
+                color_index: 0,
+                is_merge: false,
+            }],
+            connections: vec![],
+            tags: vec![],
+        };
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(svg.contains("<circle"), "normal commit should be a circle");
+        assert!(svg.contains("abc1234"), "commit hash should be displayed");
+    }
+
+    #[test]
+    fn test_render_merge_commit_hollow() {
+        let layout = GitGraphLayout {
+            width: 400.0,
+            height: 200.0,
+            branch_labels: vec![],
+            branch_lines: vec![],
+            commits: vec![PositionedCommit {
+                id: "merge1".into(),
+                x: 100.0,
+                y: 50.0,
+                commit_type: CommitType::Normal,
+                color_index: 2,
+                is_merge: true,
+            }],
+            connections: vec![],
+            tags: vec![],
+        };
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(
+            svg.contains("fill=\"#ffffff\""),
+            "merge commit should have white fill (hollow)"
+        );
+    }
+
+    #[test]
+    fn test_render_highlight_commit_as_square() {
+        let layout = GitGraphLayout {
+            width: 400.0,
+            height: 200.0,
+            branch_labels: vec![],
+            branch_lines: vec![],
+            commits: vec![PositionedCommit {
+                id: "hl1".into(),
+                x: 100.0,
+                y: 50.0,
+                commit_type: CommitType::Highlight,
+                color_index: 1,
+                is_merge: false,
+            }],
+            connections: vec![],
+            tags: vec![],
+        };
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(
+            svg.contains("<rect"),
+            "highlight commit should render as a rectangle"
+        );
+    }
+
+    #[test]
+    fn test_render_reverse_commit_has_inner_circle() {
+        let layout = GitGraphLayout {
+            width: 400.0,
+            height: 200.0,
+            branch_labels: vec![],
+            branch_lines: vec![],
+            commits: vec![PositionedCommit {
+                id: "rev1".into(),
+                x: 100.0,
+                y: 50.0,
+                commit_type: CommitType::Reverse,
+                color_index: 0,
+                is_merge: false,
+            }],
+            connections: vec![],
+            tags: vec![],
+        };
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        let circle_count = svg.matches("<circle").count();
+        assert!(
+            circle_count >= 2,
+            "reverse commit should have outer + inner circle, got {}",
+            circle_count
+        );
+    }
+
+    #[test]
+    fn test_render_tag() {
+        let layout = GitGraphLayout {
+            width: 400.0,
+            height: 200.0,
+            branch_labels: vec![],
+            branch_lines: vec![],
+            commits: vec![],
+            connections: vec![],
+            tags: vec![PositionedTag {
+                text: "v1.0.0".into(),
+                x: 100.0,
+                y: 30.0,
+                width: 60.0,
+            }],
+        };
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(svg.contains("v1.0.0"), "tag text should be displayed");
+        assert!(svg.contains("<polygon"), "tag should have a polygon shape");
+        assert!(svg.contains("#ffffcc"), "tag should have yellow fill");
+    }
+
+    #[test]
+    fn test_render_branch_label() {
+        let layout = GitGraphLayout {
+            width: 400.0,
+            height: 200.0,
+            branch_labels: vec![PositionedBranchLabel {
+                name: "main".into(),
+                x: 50.0,
+                y: 30.0,
+                width: 60.0,
+                color_index: 0,
+            }],
+            branch_lines: vec![],
+            commits: vec![],
+            connections: vec![],
+            tags: vec![],
+        };
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(svg.contains("main"), "branch name should be displayed");
+        assert!(
+            svg.contains("fill=\"#ffffff\""),
+            "branch label text should be white"
+        );
+        assert!(
+            svg.contains(BRANCH_COLORS[0]),
+            "branch label should use its color"
+        );
+    }
+
+    #[test]
+    fn test_render_connection() {
+        let layout = GitGraphLayout {
+            width: 400.0,
+            height: 200.0,
+            branch_labels: vec![],
+            branch_lines: vec![],
+            commits: vec![],
+            connections: vec![PositionedConnection {
+                points: vec![(50.0, 50.0), (100.0, 50.0), (100.0, 100.0)],
+                color_index: 1,
+            }],
+            tags: vec![],
+        };
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(svg.contains("<path"), "connection should render as a path");
+        assert!(
+            svg.contains(BRANCH_COLORS[1]),
+            "connection should use its branch color"
+        );
+    }
+
+    #[test]
+    fn test_tag_escapes_xml() {
+        let layout = GitGraphLayout {
+            width: 400.0,
+            height: 200.0,
+            branch_labels: vec![],
+            branch_lines: vec![],
+            commits: vec![],
+            connections: vec![],
+            tags: vec![PositionedTag {
+                text: "v<1>&2".into(),
+                x: 100.0,
+                y: 30.0,
+                width: 60.0,
+            }],
+        };
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        assert!(
+            svg.contains("v&lt;1&gt;&amp;2"),
+            "tag text should be XML-escaped"
+        );
+    }
+
+    #[test]
+    fn test_render_all_layers_ordering() {
+        let layout = GitGraphLayout {
+            width: 400.0,
+            height: 200.0,
+            branch_labels: vec![PositionedBranchLabel {
+                name: "dev".into(),
+                x: 50.0,
+                y: 30.0,
+                width: 40.0,
+                color_index: 1,
+            }],
+            branch_lines: vec![PositionedBranchLine {
+                y: 50.0,
+                x_start: 10.0,
+                x_end: 300.0,
+                color_index: 0,
+                is_dotted: false,
+            }],
+            commits: vec![PositionedCommit {
+                id: "c1".into(),
+                x: 100.0,
+                y: 50.0,
+                commit_type: CommitType::Normal,
+                color_index: 0,
+                is_merge: false,
+            }],
+            connections: vec![PositionedConnection {
+                points: vec![(100.0, 50.0), (150.0, 80.0)],
+                color_index: 1,
+            }],
+            tags: vec![PositionedTag {
+                text: "v1".into(),
+                x: 100.0,
+                y: 20.0,
+                width: 30.0,
+            }],
+        };
+        let theme = Theme::default();
+        let svg = render_svg(&layout, &theme).unwrap();
+
+        // All layers should be present
+        assert!(svg.contains("<line")); // branch lines
+        assert!(svg.contains("<path")); // connections
+        assert!(svg.contains("<circle")); // commits
+        assert!(svg.contains("v1")); // tags
+        assert!(svg.contains("dev")); // branch labels
+        assert!(svg.contains("c1")); // commit hashes
+    }
 }

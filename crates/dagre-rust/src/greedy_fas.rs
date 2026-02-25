@@ -205,3 +205,170 @@ fn assign_bucket(
         buckets[idx].enqueue(v.to_string());
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::graph::Graph;
+
+    #[test]
+    fn empty_graph_returns_empty_fas() {
+        let g: Graph<(), (), ()> = Graph::new();
+        let result = greedy_fas(&g, None);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn single_node_returns_empty_fas() {
+        let mut g: Graph<(), (), ()> = Graph::new();
+        g.set_node("a", None);
+        let result = greedy_fas(&g, None);
+        assert!(result.is_empty());
+    }
+
+    #[test]
+    fn acyclic_graph_returns_empty_fas() {
+        let mut g: Graph<(), (), ()> = Graph::new();
+        g.set_node("a", None);
+        g.set_node("b", None);
+        g.set_node("c", None);
+        g.set_edge("a", "b", None, None);
+        g.set_edge("b", "c", None, None);
+        let result = greedy_fas(&g, None);
+        assert!(
+            result.is_empty(),
+            "acyclic graph should have empty FAS, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn simple_cycle_returns_one_edge() {
+        let mut g: Graph<(), (), ()> = Graph::new();
+        g.set_node("a", None);
+        g.set_node("b", None);
+        g.set_edge("a", "b", None, None);
+        g.set_edge("b", "a", None, None);
+        let result = greedy_fas(&g, None);
+        assert_eq!(
+            result.len(),
+            1,
+            "simple 2-node cycle should return 1 edge in FAS, got {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn triangle_cycle_returns_one_edge() {
+        let mut g: Graph<(), (), ()> = Graph::new();
+        g.set_node("a", None);
+        g.set_node("b", None);
+        g.set_node("c", None);
+        g.set_edge("a", "b", None, None);
+        g.set_edge("b", "c", None, None);
+        g.set_edge("c", "a", None, None);
+        let result = greedy_fas(&g, None);
+        assert!(
+            !result.is_empty(),
+            "triangle cycle should return at least 1 edge in FAS"
+        );
+        // Reversing the FAS edges should make the graph acyclic.
+        // Just verify we got a reasonable number.
+        assert!(result.len() <= 2);
+    }
+
+    #[test]
+    fn custom_weight_fn_is_used() {
+        let mut g: Graph<(), (), ()> = Graph::new();
+        g.set_node("a", None);
+        g.set_node("b", None);
+        g.set_edge("a", "b", None, None);
+        g.set_edge("b", "a", None, None);
+
+        let weight_fn = |_e: &Edge, _g: &Graph<(), (), ()>| -> f64 { 5.0 };
+        let result = greedy_fas(&g, Some(&weight_fn));
+        assert_eq!(result.len(), 1);
+    }
+
+    #[test]
+    fn chain_with_back_edge() {
+        let mut g: Graph<(), (), ()> = Graph::new();
+        for id in ["a", "b", "c", "d"] {
+            g.set_node(id, None);
+        }
+        g.set_edge("a", "b", None, None);
+        g.set_edge("b", "c", None, None);
+        g.set_edge("c", "d", None, None);
+        g.set_edge("d", "a", None, None); // back edge creating cycle
+        let result = greedy_fas(&g, None);
+        assert!(
+            !result.is_empty(),
+            "chain with back edge should have non-empty FAS"
+        );
+    }
+
+    #[test]
+    fn disconnected_graph_with_cycle() {
+        let mut g: Graph<(), (), ()> = Graph::new();
+        // Component 1: acyclic
+        g.set_node("a", None);
+        g.set_node("b", None);
+        g.set_edge("a", "b", None, None);
+        // Component 2: cyclic
+        g.set_node("x", None);
+        g.set_node("y", None);
+        g.set_edge("x", "y", None, None);
+        g.set_edge("y", "x", None, None);
+        let result = greedy_fas(&g, None);
+        assert_eq!(
+            result.len(),
+            1,
+            "only the cyclic component should contribute to FAS"
+        );
+    }
+
+    #[test]
+    fn assign_bucket_source_goes_to_last() {
+        let mut buckets = vec![
+            List::new(),
+            List::new(),
+            List::new(),
+            List::new(),
+            List::new(),
+        ];
+        let zero_idx = 2;
+        // in_weight=0 means source -> goes to last bucket
+        assign_bucket(&mut buckets, zero_idx, "src", 0.0, 5.0);
+        assert_eq!(buckets[4].dequeue(), Some("src".to_string()));
+    }
+
+    #[test]
+    fn assign_bucket_sink_goes_to_first() {
+        let mut buckets = vec![
+            List::new(),
+            List::new(),
+            List::new(),
+            List::new(),
+            List::new(),
+        ];
+        let zero_idx = 2;
+        // out_weight=0 means sink -> goes to bucket 0
+        assign_bucket(&mut buckets, zero_idx, "snk", 3.0, 0.0);
+        assert_eq!(buckets[0].dequeue(), Some("snk".to_string()));
+    }
+
+    #[test]
+    fn assign_bucket_balanced_goes_to_zero_idx() {
+        let mut buckets = vec![
+            List::new(),
+            List::new(),
+            List::new(),
+            List::new(),
+            List::new(),
+        ];
+        let zero_idx = 2;
+        // out_weight == in_weight => index = zero_idx
+        assign_bucket(&mut buckets, zero_idx, "bal", 3.0, 3.0);
+        assert_eq!(buckets[2].dequeue(), Some("bal".to_string()));
+    }
+}

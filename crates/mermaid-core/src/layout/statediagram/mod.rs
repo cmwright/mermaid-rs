@@ -424,7 +424,12 @@ fn convert_composite_to_subgraph(
 
     SubgraphDef {
         id: composite.id.clone(),
-        label: Some(composite.label.clone().unwrap_or_else(|| composite.id.clone())),
+        label: Some(
+            composite
+                .label
+                .clone()
+                .unwrap_or_else(|| composite.id.clone()),
+        ),
         direction: composite.direction,
         nodes,
         edges,
@@ -866,11 +871,19 @@ fn intersect_subgraph_boundary_toward(
     let abs_dy = dy.abs();
     if abs_dy * hw > abs_dx * hh {
         let y = if dy > 0.0 { cy + hh } else { cy - hh };
-        let x = if abs_dy > 1e-9 { cx + (y - cy) * dx / dy } else { cx };
+        let x = if abs_dy > 1e-9 {
+            cx + (y - cy) * dx / dy
+        } else {
+            cx
+        };
         (x, y)
     } else {
         let x = if dx > 0.0 { cx + hw } else { cx - hw };
-        let y = if abs_dx > 1e-9 { cy + (x - cx) * dy / dx } else { cy };
+        let y = if abs_dx > 1e-9 {
+            cy + (x - cx) * dy / dx
+        } else {
+            cy
+        };
         (x, y)
     }
 }
@@ -955,7 +968,14 @@ fn convert_from_flowchart_result(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::font::FontProvider;
+    use crate::layout::text_measure::TextMeasurer;
     use crate::parser::statediagram::parse_statediagram;
+
+    fn make_measurer(provider: &FontProvider) -> TextMeasurer<'_> {
+        let font = provider.font_ref().unwrap();
+        TextMeasurer::new(font, 14.0)
+    }
 
     #[test]
     fn transitions_to_composite_use_inner_start_end() {
@@ -998,7 +1018,9 @@ mod tests {
             "expected composite->external transition to source inner end"
         );
         assert!(
-            !fc.edges.iter().any(|e| e.from == "Active" || e.to == "Active"),
+            !fc.edges
+                .iter()
+                .any(|e| e.from == "Active" || e.to == "Active"),
             "composite id should not be used as flowchart edge endpoint when inner start/end exist"
         );
     }
@@ -1026,5 +1048,807 @@ mod tests {
             exit_edge.from, "Active",
             "composite exit should resolve to a concrete inner state"
         );
+    }
+
+    #[test]
+    fn collect_kinds_maps_all_state_kinds() {
+        let states = vec![
+            StateDef {
+                id: "s1".into(),
+                label: None,
+                kind: StateKind::Normal,
+                class_shorthand: None,
+            },
+            StateDef {
+                id: "s2".into(),
+                label: None,
+                kind: StateKind::Start,
+                class_shorthand: None,
+            },
+            StateDef {
+                id: "s3".into(),
+                label: None,
+                kind: StateKind::Fork,
+                class_shorthand: None,
+            },
+        ];
+        let mut map = HashMap::new();
+        collect_kinds(&states, &[], &mut map);
+        assert_eq!(map.len(), 3);
+        assert_eq!(map["s1"], StateKind::Normal);
+        assert_eq!(map["s2"], StateKind::Start);
+        assert_eq!(map["s3"], StateKind::Fork);
+    }
+
+    #[test]
+    fn collect_kinds_recurses_into_composites() {
+        let composites = vec![CompositeStateDef {
+            id: "comp".into(),
+            label: None,
+            direction: None,
+            states: vec![StateDef {
+                id: "inner".into(),
+                label: None,
+                kind: StateKind::Choice,
+                class_shorthand: None,
+            }],
+            transitions: vec![],
+            composites: vec![],
+            notes: vec![],
+            dividers: vec![],
+        }];
+        let mut map = HashMap::new();
+        collect_kinds(&[], &composites, &mut map);
+        assert_eq!(map["inner"], StateKind::Choice);
+    }
+
+    #[test]
+    fn convert_state_to_node_maps_shapes_correctly() {
+        let cases = vec![
+            (StateKind::Normal, NodeShape::RoundedRectangle),
+            (StateKind::Start, NodeShape::Circle),
+            (StateKind::End, NodeShape::DoubleCircle),
+            (StateKind::Fork, NodeShape::Rectangle),
+            (StateKind::Join, NodeShape::Rectangle),
+            (StateKind::Choice, NodeShape::Diamond),
+        ];
+        for (kind, expected_shape) in cases {
+            let state = StateDef {
+                id: "test".into(),
+                label: Some("Test".into()),
+                kind,
+                class_shorthand: None,
+            };
+            let node = convert_state_to_node(&state);
+            assert_eq!(
+                node.shape, expected_shape,
+                "StateKind::{:?} should map to {:?}",
+                kind, expected_shape
+            );
+        }
+    }
+
+    #[test]
+    fn convert_state_to_node_special_kinds_have_no_label() {
+        for kind in [StateKind::Start, StateKind::End, StateKind::Choice] {
+            let state = StateDef {
+                id: "x".into(),
+                label: Some("should be dropped".into()),
+                kind,
+                class_shorthand: None,
+            };
+            let node = convert_state_to_node(&state);
+            assert!(
+                node.label.is_none(),
+                "StateKind::{:?} should have no label",
+                kind
+            );
+        }
+    }
+
+    #[test]
+    fn convert_state_to_node_fork_join_have_space_label() {
+        for kind in [StateKind::Fork, StateKind::Join] {
+            let state = StateDef {
+                id: "fj".into(),
+                label: Some("ignored".into()),
+                kind,
+                class_shorthand: None,
+            };
+            let node = convert_state_to_node(&state);
+            assert_eq!(node.label, Some(" ".to_string()));
+        }
+    }
+
+    #[test]
+    fn convert_note_to_node_and_edge_without_target() {
+        let note = NoteDef {
+            id: Some("n1".into()),
+            target_state: None,
+            position: None,
+            text: "A note".into(),
+        };
+        let mut note_ids = Vec::new();
+        let (node, edge) = convert_note_to_node_and_edge(&note, &mut note_ids);
+        assert_eq!(node.id, "n1");
+        assert_eq!(node.label, Some("A note".into()));
+        assert!(edge.is_none(), "no edge when note has no target");
+        assert_eq!(note_ids, vec!["n1"]);
+    }
+
+    #[test]
+    fn convert_note_to_node_and_edge_with_target() {
+        let note = NoteDef {
+            id: None,
+            target_state: Some("stateA".into()),
+            position: None,
+            text: "Attached".into(),
+        };
+        let mut note_ids = Vec::new();
+        let (node, edge) = convert_note_to_node_and_edge(&note, &mut note_ids);
+        assert!(node.id.starts_with("__note_"));
+        let edge = edge.expect("should have edge when target is set");
+        assert_eq!(edge.from, "stateA");
+        assert_eq!(edge.to, node.id);
+        assert_eq!(edge.line_style, LineStyle::Dotted);
+        assert_eq!(edge.arrow_start, ArrowEnd::None);
+        assert_eq!(edge.arrow_end, ArrowEnd::None);
+    }
+
+    #[test]
+    fn convert_to_flowchart_ast_basic_diagram() {
+        let source = r#"stateDiagram-v2
+    [*] --> Idle
+    Idle --> Running
+    Running --> [*]"#;
+        let ast = parse_statediagram(source).unwrap();
+        let mut note_ids = Vec::new();
+        let fc = convert_to_flowchart_ast(&ast, &mut note_ids);
+
+        assert!(!fc.nodes.is_empty(), "should have nodes");
+        assert!(!fc.edges.is_empty(), "should have edges");
+        assert!(note_ids.is_empty(), "no notes in this diagram");
+    }
+
+    #[test]
+    fn convert_to_flowchart_ast_preserves_styling() {
+        let ast = StateDiagramAst {
+            direction: Direction::LeftToRight,
+            states: vec![StateDef {
+                id: "s1".into(),
+                label: Some("S1".into()),
+                kind: StateKind::Normal,
+                class_shorthand: None,
+            }],
+            transitions: vec![],
+            composites: vec![],
+            notes: vec![],
+            class_defs: vec![crate::ast::statediagram::ClassDef {
+                name: "myClass".into(),
+                properties: crate::ast::common::StyleProperties {
+                    fill: Some(crate::ast::common::Color::Hex("#f00".into())),
+                    ..Default::default()
+                },
+            }],
+            class_assignments: vec![crate::ast::statediagram::ClassAssignment {
+                node_ids: vec!["s1".into()],
+                class_name: "myClass".into(),
+            }],
+            style_overrides: vec![crate::ast::statediagram::StyleOverride {
+                node_id: "s1".into(),
+                properties: crate::ast::common::StyleProperties {
+                    stroke: Some(crate::ast::common::Color::Hex("#00f".into())),
+                    ..Default::default()
+                },
+            }],
+        };
+        let mut note_ids = Vec::new();
+        let fc = convert_to_flowchart_ast(&ast, &mut note_ids);
+        assert_eq!(fc.class_defs.len(), 1);
+        assert_eq!(fc.class_defs[0].name, "myClass");
+        assert_eq!(fc.class_assignments.len(), 1);
+        assert_eq!(fc.style_overrides.len(), 1);
+        assert_eq!(fc.direction, Direction::LeftToRight);
+    }
+
+    #[test]
+    fn convert_composite_to_subgraph_includes_dividers() {
+        let composite = CompositeStateDef {
+            id: "comp".into(),
+            label: Some("Composite".into()),
+            direction: None,
+            states: vec![],
+            transitions: vec![],
+            composites: vec![],
+            notes: vec![],
+            dividers: vec![
+                DividerDef { id: "div1".into() },
+                DividerDef { id: "div2".into() },
+            ],
+        };
+        let mut note_ids = Vec::new();
+        let sg = convert_composite_to_subgraph(&composite, &mut note_ids);
+        assert_eq!(sg.id, "comp");
+        assert_eq!(sg.label, Some("Composite".into()));
+        // Dividers become nodes inside the subgraph
+        assert_eq!(sg.nodes.len(), 2);
+        assert!(sg.nodes.iter().any(|n| n.id == "div1"));
+        assert!(sg.nodes.iter().any(|n| n.id == "div2"));
+    }
+
+    #[test]
+    fn convert_composite_to_subgraph_defaults_label_to_id() {
+        let composite = CompositeStateDef {
+            id: "NoLabel".into(),
+            label: None,
+            direction: None,
+            states: vec![],
+            transitions: vec![],
+            composites: vec![],
+            notes: vec![],
+            dividers: vec![],
+        };
+        let mut note_ids = Vec::new();
+        let sg = convert_composite_to_subgraph(&composite, &mut note_ids);
+        assert_eq!(sg.label, Some("NoLabel".into()));
+    }
+
+    #[test]
+    fn resolve_composite_transition_endpoint_no_match_returns_original() {
+        let result = resolve_composite_transition_endpoint("nonexistent", true, &[]);
+        assert_eq!(result, "nonexistent");
+    }
+
+    #[test]
+    fn resolve_composite_transition_endpoint_finds_start_for_incoming() {
+        let composites = vec![CompositeStateDef {
+            id: "Active".into(),
+            label: None,
+            direction: None,
+            states: vec![
+                StateDef {
+                    id: "inner_start".into(),
+                    label: None,
+                    kind: StateKind::Start,
+                    class_shorthand: None,
+                },
+                StateDef {
+                    id: "inner_state".into(),
+                    label: None,
+                    kind: StateKind::Normal,
+                    class_shorthand: None,
+                },
+            ],
+            transitions: vec![],
+            composites: vec![],
+            notes: vec![],
+            dividers: vec![],
+        }];
+        // is_source=false means incoming to composite, should find Start
+        let result = resolve_composite_transition_endpoint("Active", false, &composites);
+        assert_eq!(result, "inner_start");
+    }
+
+    #[test]
+    fn resolve_composite_transition_endpoint_finds_end_for_outgoing() {
+        let composites = vec![CompositeStateDef {
+            id: "Active".into(),
+            label: None,
+            direction: None,
+            states: vec![
+                StateDef {
+                    id: "inner_end".into(),
+                    label: None,
+                    kind: StateKind::End,
+                    class_shorthand: None,
+                },
+                StateDef {
+                    id: "inner_state".into(),
+                    label: None,
+                    kind: StateKind::Normal,
+                    class_shorthand: None,
+                },
+            ],
+            transitions: vec![],
+            composites: vec![],
+            notes: vec![],
+            dividers: vec![],
+        }];
+        // is_source=true means outgoing from composite, should find End
+        let result = resolve_composite_transition_endpoint("Active", true, &composites);
+        assert_eq!(result, "inner_end");
+    }
+
+    #[test]
+    fn resolve_composite_transition_endpoint_fallback_to_normal_state() {
+        let composites = vec![CompositeStateDef {
+            id: "Active".into(),
+            label: None,
+            direction: None,
+            states: vec![
+                StateDef {
+                    id: "first".into(),
+                    label: None,
+                    kind: StateKind::Normal,
+                    class_shorthand: None,
+                },
+                StateDef {
+                    id: "last".into(),
+                    label: None,
+                    kind: StateKind::Normal,
+                    class_shorthand: None,
+                },
+            ],
+            transitions: vec![],
+            composites: vec![],
+            notes: vec![],
+            dividers: vec![],
+        }];
+        // is_source=false (incoming) => first normal state
+        assert_eq!(
+            resolve_composite_transition_endpoint("Active", false, &composites),
+            "first"
+        );
+        // is_source=true (outgoing) => last normal state
+        assert_eq!(
+            resolve_composite_transition_endpoint("Active", true, &composites),
+            "last"
+        );
+    }
+
+    #[test]
+    fn make_cubic_bezier_bow_produces_valid_path() {
+        let path = make_cubic_bezier_bow(0.0, 0.0, 100.0, 0.0, 0.0, 1.0, 30.0);
+        assert!(path.starts_with("M "), "path should start with M command");
+        assert!(path.contains("C "), "path should contain C command");
+        // Parse out the endpoint to verify
+        let parts: Vec<&str> = path.split_whitespace().collect();
+        // M sx sy C cx1 cy1 cx2 cy2 ex ey
+        assert_eq!(parts.len(), 10);
+        assert_eq!(parts[0], "M");
+        assert_eq!(parts[3], "C");
+    }
+
+    #[test]
+    fn make_cubic_bezier_bow_control_points_offset_perpendicular() {
+        // Horizontal edge from (0,0) to (100,0), perpendicular is (0,1), bow=30
+        let path = make_cubic_bezier_bow(0.0, 0.0, 100.0, 0.0, 0.0, 1.0, 30.0);
+        let parts: Vec<f64> = path
+            .replace("M", "")
+            .replace("C", "")
+            .split_whitespace()
+            .map(|s| s.parse().unwrap())
+            .collect();
+        // parts: [sx, sy, cx1, cy1, cx2, cy2, ex, ey]
+        let cy1 = parts[3];
+        let cy2 = parts[5];
+        // Control points should be offset by bow (30.0) in the y direction
+        assert!(cy1 > 0.0, "cy1 should be positive (bowed downward)");
+        assert!(cy2 > 0.0, "cy2 should be positive (bowed downward)");
+    }
+
+    #[test]
+    fn separate_bidirectional_edges_bows_opposing_directions() {
+        let mut transitions = vec![
+            PositionedTransition {
+                from_id: "A".into(),
+                to_id: "B".into(),
+                line_style: LineStyle::Solid,
+                arrow_end: ArrowEnd::Arrow,
+                label: None,
+                label_x: None,
+                label_y: None,
+                label_width: None,
+                label_height: None,
+                points: vec![(0.0, 0.0), (100.0, 0.0)],
+                raw_path_d: None,
+            },
+            PositionedTransition {
+                from_id: "B".into(),
+                to_id: "A".into(),
+                line_style: LineStyle::Solid,
+                arrow_end: ArrowEnd::Arrow,
+                label: None,
+                label_x: None,
+                label_y: None,
+                label_width: None,
+                label_height: None,
+                points: vec![(100.0, 0.0), (0.0, 0.0)],
+                raw_path_d: None,
+            },
+        ];
+
+        separate_bidirectional_edges(&mut transitions);
+
+        assert!(
+            transitions[0].raw_path_d.is_some(),
+            "A→B should get a raw path"
+        );
+        assert!(
+            transitions[1].raw_path_d.is_some(),
+            "B→A should get a raw path"
+        );
+
+        // The two edges should bow in opposite directions
+        // Check that the apex points are on opposite sides
+        let apex_0 = transitions[0].points[1];
+        let apex_1 = transitions[1].points[1];
+        // For a horizontal edge, they should have opposite y values
+        assert!(
+            (apex_0.1 > 0.0 && apex_1.1 < 0.0) || (apex_0.1 < 0.0 && apex_1.1 > 0.0),
+            "bidirectional edges should bow to opposite sides: apex_0.y={}, apex_1.y={}",
+            apex_0.1,
+            apex_1.1
+        );
+    }
+
+    #[test]
+    fn separate_bidirectional_edges_no_op_for_unidirectional() {
+        let mut transitions = vec![PositionedTransition {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            line_style: LineStyle::Solid,
+            arrow_end: ArrowEnd::Arrow,
+            label: None,
+            label_x: None,
+            label_y: None,
+            label_width: None,
+            label_height: None,
+            points: vec![(0.0, 0.0), (100.0, 0.0)],
+            raw_path_d: None,
+        }];
+
+        separate_bidirectional_edges(&mut transitions);
+
+        assert!(
+            transitions[0].raw_path_d.is_none(),
+            "unidirectional edge should not get a raw path"
+        );
+    }
+
+    #[test]
+    fn expand_bounds_for_transitions_grows_for_out_of_bounds_points() {
+        let mut diagram = PositionedStateDiagram {
+            states: vec![],
+            transitions: vec![PositionedTransition {
+                from_id: "A".into(),
+                to_id: "B".into(),
+                line_style: LineStyle::Solid,
+                arrow_end: ArrowEnd::Arrow,
+                label: None,
+                label_x: None,
+                label_y: None,
+                label_width: None,
+                label_height: None,
+                points: vec![(0.0, 0.0), (200.0, 150.0)],
+                raw_path_d: None,
+            }],
+            composites: vec![],
+            notes: vec![],
+            width: 100.0,
+            height: 80.0,
+            direction: Direction::TopToBottom,
+        };
+
+        expand_bounds_for_transitions(&mut diagram);
+
+        assert!(
+            diagram.width >= 200.0,
+            "width should expand to cover point at x=200"
+        );
+        assert!(
+            diagram.height >= 150.0,
+            "height should expand to cover point at y=150"
+        );
+    }
+
+    #[test]
+    fn expand_bounds_shifts_negative_coords() {
+        let mut diagram = PositionedStateDiagram {
+            states: vec![PositionedState {
+                id: "s1".into(),
+                label: "S1".into(),
+                kind: StateKind::Normal,
+                style: Default::default(),
+                x: 50.0,
+                y: 50.0,
+                width: 40.0,
+                height: 20.0,
+            }],
+            transitions: vec![PositionedTransition {
+                from_id: "A".into(),
+                to_id: "B".into(),
+                line_style: LineStyle::Solid,
+                arrow_end: ArrowEnd::Arrow,
+                label: None,
+                label_x: None,
+                label_y: None,
+                label_width: None,
+                label_height: None,
+                points: vec![(-20.0, -10.0), (50.0, 50.0)],
+                raw_path_d: None,
+            }],
+            composites: vec![],
+            notes: vec![],
+            width: 100.0,
+            height: 80.0,
+            direction: Direction::TopToBottom,
+        };
+
+        expand_bounds_for_transitions(&mut diagram);
+
+        // After shifting, the state should have moved by (20, 10)
+        assert!(
+            diagram.states[0].x > 50.0,
+            "state x should be shifted positive"
+        );
+        assert!(
+            diagram.states[0].y > 50.0,
+            "state y should be shifted positive"
+        );
+        // All transition points should be non-negative
+        for &(px, py) in &diagram.transitions[0].points {
+            assert!(px >= 0.0, "shifted point x should be non-negative");
+            assert!(py >= 0.0, "shifted point y should be non-negative");
+        }
+    }
+
+    #[test]
+    fn intersect_subgraph_boundary_toward_from_above() {
+        let sg = flowchart::PositionedSubgraph {
+            id: "sg".into(),
+            label: None,
+            x: 50.0,
+            y: 50.0,
+            width: 100.0,
+            height: 80.0,
+            style: Default::default(),
+        };
+        // Point above the subgraph center
+        let result = intersect_subgraph_boundary_toward(&sg, (100.0, 0.0));
+        // Should intersect at the top boundary (y = 50.0)
+        assert!(
+            (result.1 - 50.0).abs() < 1.0,
+            "should intersect near top boundary, got y={}",
+            result.1
+        );
+    }
+
+    #[test]
+    fn intersect_subgraph_boundary_toward_from_right() {
+        let sg = flowchart::PositionedSubgraph {
+            id: "sg".into(),
+            label: None,
+            x: 50.0,
+            y: 50.0,
+            width: 100.0,
+            height: 80.0,
+            style: Default::default(),
+        };
+        // Point to the right of the subgraph center
+        let result = intersect_subgraph_boundary_toward(&sg, (300.0, 90.0));
+        // Should intersect at right boundary (x = 50 + 100/2 = 100 + 50 = 150)
+        assert!(
+            (result.0 - 150.0).abs() < 1.0,
+            "should intersect near right boundary, got x={}",
+            result.0
+        );
+    }
+
+    #[test]
+    fn convert_from_flowchart_result_separates_notes() {
+        let positioned = flowchart::PositionedGraph {
+            nodes: vec![
+                flowchart::PositionedNode {
+                    id: "s1".into(),
+                    label: "State 1".into(),
+                    x: 50.0,
+                    y: 50.0,
+                    width: 80.0,
+                    height: 40.0,
+                    shape: NodeShape::RoundedRectangle,
+                    style: Default::default(),
+                },
+                flowchart::PositionedNode {
+                    id: "__note_0".into(),
+                    label: "My note".into(),
+                    x: 200.0,
+                    y: 50.0,
+                    width: 100.0,
+                    height: 40.0,
+                    shape: NodeShape::Rectangle,
+                    style: Default::default(),
+                },
+            ],
+            edges: vec![],
+            subgraphs: vec![],
+            width: 300.0,
+            height: 100.0,
+            direction: Direction::TopToBottom,
+        };
+        let kind_map = HashMap::from([("s1".to_string(), StateKind::Normal)]);
+        let note_ids = vec!["__note_0".to_string()];
+
+        let result = convert_from_flowchart_result(positioned, &kind_map, &note_ids);
+
+        assert_eq!(result.states.len(), 1);
+        assert_eq!(result.states[0].id, "s1");
+        assert_eq!(result.notes.len(), 1);
+        assert_eq!(result.notes[0].id, "__note_0");
+        assert_eq!(result.notes[0].text, "My note");
+    }
+
+    #[test]
+    fn adjust_labels_for_nodes_pushes_overlapping_labels() {
+        use crate::layout::flowchart::{PositionedEdge, PositionedNode};
+
+        let nodes = vec![PositionedNode {
+            id: "blocker".into(),
+            label: "Blocker".into(),
+            x: 100.0,
+            y: 100.0,
+            width: 60.0,
+            height: 40.0,
+            shape: NodeShape::RoundedRectangle,
+            style: Default::default(),
+        }];
+
+        let mut edges = vec![PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            line_style: LineStyle::Solid,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::Arrow,
+            label: Some("test".into()),
+            label_x: Some(100.0), // directly on top of the node
+            label_y: Some(100.0),
+            label_width: Some(30.0),
+            label_height: Some(16.0),
+            points: vec![(0.0, 0.0), (200.0, 200.0)],
+        }];
+
+        adjust_labels_for_nodes(&mut edges, &nodes);
+
+        let new_x = edges[0].label_x.unwrap();
+        let new_y = edges[0].label_y.unwrap();
+        // Label should have been pushed away from the node center
+        let moved = (new_x - 100.0).abs() > 1.0 || (new_y - 100.0).abs() > 1.0;
+        assert!(
+            moved,
+            "label should be pushed away from overlapping node, got ({}, {})",
+            new_x, new_y
+        );
+    }
+
+    #[test]
+    fn adjust_labels_for_nodes_skips_edge_endpoints() {
+        use crate::layout::flowchart::{PositionedEdge, PositionedNode};
+
+        let nodes = vec![PositionedNode {
+            id: "source".into(),
+            label: "Source".into(),
+            x: 100.0,
+            y: 100.0,
+            width: 60.0,
+            height: 40.0,
+            shape: NodeShape::RoundedRectangle,
+            style: Default::default(),
+        }];
+
+        let mut edges = vec![PositionedEdge {
+            from_id: "source".into(), // edge starts from "source" node
+            to_id: "target".into(),
+            line_style: LineStyle::Solid,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::Arrow,
+            label: Some("test".into()),
+            label_x: Some(100.0),
+            label_y: Some(100.0),
+            label_width: Some(30.0),
+            label_height: Some(16.0),
+            points: vec![(100.0, 100.0), (200.0, 200.0)],
+        }];
+
+        adjust_labels_for_nodes(&mut edges, &nodes);
+
+        // Label should NOT be pushed away because the overlapping node is the edge's own endpoint
+        assert_eq!(edges[0].label_x, Some(100.0));
+        assert_eq!(edges[0].label_y, Some(100.0));
+    }
+
+    #[test]
+    fn layout_statediagram_basic_produces_valid_result() {
+        let source = r#"stateDiagram-v2
+    [*] --> Idle
+    Idle --> Running
+    Running --> [*]"#;
+        let ast = parse_statediagram(source).unwrap();
+        let provider = FontProvider::default();
+        let measurer = make_measurer(&provider);
+        let result = layout_statediagram(&ast, &measurer).unwrap();
+
+        assert!(!result.states.is_empty(), "should have states");
+        assert!(!result.transitions.is_empty(), "should have transitions");
+        assert!(result.width > 0.0, "width should be positive");
+        assert!(result.height > 0.0, "height should be positive");
+    }
+
+    #[test]
+    fn layout_statediagram_with_composites() {
+        let source = r#"stateDiagram-v2
+    [*] --> Active
+    state Active {
+        [*] --> Idle
+        Idle --> Processing
+        Processing --> [*]
+    }
+    Active --> [*]"#;
+        let ast = parse_statediagram(source).unwrap();
+        let provider = FontProvider::default();
+        let measurer = make_measurer(&provider);
+        let result = layout_statediagram(&ast, &measurer).unwrap();
+
+        assert!(!result.composites.is_empty(), "should have composites");
+        // Composite should have non-zero dimensions
+        let comp = &result.composites[0];
+        assert!(comp.width > 0.0);
+        assert!(comp.height > 0.0);
+    }
+
+    #[test]
+    fn layout_statediagram_with_notes() {
+        let source = r#"stateDiagram-v2
+    [*] --> Active
+    note right of Active: This is a note"#;
+        let ast = parse_statediagram(source).unwrap();
+        let provider = FontProvider::default();
+        let measurer = make_measurer(&provider);
+        let result = layout_statediagram(&ast, &measurer).unwrap();
+
+        assert!(!result.notes.is_empty(), "should have notes");
+        assert!(!result.notes[0].text.is_empty());
+    }
+
+    #[test]
+    fn layout_statediagram_with_fork_join() {
+        let source = r#"stateDiagram-v2
+    [*] --> fork1
+    state fork1 <<fork>>
+    fork1 --> A
+    fork1 --> B
+    A --> join1
+    B --> join1
+    state join1 <<join>>
+    join1 --> [*]"#;
+        let ast = parse_statediagram(source).unwrap();
+        let provider = FontProvider::default();
+        let measurer = make_measurer(&provider);
+        let result = layout_statediagram(&ast, &measurer).unwrap();
+
+        // Fork and join states should have small dimensions
+        let fork_state = result.states.iter().find(|s| s.id == "fork1");
+        let join_state = result.states.iter().find(|s| s.id == "join1");
+        assert!(fork_state.is_some(), "should find fork state");
+        assert!(join_state.is_some(), "should find join state");
+    }
+
+    #[test]
+    fn layout_statediagram_with_choice() {
+        let source = r#"stateDiagram-v2
+    [*] --> IsPositive
+    state IsPositive <<choice>>
+    IsPositive --> Yes: positive
+    IsPositive --> No: negative"#;
+        let ast = parse_statediagram(source).unwrap();
+        let provider = FontProvider::default();
+        let measurer = make_measurer(&provider);
+        let result = layout_statediagram(&ast, &measurer).unwrap();
+
+        let choice = result
+            .states
+            .iter()
+            .find(|s| s.id == "IsPositive")
+            .expect("should find choice state");
+        assert_eq!(choice.kind, StateKind::Choice);
     }
 }
