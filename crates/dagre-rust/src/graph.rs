@@ -427,6 +427,47 @@ impl<N: Default + Clone, E: Default + Clone, G: Default + Clone> Graph<N, E, G> 
         })
     }
 
+    /// Iterate over neighbor names without allocating a Vec.
+    /// Calls the closure with each unique neighbor name.
+    /// Returns false if the node doesn't exist.
+    pub fn for_each_neighbor<F>(&self, v: &str, mut f: F) -> bool
+    where
+        F: FnMut(&str),
+    {
+        let preds = match self.preds.get(v) {
+            Some(m) => m,
+            None => return false,
+        };
+        let sucs = self.sucs.get(v);
+        // For undirected graphs, preds and sucs overlap — need dedup.
+        // For directed graphs, they're disjoint.
+        if self.is_directed {
+            for k in preds.keys() {
+                f(k);
+            }
+            if let Some(s) = sucs {
+                for k in s.keys() {
+                    if !preds.contains_key(k) {
+                        f(k);
+                    }
+                }
+            }
+        } else {
+            // Undirected: preds == sucs, just iterate one
+            for k in preds.keys() {
+                f(k);
+            }
+            if let Some(s) = sucs {
+                for k in s.keys() {
+                    if !preds.contains_key(k) {
+                        f(k);
+                    }
+                }
+            }
+        }
+        true
+    }
+
     pub fn is_leaf(&self, v: &str) -> bool {
         let neighbors = if self.is_directed {
             self.successors(v)

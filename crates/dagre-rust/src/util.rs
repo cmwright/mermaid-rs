@@ -44,12 +44,18 @@ pub fn add_dummy_node(
 
 /// Returns a new graph with only simple edges. Multi-edges are aggregated
 /// by summing weights and taking max minlen.
+/// Only copies the `rank` field of NodeLabel to avoid expensive cloning.
 pub fn simplify(g: &LayoutGraph) -> LayoutGraph {
     let mut simplified = LayoutGraph::new();
     simplified.set_graph(g.graph().clone());
 
     for v in g.node_ids() {
-        simplified.set_node(v, g.node(v).cloned());
+        // Only copy the rank field — callers (network_simplex) only need rank
+        let mut label = NodeLabel::default();
+        if let Some(orig) = g.node(v) {
+            label.rank = orig.rank;
+        }
+        simplified.set_node(v, Some(label));
     }
 
     for eid in g.edge_ids() {
@@ -116,15 +122,50 @@ pub fn as_non_compound_graph(g: &LayoutGraph) -> LayoutGraph {
     simplified
 }
 
+/// Lightweight version of as_non_compound_graph for ranking only.
+/// Only copies the `rank` field of NodeLabel to avoid expensive cloning.
+pub fn as_non_compound_graph_for_rank(g: &LayoutGraph) -> LayoutGraph {
+    let mut simplified = LayoutGraph::with_options(&GraphOptions {
+        directed: true,
+        multigraph: g.is_multigraph(),
+        compound: false,
+    });
+    simplified.set_graph(g.graph().clone());
+
+    for v in g.node_ids() {
+        if g.children(Some(v)).is_none_or(|c| c.is_empty()) {
+            let mut label = NodeLabel::default();
+            if let Some(orig) = g.node(v) {
+                label.rank = orig.rank;
+            }
+            simplified.set_node(v, Some(label));
+        }
+    }
+
+    for eid in g.edge_ids() {
+        let eobj = match g.edge_obj_by_id(eid) {
+            Some(e) => e,
+            None => continue,
+        };
+        if simplified.has_node(&eobj.v) && simplified.has_node(&eobj.w) {
+            simplified.set_edge_with_obj(eobj, g.edge_label_by_id(eid).cloned());
+        }
+    }
+
+    simplified
+}
+
 /// Returns a map from node -> { successor -> weight sum }.
 pub fn successor_weights(g: &LayoutGraph) -> HashMap<String, HashMap<String, f64>> {
     let mut result = HashMap::new();
     for v in g.node_ids() {
         let mut sucs: HashMap<String, f64> = HashMap::new();
-        if let Some(edges) = g.out_edges(v, None) {
-            for e in &edges {
-                let w = g.edge_by_obj(e).map(|l| l.weight).unwrap_or(0.0);
-                *sucs.entry(e.w.clone()).or_insert(0.0) += w;
+        if let Some(edge_ids) = g.out_edge_ids(v) {
+            for eid in edge_ids {
+                let w = g.edge_label_by_id(eid).map(|l| l.weight).unwrap_or(0.0);
+                if let Some(eobj) = g.edge_obj_by_id(eid) {
+                    *sucs.entry(eobj.w.clone()).or_insert(0.0) += w;
+                }
             }
         }
         result.insert(v.clone(), sucs);
@@ -137,10 +178,12 @@ pub fn predecessor_weights(g: &LayoutGraph) -> HashMap<String, HashMap<String, f
     let mut result = HashMap::new();
     for v in g.node_ids() {
         let mut preds: HashMap<String, f64> = HashMap::new();
-        if let Some(edges) = g.in_edges(v, None) {
-            for e in &edges {
-                let w = g.edge_by_obj(e).map(|l| l.weight).unwrap_or(0.0);
-                *preds.entry(e.v.clone()).or_insert(0.0) += w;
+        if let Some(edge_ids) = g.in_edge_ids(v) {
+            for eid in edge_ids {
+                let w = g.edge_label_by_id(eid).map(|l| l.weight).unwrap_or(0.0);
+                if let Some(eobj) = g.edge_obj_by_id(eid) {
+                    *preds.entry(eobj.v.clone()).or_insert(0.0) += w;
+                }
             }
         }
         result.insert(v.clone(), preds);

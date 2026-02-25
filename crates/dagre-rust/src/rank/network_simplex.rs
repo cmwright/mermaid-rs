@@ -178,11 +178,15 @@ fn dfs_assign_low_lim(
 ) -> i64 {
     let low = next_lim;
 
-    let neighbors = tree.neighbors(v).unwrap_or_default();
-    for w in &neighbors {
-        if Some(w.as_str()) != parent {
-            next_lim = dfs_assign_low_lim(tree, next_lim, w, Some(v));
+    // Collect neighbor names to avoid borrowing tree while mutating
+    let mut neighbor_names = Vec::new();
+    tree.for_each_neighbor(v, |w| {
+        if Some(w) != parent {
+            neighbor_names.push(w.to_string());
         }
+    });
+    for w in &neighbor_names {
+        next_lim = dfs_assign_low_lim(tree, next_lim, w, Some(v));
     }
 
     let label = tree.node_mut(v).unwrap();
@@ -310,32 +314,37 @@ fn is_tree_edge(tree: &LayoutGraph, u: &str, v: &str) -> bool {
 
 /// Pre-order DFS traversal.
 fn preorder_traversal(g: &LayoutGraph, root: &str) -> Vec<String> {
-    let mut result = Vec::new();
-    fn dfs(g: &LayoutGraph, v: &str, parent: Option<&str>, result: &mut Vec<String>) {
-        result.push(v.to_string());
-        for w in g.neighbors(v).unwrap_or_default() {
-            if Some(w.as_str()) != parent {
-                dfs(g, &w, Some(v), result);
+    let mut result = Vec::with_capacity(g.node_count());
+    let mut stack: Vec<(String, Option<String>)> = vec![(root.to_string(), None)];
+    while let Some((v, parent)) = stack.pop() {
+        result.push(v.clone());
+        // Push neighbors in reverse so first neighbor is processed first
+        let mut children = Vec::new();
+        g.for_each_neighbor(&v, |w| {
+            if parent.as_deref() != Some(w) {
+                children.push(w.to_string());
             }
+        });
+        for child in children.into_iter().rev() {
+            stack.push((child, Some(v.clone())));
         }
     }
-
-    dfs(g, root, None, &mut result);
     result
 }
 
 /// Post-order DFS traversal from a single root.
 fn postorder_traversal(g: &LayoutGraph, root: &str) -> Vec<String> {
-    let mut result = Vec::new();
-    fn dfs(g: &LayoutGraph, v: &str, parent: Option<&str>, result: &mut Vec<String>) {
-        for w in g.neighbors(v).unwrap_or_default() {
-            if Some(w.as_str()) != parent {
-                dfs(g, &w, Some(v), result);
+    // Iterative post-order: use two stacks
+    let mut stack: Vec<(String, Option<String>)> = vec![(root.to_string(), None)];
+    let mut visit_order = Vec::with_capacity(g.node_count());
+    while let Some((v, parent)) = stack.pop() {
+        visit_order.push(v.clone());
+        g.for_each_neighbor(&v, |w| {
+            if parent.as_deref() != Some(w) {
+                stack.push((w.to_string(), Some(v.clone())));
             }
-        }
-        result.push(v.to_string());
+        });
     }
-
-    dfs(g, root, None, &mut result);
-    result
+    visit_order.reverse();
+    visit_order
 }

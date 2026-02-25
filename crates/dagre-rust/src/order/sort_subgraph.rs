@@ -15,15 +15,13 @@ pub fn sort_subgraph(
     bias_right: bool,
 ) -> sort::SortResult {
     let mut movable = g.children(Some(v)).unwrap_or_default();
-    let node = g.node(v).cloned();
+    let node = g.node(v);
 
     let bl = node
-        .as_ref()
         .and_then(|n| n.border_left.first())
         .and_then(|o| o.as_deref())
         .map(|s| s.to_string());
     let br = node
-        .as_ref()
         .and_then(|n| n.border_right.first())
         .and_then(|o| o.as_deref())
         .map(|s| s.to_string());

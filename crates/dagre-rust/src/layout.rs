@@ -61,7 +61,7 @@ fn run_layout(g: &mut LayoutGraph, opts: &LayoutOpts) {
 
     // Rank using a non-compound copy
     {
-        let mut ncg = util::as_non_compound_graph(g);
+        let mut ncg = util::as_non_compound_graph_for_rank(g);
         rank::rank(&mut ncg);
         for v in ncg.node_ids() {
             if let Some(rank) = ncg.node(v).and_then(|n| n.rank)
@@ -125,7 +125,7 @@ fn run_layout_profiled(g: &mut LayoutGraph, opts: &LayoutOpts) -> LayoutProfile 
 
     let s = Instant::now();
     {
-        let mut ncg = util::as_non_compound_graph(g);
+        let mut ncg = util::as_non_compound_graph_for_rank(g);
         rank::rank(&mut ncg);
         for v in ncg.node_ids() {
             if let Some(rank) = ncg.node(v).and_then(|n| n.rank)

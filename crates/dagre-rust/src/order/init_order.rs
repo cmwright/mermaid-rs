@@ -34,8 +34,10 @@ pub fn init_order(g: &LayoutGraph) -> Vec<Vec<String>> {
         {
             layers[rank as usize].push(v.to_string());
         }
-        for w in g.successors(v).unwrap_or_default() {
-            dfs(g, &w, visited, layers);
+        if let Some(succ_map) = g.successor_map(v) {
+            for w in succ_map.keys() {
+                dfs(g, w, visited, layers);
+            }
         }
     }
 
