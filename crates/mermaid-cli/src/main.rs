@@ -81,12 +81,14 @@ fn determine_output_format(
     if let Some(fmt) = format_arg {
         match fmt.as_str() {
             "png" => mermaid_core::OutputFormat::Png,
+            "ascii" => mermaid_core::OutputFormat::Ascii,
             _ => mermaid_core::OutputFormat::Svg,
         }
     } else if let Some(ref path) = output_path {
         // Auto-detect from extension
         match path.extension().and_then(|e| e.to_str()) {
             Some("png") => mermaid_core::OutputFormat::Png,
+            Some("txt") => mermaid_core::OutputFormat::Ascii,
             _ => mermaid_core::OutputFormat::Svg,
         }
     } else {
@@ -140,6 +142,7 @@ fn determine_output_path(
             .unwrap_or("output");
         let ext = match output_format {
             mermaid_core::OutputFormat::Png => "png",
+            mermaid_core::OutputFormat::Ascii => "txt",
             _ => "svg",
         };
         PathBuf::from(format!("{}.{}", stem, ext))

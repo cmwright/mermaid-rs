@@ -231,7 +231,10 @@ mod tests {
     fn basis_curve_three_points_has_cubic_bezier() {
         let path = build_basis_curve_path(&[(0.0, 0.0), (10.0, 20.0), (30.0, 40.0)]);
         assert!(path.starts_with("M "), "path should start with M: {path}");
-        assert!(path.contains("C "), "path should contain cubic bezier C: {path}");
+        assert!(
+            path.contains("C "),
+            "path should contain cubic bezier C: {path}"
+        );
     }
 
     #[test]
@@ -270,7 +273,10 @@ mod tests {
     fn orthogonal_two_points_horizontal_first() {
         // dx (50) > dy (5) => horizontal-first branch
         let path = build_orthogonal_path(&[(0.0, 0.0), (50.0, 5.0)]);
-        assert!(path.starts_with("M 0 0"), "path should start with M 0 0: {path}");
+        assert!(
+            path.starts_with("M 0 0"),
+            "path should start with M 0 0: {path}"
+        );
         assert!(path.contains("Q "), "path should contain a Q arc: {path}");
         assert!(path.contains("L 50 5"), "path should end at target: {path}");
     }
@@ -279,7 +285,10 @@ mod tests {
     fn orthogonal_two_points_vertical_first() {
         // dy (50) > dx (5) => vertical-first branch (the else at line ~139)
         let path = build_orthogonal_path(&[(0.0, 0.0), (5.0, 50.0)]);
-        assert!(path.starts_with("M 0 0"), "path should start with M 0 0: {path}");
+        assert!(
+            path.starts_with("M 0 0"),
+            "path should start with M 0 0: {path}"
+        );
         assert!(path.contains("Q "), "path should contain a Q arc: {path}");
         assert!(path.contains("L 5 50"), "path should end at target: {path}");
     }
@@ -289,8 +298,14 @@ mod tests {
         // First segment: dx=50 > dy=10  => horizontal first, so prev_horizontal=true
         // Second segment: from (50,10) to (55,80) => prev_horizontal branch in "else" block
         let path = build_orthogonal_path(&[(0.0, 0.0), (50.0, 10.0), (55.0, 80.0)]);
-        assert!(path.starts_with("M 0 0"), "path should start with M 0 0: {path}");
-        assert!(path.contains("L 55 80"), "path should reach final point: {path}");
+        assert!(
+            path.starts_with("M 0 0"),
+            "path should start with M 0 0: {path}"
+        );
+        assert!(
+            path.contains("L 55 80"),
+            "path should reach final point: {path}"
+        );
     }
 
     #[test]
@@ -298,8 +313,14 @@ mod tests {
         // First segment: dy=50 > dx=5  => vertical first, so prev_horizontal=false
         // Second segment: from (5,50) to (80,55) => !prev_horizontal branch
         let path = build_orthogonal_path(&[(0.0, 0.0), (5.0, 50.0), (80.0, 55.0)]);
-        assert!(path.starts_with("M 0 0"), "path should start with M 0 0: {path}");
-        assert!(path.contains("L 80 55"), "path should reach final point: {path}");
+        assert!(
+            path.starts_with("M 0 0"),
+            "path should start with M 0 0: {path}"
+        );
+        assert!(
+            path.contains("L 80 55"),
+            "path should reach final point: {path}"
+        );
     }
 
     #[test]
@@ -308,8 +329,14 @@ mod tests {
         // Second segment: from (50,5) to (50,60) => x2==x1, skips the Q arc in the
         //   prev_horizontal branch (line 165 condition).
         let path = build_orthogonal_path(&[(0.0, 0.0), (50.0, 5.0), (50.0, 60.0)]);
-        assert!(path.starts_with("M 0 0"), "path should start with M 0 0: {path}");
-        assert!(path.contains("L 50 60"), "path should reach final point: {path}");
+        assert!(
+            path.starts_with("M 0 0"),
+            "path should start with M 0 0: {path}"
+        );
+        assert!(
+            path.contains("L 50 60"),
+            "path should reach final point: {path}"
+        );
 
         // The second segment should NOT have a Q for the corner because x2==x1.
         // Count Q commands - only the first segment should produce one.
@@ -326,8 +353,14 @@ mod tests {
         // Second segment: from (5,50) to (60,50) => y2==y1, skips the Q arc in the
         //   !prev_horizontal branch (line 174 condition).
         let path = build_orthogonal_path(&[(0.0, 0.0), (5.0, 50.0), (60.0, 50.0)]);
-        assert!(path.starts_with("M 0 0"), "path should start with M 0 0: {path}");
-        assert!(path.contains("L 60 50"), "path should reach final point: {path}");
+        assert!(
+            path.starts_with("M 0 0"),
+            "path should start with M 0 0: {path}"
+        );
+        assert!(
+            path.contains("L 60 50"),
+            "path should reach final point: {path}"
+        );
 
         // The second segment should NOT have a Q for the corner because y2==y1.
         let q_count = path.matches("Q ").count();

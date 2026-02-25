@@ -659,7 +659,10 @@ mod tests {
     #[test]
     fn test_hex_luminance_malformed() {
         let lum = hex_luminance("#ab");
-        assert!((lum - 0.5).abs() < 0.01, "malformed hex should fallback to 0.5");
+        assert!(
+            (lum - 0.5).abs() < 0.01,
+            "malformed hex should fallback to 0.5"
+        );
     }
 
     #[test]

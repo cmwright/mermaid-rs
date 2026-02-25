@@ -11,6 +11,10 @@ use crate::layout::sequence;
 use crate::layout::statediagram;
 use crate::layout::text_measure::TextMeasurer;
 use crate::parser::{self, DiagramKind};
+#[cfg(feature = "ascii")]
+use crate::render::ascii_flowchart;
+#[cfg(feature = "ascii")]
+use crate::render::ascii_sequence;
 #[cfg(feature = "png")]
 use crate::render::png;
 use crate::render::svg_architecture;
@@ -30,14 +34,18 @@ pub enum OutputFormat {
     Svg,
     #[cfg(feature = "png")]
     Png,
+    #[cfg(feature = "ascii")]
+    Ascii,
 }
 
-/// The output of rendering, which can be either text (SVG) or binary (PNG).
+/// The output of rendering, which can be either text (SVG/ASCII) or binary (PNG).
 #[derive(Debug, Clone)]
 pub enum RenderOutput {
     Svg(String),
     #[cfg(feature = "png")]
     Png(Vec<u8>),
+    #[cfg(feature = "ascii")]
+    Ascii(String),
 }
 
 impl RenderOutput {
@@ -47,6 +55,8 @@ impl RenderOutput {
             RenderOutput::Svg(s) => Some(s),
             #[cfg(feature = "png")]
             RenderOutput::Png(_) => None,
+            #[cfg(feature = "ascii")]
+            RenderOutput::Ascii(_) => None,
         }
     }
 
@@ -56,25 +66,44 @@ impl RenderOutput {
         match self {
             RenderOutput::Svg(_) => None,
             RenderOutput::Png(b) => Some(b),
+            #[cfg(feature = "ascii")]
+            RenderOutput::Ascii(_) => None,
         }
     }
 
-    /// Convert to bytes (UTF-8 for SVG, raw bytes for PNG).
+    /// Get the ASCII text if this is ASCII output.
+    #[cfg(feature = "ascii")]
+    pub fn as_ascii(&self) -> Option<&str> {
+        match self {
+            RenderOutput::Ascii(s) => Some(s),
+            RenderOutput::Svg(_) => None,
+            #[cfg(feature = "png")]
+            RenderOutput::Png(_) => None,
+        }
+    }
+
+    /// Convert to bytes (UTF-8 for SVG/ASCII, raw bytes for PNG).
     pub fn into_bytes(self) -> Vec<u8> {
         match self {
             RenderOutput::Svg(s) => s.into_bytes(),
             #[cfg(feature = "png")]
             RenderOutput::Png(b) => b,
+            #[cfg(feature = "ascii")]
+            RenderOutput::Ascii(s) => s.into_bytes(),
         }
     }
 
-    /// Convert to SVG string, returning an error if this is PNG output.
+    /// Convert to SVG string, returning an error if this is not SVG output.
     pub fn into_svg(self) -> crate::error::Result<String> {
         match self {
             RenderOutput::Svg(s) => Ok(s),
             #[cfg(feature = "png")]
             RenderOutput::Png(_) => Err(crate::error::MermaidError::Render(
                 "Expected SVG output, but got PNG".to_string(),
+            )),
+            #[cfg(feature = "ascii")]
+            RenderOutput::Ascii(_) => Err(crate::error::MermaidError::Render(
+                "Expected SVG output, but got ASCII".to_string(),
             )),
         }
     }
@@ -87,6 +116,25 @@ impl RenderOutput {
                 "Expected PNG output, but got SVG".to_string(),
             )),
             RenderOutput::Png(b) => Ok(b),
+            #[cfg(feature = "ascii")]
+            RenderOutput::Ascii(_) => Err(crate::error::MermaidError::Render(
+                "Expected PNG output, but got ASCII".to_string(),
+            )),
+        }
+    }
+
+    /// Convert to ASCII string, returning an error if this is not ASCII output.
+    #[cfg(feature = "ascii")]
+    pub fn into_ascii(self) -> crate::error::Result<String> {
+        match self {
+            RenderOutput::Ascii(s) => Ok(s),
+            RenderOutput::Svg(_) => Err(crate::error::MermaidError::Render(
+                "Expected ASCII output, but got SVG".to_string(),
+            )),
+            #[cfg(feature = "png")]
+            RenderOutput::Png(_) => Err(crate::error::MermaidError::Render(
+                "Expected ASCII output, but got PNG".to_string(),
+            )),
         }
     }
 }
@@ -116,6 +164,13 @@ impl Default for RenderConfig {
 /// Top-level render function: detect diagram type, parse, layout, render.
 pub fn render(source: &str, config: &RenderConfig) -> Result<RenderOutput> {
     let kind = parser::detect_diagram_kind(source)?;
+
+    // ASCII output path: skip SVG entirely, render directly to text
+    #[cfg(feature = "ascii")]
+    if config.output_format == OutputFormat::Ascii {
+        return render_ascii(source, config, kind);
+    }
+
     let svg = match kind {
         DiagramKind::Architecture => render_architecture_svg(source, config)?,
         DiagramKind::ErDiagram => render_er_diagram_svg(source, config)?,
@@ -135,7 +190,37 @@ pub fn render(source: &str, config: &RenderConfig) -> Result<RenderOutput> {
             let png = png::render_png(&svg, config)?;
             Ok(RenderOutput::Png(png))
         }
+        #[cfg(feature = "ascii")]
+        OutputFormat::Ascii => unreachable!("ASCII handled above"),
     }
+}
+
+/// Render directly to ASCII text output.
+#[cfg(feature = "ascii")]
+fn render_ascii(source: &str, config: &RenderConfig, kind: DiagramKind) -> Result<RenderOutput> {
+    let text = match kind {
+        DiagramKind::Flowchart => {
+            let ast = crate::parser::flowchart::parse_flowchart(source)?;
+            let font_ref = config.font_provider.font_ref()?;
+            let measurer = TextMeasurer::new(font_ref, config.theme.font_size as f32);
+            let positioned = flowchart::layout_flowchart(&ast, &measurer)?;
+            ascii_flowchart::render_ascii(&positioned)?
+        }
+        DiagramKind::Sequence => {
+            let ast = crate::parser::sequence::parse_sequence(source)?;
+            let font_ref = config.font_provider.font_ref()?;
+            let measurer = TextMeasurer::new(font_ref, config.theme.font_size as f32);
+            let layout = sequence::layout_sequence(&ast, &measurer, &config.theme)?;
+            ascii_sequence::render_ascii(&layout)?
+        }
+        other => {
+            return Err(crate::error::MermaidError::Render(format!(
+                "ASCII output is not yet supported for {:?} diagrams",
+                other
+            )));
+        }
+    };
+    Ok(RenderOutput::Ascii(text))
 }
 
 fn render_er_diagram_svg(source: &str, config: &RenderConfig) -> Result<String> {
@@ -340,9 +425,13 @@ mod tests {
     #[test]
     fn render_pie() {
         let config = RenderConfig::default();
-        let out = render(r#"pie
+        let out = render(
+            r#"pie
     "a" : 1
-    "b" : 2"#, &config).unwrap();
+    "b" : 2"#,
+            &config,
+        )
+        .unwrap();
         let svg = out.as_svg().unwrap();
         assert!(svg.contains("<svg"));
     }
@@ -350,7 +439,11 @@ mod tests {
     #[test]
     fn render_gantt() {
         let config = RenderConfig::default();
-        let out = render("gantt\n  title X\n  section S\n  A: 2024-01-01, 1d", &config).unwrap();
+        let out = render(
+            "gantt\n  title X\n  section S\n  A: 2024-01-01, 1d",
+            &config,
+        )
+        .unwrap();
         let svg = out.as_svg().unwrap();
         assert!(svg.contains("<svg"));
     }

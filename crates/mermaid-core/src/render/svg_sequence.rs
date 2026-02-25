@@ -719,7 +719,10 @@ mod tests {
         let svg = render_svg(&layout, &theme).unwrap();
 
         // Stick figure head (circle)
-        assert!(svg.contains("<circle"), "expected <circle for stick figure head");
+        assert!(
+            svg.contains("<circle"),
+            "expected <circle for stick figure head"
+        );
         // Body, arms, and legs are all <line> elements — at least 4 lines
         let line_count = svg.matches("<line ").count();
         // 4 lines per stick figure * 2 (top + bottom rendering) = 8
@@ -784,7 +787,10 @@ mod tests {
         assert!(svg.contains("second line"), "expected second line text");
         assert!(svg.contains("third line"), "expected third line text");
         let tspan_count = svg.matches("<tspan").count();
-        assert_eq!(tspan_count, 3, "expected 3 <tspan> elements for 3-line note");
+        assert_eq!(
+            tspan_count, 3,
+            "expected 3 <tspan> elements for 3-line note"
+        );
     }
 
     #[test]
@@ -862,10 +868,7 @@ mod tests {
 
         let svg = render_svg(&layout, &theme).unwrap();
 
-        assert!(
-            svg.contains("<circle"),
-            "expected <circle> for autonumber"
-        );
+        assert!(svg.contains("<circle"), "expected <circle> for autonumber");
         // The number text "1"
         assert!(
             svg.contains(">1</text>"),
@@ -900,7 +903,10 @@ mod tests {
             "expected number '3' in autonumber circle"
         );
         // Self-message autonumber is positioned at from_x - 12.0 = 88
-        assert!(svg.contains("cx=\"88\""), "expected cx=88 for self-message autonumber");
+        assert!(
+            svg.contains("cx=\"88\""),
+            "expected cx=88 for self-message autonumber"
+        );
     }
 
     // ── 6. Multi-line message label ────────────────────────────
@@ -1023,7 +1029,9 @@ mod tests {
 
         for (arrow, expected_marker) in &arrows {
             let mut layout = empty_layout();
-            layout.messages.push(make_message(50.0, 200.0, 100.0, *arrow, "msg"));
+            layout
+                .messages
+                .push(make_message(50.0, 200.0, 100.0, *arrow, "msg"));
             let svg = render_svg(&layout, &theme).unwrap();
             assert!(
                 svg.contains(expected_marker),
@@ -1036,7 +1044,9 @@ mod tests {
         // SolidParen and DottedParen produce no marker-end
         for arrow in &[ArrowType::SolidParen, ArrowType::DottedParen] {
             let mut layout = empty_layout();
-            layout.messages.push(make_message(50.0, 200.0, 100.0, *arrow, "msg"));
+            layout
+                .messages
+                .push(make_message(50.0, 200.0, 100.0, *arrow, "msg"));
             let svg = render_svg(&layout, &theme).unwrap();
             assert!(
                 !svg.contains("marker-end"),
@@ -1052,7 +1062,9 @@ mod tests {
             ArrowType::DottedCross,
         ] {
             let mut layout = empty_layout();
-            layout.messages.push(make_message(50.0, 200.0, 100.0, *arrow, "msg"));
+            layout
+                .messages
+                .push(make_message(50.0, 200.0, 100.0, *arrow, "msg"));
             let svg = render_svg(&layout, &theme).unwrap();
             // The defs section always has stroke, but the message line should also have dasharray
             assert!(
@@ -1275,10 +1287,7 @@ mod tests {
             svg.contains("<line "),
             "expected <line> element for lifeline"
         );
-        assert!(
-            svg.contains("x1=\"100\""),
-            "expected lifeline at x=100"
-        );
+        assert!(svg.contains("x1=\"100\""), "expected lifeline at x=100");
     }
 
     #[test]
@@ -1385,10 +1394,7 @@ mod tests {
         // Block background rect
         assert!(svg.contains("<rect "), "expected block background <rect>");
         // Tab polygon
-        assert!(
-            svg.contains("<polygon "),
-            "expected block tab <polygon>"
-        );
+        assert!(svg.contains("<polygon "), "expected block tab <polygon>");
         // Label
         assert!(svg.contains("[forever]"), "expected condition label");
     }
@@ -1481,14 +1487,8 @@ mod tests {
         let svg = render_svg(&layout, &theme).unwrap();
 
         assert!(svg.contains(">par</text>"), "expected block kind 'par'");
-        assert!(
-            svg.contains("[parallel tasks]"),
-            "expected condition label"
-        );
-        assert!(
-            svg.contains("[and task B]"),
-            "expected first divider label"
-        );
+        assert!(svg.contains("[parallel tasks]"), "expected condition label");
+        assert!(svg.contains("[and task B]"), "expected first divider label");
         assert!(
             svg.contains("[and task C]"),
             "expected second divider label"

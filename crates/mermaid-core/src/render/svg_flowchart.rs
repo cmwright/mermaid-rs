@@ -607,12 +607,7 @@ fn render_edge_path(svg: &mut String, edge: &PositionedEdge, theme: &Theme) {
     let _ = write!(
         svg,
         r#"<path d="{}" fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round"{}{}{}/>"#,
-        path_d,
-        line_color,
-        stroke_width,
-        dasharray,
-        m_end,
-        m_start,
+        path_d, line_color, stroke_width, dasharray, m_end, m_start,
     );
     svg.push('\n');
 }
@@ -794,12 +789,7 @@ mod tests {
     }
 
     /// Helper: build an edge with the given type and optional label.
-    fn make_edge(
-        from: &str,
-        to: &str,
-        edge_type: EdgeType,
-        label: Option<&str>,
-    ) -> PositionedEdge {
+    fn make_edge(from: &str, to: &str, edge_type: EdgeType, label: Option<&str>) -> PositionedEdge {
         let has_label = label.is_some();
         let (line_style, arrow_end) = edge_type.to_parts();
         PositionedEdge {
@@ -855,17 +845,35 @@ mod tests {
         let svg = render_svg(&graph, &theme).unwrap();
 
         // Rectangle: plain <rect> without rx
-        assert!(svg.contains("<rect x="), "SVG should contain <rect> for Rectangle");
+        assert!(
+            svg.contains("<rect x="),
+            "SVG should contain <rect> for Rectangle"
+        );
         // RoundedRectangle: <rect> with rx attribute
-        assert!(svg.contains("rx="), "SVG should contain rx= for RoundedRectangle");
+        assert!(
+            svg.contains("rx="),
+            "SVG should contain rx= for RoundedRectangle"
+        );
         // Circle: <circle> element
-        assert!(svg.contains("<circle"), "SVG should contain <circle> for Circle");
+        assert!(
+            svg.contains("<circle"),
+            "SVG should contain <circle> for Circle"
+        );
         // Diamond: <polygon> element
-        assert!(svg.contains("<polygon"), "SVG should contain <polygon> for Diamond");
+        assert!(
+            svg.contains("<polygon"),
+            "SVG should contain <polygon> for Diamond"
+        );
         // Subroutine: <rect> and <line> elements
-        assert!(svg.contains("<line"), "SVG should contain <line> for Subroutine");
+        assert!(
+            svg.contains("<line"),
+            "SVG should contain <line> for Subroutine"
+        );
         // Cylinder: <ellipse> element
-        assert!(svg.contains("<ellipse"), "SVG should contain <ellipse> for Cylinder");
+        assert!(
+            svg.contains("<ellipse"),
+            "SVG should contain <ellipse> for Cylinder"
+        );
         // Verify the SVG is well-formed
         assert!(svg.contains("</svg>"), "SVG should be well-formed");
     }
@@ -1399,7 +1407,10 @@ mod tests {
         let theme = Theme::default();
         let svg = render_svg(&graph, &theme).unwrap();
 
-        assert!(svg.contains("<polygon"), "TrapezoidAlt should use <polygon>");
+        assert!(
+            svg.contains("<polygon"),
+            "TrapezoidAlt should use <polygon>"
+        );
     }
 
     #[test]
@@ -1606,7 +1617,10 @@ mod tests {
         let graph = make_graph(nodes, vec![edge], vec![]);
         let theme = Theme::default();
         let svg = render_svg(&graph, &theme).unwrap();
-        assert!(svg.contains("fallback"), "edge label should appear even without measured dims");
+        assert!(
+            svg.contains("fallback"),
+            "edge label should appear even without measured dims"
+        );
     }
 
     #[test]
@@ -1773,11 +1787,29 @@ mod tests {
         let theme = Theme::default();
         let svg = render_svg(&graph, &theme).unwrap();
 
-        assert!(svg.contains(r#"id="arrowhead""#), "should have arrowhead marker");
-        assert!(svg.contains(r#"id="arrowhead-start""#), "should have arrowhead-start marker");
-        assert!(svg.contains(r#"id="circle-end""#), "should have circle-end marker");
-        assert!(svg.contains(r#"id="circle-start""#), "should have circle-start marker");
-        assert!(svg.contains(r#"id="cross-end""#), "should have cross-end marker");
-        assert!(svg.contains(r#"id="cross-start""#), "should have cross-start marker");
+        assert!(
+            svg.contains(r#"id="arrowhead""#),
+            "should have arrowhead marker"
+        );
+        assert!(
+            svg.contains(r#"id="arrowhead-start""#),
+            "should have arrowhead-start marker"
+        );
+        assert!(
+            svg.contains(r#"id="circle-end""#),
+            "should have circle-end marker"
+        );
+        assert!(
+            svg.contains(r#"id="circle-start""#),
+            "should have circle-start marker"
+        );
+        assert!(
+            svg.contains(r#"id="cross-end""#),
+            "should have cross-end marker"
+        );
+        assert!(
+            svg.contains(r#"id="cross-start""#),
+            "should have cross-start marker"
+        );
     }
 }

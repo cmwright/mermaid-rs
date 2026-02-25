@@ -320,7 +320,10 @@ mod tests {
         let theme = Theme::default();
         let svg = render_svg(&layout, &theme).unwrap();
         // The large slice (80%) spans > 180°, so the large_arc flag should be 1
-        assert!(svg.contains(" 1 1 "), "expected large_arc=1 for >180° slice");
+        assert!(
+            svg.contains(" 1 1 "),
+            "expected large_arc=1 for >180° slice"
+        );
     }
 
     #[test]
@@ -349,6 +352,9 @@ mod tests {
         };
         let theme = Theme::default();
         let svg = render_svg(&layout, &theme).unwrap();
-        assert!(!svg.contains("2%"), "tiny slice (<3%) should not show percentage label");
+        assert!(
+            !svg.contains("2%"),
+            "tiny slice (<3%) should not show percentage label"
+        );
     }
 }

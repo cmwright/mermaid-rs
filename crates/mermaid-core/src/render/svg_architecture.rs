@@ -223,7 +223,7 @@ fn render_subgraph(svg: &mut String, sg: &PositionedSubgraph, theme: &Theme) {
                 );
                 svg.push('\n');
             }
-            sg.x + 28.0  // icon (6 + 18) + 4px gap
+            sg.x + 28.0 // icon (6 + 18) + 4px gap
         } else {
             sg.x + 8.0
         };
@@ -289,12 +289,7 @@ fn render_edge(svg: &mut String, edge: &PositionedEdge, theme: &Theme) {
     let _ = write!(
         svg,
         r#"<path d="{}" fill="none" stroke="{}" stroke-width="{}" stroke-linecap="round" stroke-linejoin="round"{}{}{}/>"#,
-        path_d,
-        line_color,
-        stroke_width,
-        dasharray,
-        m_end,
-        m_start,
+        path_d, line_color, stroke_width, dasharray, m_end, m_start,
     );
     svg.push('\n');
 
@@ -411,9 +406,15 @@ mod tests {
         let content = content_after_defs(&svg);
 
         // Blue icon box
-        assert!(content.contains(r##"fill="#3b82f6""##), "missing blue box: {svg}");
+        assert!(
+            content.contains(r##"fill="#3b82f6""##),
+            "missing blue box: {svg}"
+        );
         // Nested icon SVG with white stroke
-        assert!(content.contains(r#"stroke="white""#), "missing white stroke icon: {svg}");
+        assert!(
+            content.contains(r#"stroke="white""#),
+            "missing white stroke icon: {svg}"
+        );
         // 24×24 icon dimensions
         assert!(
             content.contains(r#"width="24" height="24""#),
@@ -425,7 +426,10 @@ mod tests {
             "missing server icon paths: {svg}"
         );
         // Label text
-        assert!(content.contains(">Web Server<"), "missing label text: {svg}");
+        assert!(
+            content.contains(">Web Server<"),
+            "missing label text: {svg}"
+        );
     }
 
     #[test]
@@ -453,7 +457,10 @@ mod tests {
         let svg = render_svg(&graph, &Theme::default()).unwrap();
         let content = content_after_defs(&svg);
 
-        assert!(content.contains("<circle"), "missing junction circle: {svg}");
+        assert!(
+            content.contains("<circle"),
+            "missing junction circle: {svg}"
+        );
         // Should not have the blue icon box
         assert!(
             !content.contains(r##"fill="#3b82f6""##),
@@ -482,9 +489,15 @@ mod tests {
             "missing 18x18 group icon: {svg}"
         );
         // Cloud icon path data
-        assert!(content.contains("M17.5 19H9"), "missing cloud icon paths: {svg}");
+        assert!(
+            content.contains("M17.5 19H9"),
+            "missing cloud icon paths: {svg}"
+        );
         // Label text
-        assert!(content.contains(">API Layer<"), "missing group label: {svg}");
+        assert!(
+            content.contains(">API Layer<"),
+            "missing group label: {svg}"
+        );
     }
 
     #[test]
@@ -502,7 +515,10 @@ mod tests {
         let svg = render_svg(&graph, &Theme::default()).unwrap();
         let content = content_after_defs(&svg);
 
-        assert!(content.contains(">Plain Group<"), "missing group label: {svg}");
+        assert!(
+            content.contains(">Plain Group<"),
+            "missing group label: {svg}"
+        );
         // No inline icon SVG
         assert!(
             !content.contains(r#"width="18" height="18""#),

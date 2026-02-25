@@ -304,22 +304,23 @@ fn render_note(svg: &mut String, note: &PositionedNote, theme: &Theme) {
     let hh = note.height / 2.0;
     let fold = 8.0;
 
-    let _ = write!(
-        svg,
-        r#"<g transform="translate({}, {})">"#,
-        note.x, note.y
-    );
+    let _ = write!(svg, r#"<g transform="translate({}, {})">"#, note.x, note.y);
     svg.push('\n');
 
     // Note body (rectangle with corner fold)
     let _ = write!(
         svg,
         r#"  <path d="M {} {} L {} {} L {} {} L {} {} L {} {} Z" fill="{}" stroke="{}" stroke-width="1"/>"#,
-        -hw, -hh,              // top-left
-        hw - fold, -hh,        // top-right before fold
-        hw, -hh + fold,        // fold corner
-        hw, hh,                // bottom-right
-        -hw, hh,               // bottom-left
+        -hw,
+        -hh, // top-left
+        hw - fold,
+        -hh, // top-right before fold
+        hw,
+        -hh + fold, // fold corner
+        hw,
+        hh, // bottom-right
+        -hw,
+        hh, // bottom-left
         theme.sequence.note_fill.to_css(),
         theme.sequence.note_border.to_css(),
     );
@@ -329,9 +330,12 @@ fn render_note(svg: &mut String, note: &PositionedNote, theme: &Theme) {
     let _ = write!(
         svg,
         r#"  <path d="M {} {} L {} {} L {} {} Z" fill="none" stroke="{}" stroke-width="1"/>"#,
-        hw - fold, -hh,
-        hw - fold, -hh + fold,
-        hw, -hh + fold,
+        hw - fold,
+        -hh,
+        hw - fold,
+        -hh + fold,
+        hw,
+        -hh + fold,
         theme.sequence.note_border.to_css(),
     );
     svg.push('\n');
@@ -407,8 +411,12 @@ fn render_transition(svg: &mut String, transition: &PositionedTransition, theme:
     svg.push('\n');
 
     // Transition label
-    if let (Some(label), Some(lx), Some(ly)) = (&transition.label, transition.label_x, transition.label_y) {
-        let label_w = transition.label_width.unwrap_or(label.len() as f64 * 8.0 + 10.0);
+    if let (Some(label), Some(lx), Some(ly)) =
+        (&transition.label, transition.label_x, transition.label_y)
+    {
+        let label_w = transition
+            .label_width
+            .unwrap_or(label.len() as f64 * 8.0 + 10.0);
         let label_h = transition.label_height.unwrap_or(20.0);
         let _ = write!(
             svg,

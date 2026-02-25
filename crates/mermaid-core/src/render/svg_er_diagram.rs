@@ -19,8 +19,7 @@ pub fn render_svg(diagram: &PositionedErDiagram, theme: &Theme) -> Result<String
     let view_w = diagram.width + 2.0 * SVG_PADDING;
     let view_h = diagram.height + 2.0 * SVG_PADDING;
 
-    let est_capacity =
-        2048 + diagram.entities.len() * 500 + diagram.relationships.len() * 400;
+    let est_capacity = 2048 + diagram.entities.len() * 500 + diagram.relationships.len() * 400;
     let mut svg = String::with_capacity(est_capacity);
 
     // SVG header
@@ -90,8 +89,12 @@ fn render_entity(svg: &mut String, entity: &PositionedEntity, theme: &Theme) {
     let _ = write!(
         svg,
         r#"  <rect x="{}" y="{}" width="{}" height="{}" fill="{}" stroke="{}" stroke-width="1.5"/>"#,
-        -hw, -hh, entity.width, entity.height,
-        er.entity_fill.to_css(), er.entity_border.to_css(),
+        -hw,
+        -hh,
+        entity.width,
+        entity.height,
+        er.entity_fill.to_css(),
+        er.entity_border.to_css(),
     );
     svg.push('\n');
 
@@ -102,7 +105,10 @@ fn render_entity(svg: &mut String, entity: &PositionedEntity, theme: &Theme) {
     let _ = write!(
         svg,
         r#"  <rect x="{}" y="{}" width="{}" height="{}" fill="{}" stroke="none"/>"#,
-        inner_x, -hh + inset, inner_w, entity.header_height - inset,
+        inner_x,
+        -hh + inset,
+        inner_w,
+        entity.header_height - inset,
         er.entity_header_fill.to_css(),
     );
     svg.push('\n');
@@ -123,7 +129,10 @@ fn render_entity(svg: &mut String, entity: &PositionedEntity, theme: &Theme) {
         let _ = write!(
             svg,
             r#"  <line x1="{}" y1="{}" x2="{}" y2="{}" stroke="{}" stroke-width="1"/>"#,
-            -hw, divider_y, hw, divider_y,
+            -hw,
+            divider_y,
+            hw,
+            divider_y,
             er.entity_border.to_css(),
         );
         svg.push('\n');
@@ -140,7 +149,10 @@ fn render_entity(svg: &mut String, entity: &PositionedEntity, theme: &Theme) {
                     let _ = write!(
                         svg,
                         r#"  <rect x="{}" y="{}" width="{}" height="{}" fill="{}" stroke="none"/>"#,
-                        inner_x, row_y, inner_w, row_h,
+                        inner_x,
+                        row_y,
+                        inner_w,
+                        row_h,
                         er.attr_row_alt_fill.to_css(),
                     );
                     svg.push('\n');
@@ -157,7 +169,8 @@ fn render_entity(svg: &mut String, entity: &PositionedEntity, theme: &Theme) {
             let _ = write!(
                 svg,
                 r#"  <text class="er-attr-text" x="{}" y="{}" dominant-baseline="central" fill="{}">{}</text>"#,
-                col_x, text_y,
+                col_x,
+                text_y,
                 er.entity_text.to_css(),
                 escape_xml(&attr.type_name),
             );
@@ -168,7 +181,8 @@ fn render_entity(svg: &mut String, entity: &PositionedEntity, theme: &Theme) {
             let _ = write!(
                 svg,
                 r#"  <text class="er-attr-text" x="{}" y="{}" dominant-baseline="central" font-weight="bold" fill="{}">{}</text>"#,
-                col_x, text_y,
+                col_x,
+                text_y,
                 er.entity_text.to_css(),
                 escape_xml(&attr.name),
             );
@@ -186,7 +200,8 @@ fn render_entity(svg: &mut String, entity: &PositionedEntity, theme: &Theme) {
                 let _ = write!(
                     svg,
                     r#"  <text class="er-attr-text" x="{}" y="{}" dominant-baseline="central" fill="{}" font-style="italic">{}</text>"#,
-                    col_x, text_y,
+                    col_x,
+                    text_y,
                     er.entity_text.to_css(),
                     key_str,
                 );
@@ -199,7 +214,8 @@ fn render_entity(svg: &mut String, entity: &PositionedEntity, theme: &Theme) {
                 let _ = write!(
                     svg,
                     r#"  <text class="er-attr-text" x="{}" y="{}" dominant-baseline="central" fill="{}" opacity="0.7">{}</text>"#,
-                    col_x, text_y,
+                    col_x,
+                    text_y,
                     er.entity_text.to_css(),
                     escape_xml(comment),
                 );
@@ -246,7 +262,17 @@ fn render_relationship(svg: &mut String, rel: &PositionedRelationship, theme: &T
         } else {
             (0.0, 1.0)
         };
-        draw_cardinality_symbols(svg, rel.cardinality_from, ex, ey, dx, dy, &line_color, &bg_color, stroke_width);
+        draw_cardinality_symbols(
+            svg,
+            rel.cardinality_from,
+            ex,
+            ey,
+            dx,
+            dy,
+            &line_color,
+            &bg_color,
+            stroke_width,
+        );
     }
 
     // Draw cardinality symbols at the end (entity B side)
@@ -262,7 +288,17 @@ fn render_relationship(svg: &mut String, rel: &PositionedRelationship, theme: &T
         } else {
             (0.0, -1.0)
         };
-        draw_cardinality_symbols(svg, rel.cardinality_to, ex, ey, dx, dy, &line_color, &bg_color, stroke_width);
+        draw_cardinality_symbols(
+            svg,
+            rel.cardinality_to,
+            ex,
+            ey,
+            dx,
+            dy,
+            &line_color,
+            &bg_color,
+            stroke_width,
+        );
     }
 
     // Relationship label at midpoint
@@ -282,7 +318,8 @@ fn render_relationship(svg: &mut String, rel: &PositionedRelationship, theme: &T
         let _ = write!(
             svg,
             r#"<text class="er-edge-label" x="{}" y="{}" text-anchor="middle" dominant-baseline="central" fill="{}">{}</text>"#,
-            lx, ly,
+            lx,
+            ly,
             theme.text_color.to_css(),
             escape_xml(label),
         );
@@ -340,9 +377,12 @@ fn draw_cardinality_symbols(
 /// Draw a perpendicular line crossing the path at the given offset from the entity edge.
 fn draw_perp_line(
     svg: &mut String,
-    ex: f64, ey: f64,
-    dx: f64, dy: f64,
-    nx: f64, ny: f64,
+    ex: f64,
+    ey: f64,
+    dx: f64,
+    dy: f64,
+    nx: f64,
+    ny: f64,
     offset: f64,
     color: &str,
     stroke_width: f64,
@@ -365,8 +405,10 @@ fn draw_perp_line(
 /// Filled with background color to mask the line underneath.
 fn draw_zero_circle(
     svg: &mut String,
-    ex: f64, ey: f64,
-    dx: f64, dy: f64,
+    ex: f64,
+    ey: f64,
+    dx: f64,
+    dy: f64,
     offset: f64,
     color: &str,
     bg_color: &str,
@@ -387,9 +429,12 @@ fn draw_zero_circle(
 /// `base_offset`: how far from entity edge the convergence point is
 fn draw_crows_foot(
     svg: &mut String,
-    ex: f64, ey: f64,
-    dx: f64, dy: f64,
-    nx: f64, ny: f64,
+    ex: f64,
+    ey: f64,
+    dx: f64,
+    dy: f64,
+    nx: f64,
+    ny: f64,
     tip_offset: f64,
     base_offset: f64,
     color: &str,

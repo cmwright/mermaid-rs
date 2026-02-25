@@ -390,7 +390,10 @@ mod tests {
         let svg = render_svg(&layout, &theme).unwrap();
         // Cloud shape is rendered as a <path> with arc commands
         assert!(svg.contains("<path"), "cloud must render a <path> element");
-        assert!(svg.contains(" a "), "cloud path must contain arc ('a') commands");
+        assert!(
+            svg.contains(" a "),
+            "cloud path must contain arc ('a') commands"
+        );
         assert!(svg.contains("Clouds"));
     }
 
@@ -401,7 +404,10 @@ mod tests {
         let svg = render_svg(&layout, &theme).unwrap();
         // Bang shape is rendered as a <path> with L (line-to) commands for jagged edges
         assert!(svg.contains("<path"), "bang must render a <path> element");
-        assert!(svg.contains(" L "), "bang path must contain line-to ('L') commands");
+        assert!(
+            svg.contains(" L "),
+            "bang path must contain line-to ('L') commands"
+        );
         assert!(svg.contains("Boom"));
     }
 
@@ -414,7 +420,10 @@ mod tests {
             svg.contains("<polygon"),
             "hexagon must render a <polygon> element"
         );
-        assert!(svg.contains("points="), "polygon must have a points attribute");
+        assert!(
+            svg.contains("points="),
+            "polygon must have a points attribute"
+        );
         assert!(svg.contains("Hex"));
     }
 
@@ -436,7 +445,10 @@ mod tests {
         let layout = single_node_layout("Rounded", MindmapNodeShape::RoundedRect, 1, 0);
         let theme = Theme::default();
         let svg = render_svg(&layout, &theme).unwrap();
-        assert!(svg.contains("<rect"), "rounded rect must render a <rect> element");
+        assert!(
+            svg.contains("<rect"),
+            "rounded rect must render a <rect> element"
+        );
         assert!(
             svg.contains(r#"rx="5""#),
             "rounded rect shape must have rx=\"5\""
@@ -450,7 +462,10 @@ mod tests {
         let theme = Theme::default();
         let svg = render_svg(&layout, &theme).unwrap();
         // Default shape renders as a rounded rect in mindmaps
-        assert!(svg.contains("<rect"), "default shape must render a <rect> element");
+        assert!(
+            svg.contains("<rect"),
+            "default shape must render a <rect> element"
+        );
         assert!(
             svg.contains(r#"rx="5""#),
             "default shape must render as rounded rect with rx=\"5\""
@@ -470,11 +485,11 @@ mod tests {
         assert!(svg.contains("Line1"), "first line text must be present");
         assert!(svg.contains("Line2"), "second line text must be present");
         // Should contain dy attributes for positioning
-        assert!(svg.contains("dy="), "tspan elements must have dy attributes");
         assert!(
-            svg.contains(r#"x="0""#),
-            "tspan elements must reset x to 0"
+            svg.contains("dy="),
+            "tspan elements must have dy attributes"
         );
+        assert!(svg.contains(r#"x="0""#), "tspan elements must reset x to 0");
     }
 
     #[test]
@@ -507,7 +522,10 @@ mod tests {
         };
         let theme = Theme::default();
         let svg = render_svg(&layout, &theme).unwrap();
-        assert!(svg.contains("mindmap-edge"), "edge must have mindmap-edge class");
+        assert!(
+            svg.contains("mindmap-edge"),
+            "edge must have mindmap-edge class"
+        );
         // depth 0 => stroke-width 6
         assert!(
             svg.contains(r#"stroke-width="6""#),
@@ -682,7 +700,7 @@ mod tests {
         let theme = Theme::default();
         let svg = render_svg(&layout, &theme).unwrap();
         let stroke_color = SECTION_COLORS[0].1; // "#9370DB"
-        // The rect's fill and stroke should both be the stroke color
+                                                // The rect's fill and stroke should both be the stroke color
         let expected_fill = format!(r#"fill="{}""#, stroke_color);
         let expected_stroke = format!(r#"stroke="{}""#, stroke_color);
         assert!(

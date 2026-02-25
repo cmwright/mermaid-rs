@@ -7,6 +7,10 @@ edition.workspace = true
 name = "mermaid"
 path = "src/main.rs"
 
+[features]
+default = ["ascii"]
+ascii = ["mermaid-core/ascii"]
+
 [dependencies]
 mermaid-core = { path = "../mermaid-core" }
 clap = { version = "4", features = ["derive"] }

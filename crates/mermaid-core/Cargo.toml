@@ -4,9 +4,10 @@ version.workspace = true
 edition.workspace = true
 
 [features]
-default = ["png"]
+default = ["png", "ascii"]
 wasm = ["chrono/wasmbind"]
 png = ["dep:resvg", "dep:png"]
+ascii = []
 
 [dependencies]
 pest = "2.7"

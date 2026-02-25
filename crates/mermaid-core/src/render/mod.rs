@@ -1,3 +1,9 @@
+#[cfg(feature = "ascii")]
+pub mod ascii_canvas;
+#[cfg(feature = "ascii")]
+pub mod ascii_flowchart;
+#[cfg(feature = "ascii")]
+pub mod ascii_sequence;
 pub mod html_util;
 pub mod icons;
 #[cfg(feature = "png")]
