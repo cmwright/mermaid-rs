@@ -14,7 +14,7 @@ fn setup_test_dir() -> (TempDir, std::path::PathBuf, std::path::PathBuf) {
 
 #[test]
 fn test_cli_version() {
-    let mut cmd = cargo_bin_cmd!("mermaid");
+    let mut cmd = cargo_bin_cmd!("mmrs");
     cmd.arg("--version");
     cmd.assert()
         .success()
@@ -23,11 +23,11 @@ fn test_cli_version() {
 
 #[test]
 fn test_cli_help() {
-    let mut cmd = cargo_bin_cmd!("mermaid");
+    let mut cmd = cargo_bin_cmd!("mmrs");
     cmd.arg("--help");
     cmd.assert()
         .success()
-        .stdout(predicate::str::contains("mermaid"))
+        .stdout(predicate::str::contains("mmrs"))
         .stdout(predicate::str::contains("-i"))
         .stdout(predicate::str::contains("-o"))
         .stdout(predicate::str::contains("-f"));
@@ -38,7 +38,7 @@ fn test_cli_basic_svg_rendering() {
     let (temp_dir, input_path, _output_path) = setup_test_dir();
     fs::write(&input_path, "flowchart TD\n    A --> B\n").unwrap();
 
-    let mut cmd = cargo_bin_cmd!("mermaid");
+    let mut cmd = cargo_bin_cmd!("mmrs");
     cmd.current_dir(&temp_dir);
     cmd.args(["-i", input_path.to_str().unwrap()]);
     let output = cmd.output().unwrap();
@@ -70,7 +70,7 @@ fn test_cli_png_rendering_with_format_flag() {
 
     let png_output = output_path.with_extension("png");
 
-    let mut cmd = cargo_bin_cmd!("mermaid");
+    let mut cmd = cargo_bin_cmd!("mmrs");
     cmd.current_dir(&temp_dir);
     cmd.args([
         "-i",
@@ -104,7 +104,7 @@ fn test_cli_png_rendering_by_extension() {
 
     let png_output = output_path.with_extension("png");
 
-    let mut cmd = cargo_bin_cmd!("mermaid");
+    let mut cmd = cargo_bin_cmd!("mmrs");
     cmd.current_dir(&temp_dir);
     cmd.args([
         "-i",
@@ -141,7 +141,7 @@ fn test_cli_flowchart_diagram() {
     )
     .unwrap();
 
-    let mut cmd = cargo_bin_cmd!("mermaid");
+    let mut cmd = cargo_bin_cmd!("mmrs");
     cmd.current_dir(&temp_dir);
     cmd.args(["-i", input_path.to_str().unwrap()]);
     let output = cmd.output().unwrap();
@@ -169,7 +169,7 @@ fn test_cli_pie_chart() {
     )
     .unwrap();
 
-    let mut cmd = cargo_bin_cmd!("mermaid");
+    let mut cmd = cargo_bin_cmd!("mmrs");
     cmd.current_dir(&temp_dir);
     cmd.args(["-i", input_path.to_str().unwrap()]);
     let output = cmd.output().unwrap();
@@ -197,7 +197,7 @@ fn test_cli_sequence_diagram() {
     )
     .unwrap();
 
-    let mut cmd = cargo_bin_cmd!("mermaid");
+    let mut cmd = cargo_bin_cmd!("mmrs");
     cmd.current_dir(&temp_dir);
     cmd.args(["-i", input_path.to_str().unwrap()]);
     let output = cmd.output().unwrap();
@@ -227,7 +227,7 @@ fn test_cli_gitgraph() {
     )
     .unwrap();
 
-    let mut cmd = cargo_bin_cmd!("mermaid");
+    let mut cmd = cargo_bin_cmd!("mmrs");
     cmd.current_dir(&temp_dir);
     cmd.args(["-i", input_path.to_str().unwrap()]);
     let output = cmd.output().unwrap();
@@ -248,7 +248,7 @@ fn test_cli_with_theme() {
     let (temp_dir, input_path, _output_path) = setup_test_dir();
     fs::write(&input_path, "flowchart TD\n    A --> B\n").unwrap();
 
-    let mut cmd = cargo_bin_cmd!("mermaid");
+    let mut cmd = cargo_bin_cmd!("mmrs");
     cmd.current_dir(&temp_dir);
     cmd.args(["-i", input_path.to_str().unwrap(), "-t", "dark"]);
     let output = cmd.output().unwrap();
@@ -269,7 +269,7 @@ fn test_cli_with_background_color() {
     let (temp_dir, input_path, _output_path) = setup_test_dir();
     fs::write(&input_path, "flowchart TD\n    A --> B\n").unwrap();
 
-    let mut cmd = cargo_bin_cmd!("mermaid");
+    let mut cmd = cargo_bin_cmd!("mmrs");
     cmd.current_dir(&temp_dir);
     cmd.args(["-i", input_path.to_str().unwrap(), "-b", "#ff0000"]);
     let output = cmd.output().unwrap();
@@ -290,7 +290,7 @@ fn test_cli_with_width() {
     let (temp_dir, input_path, _output_path) = setup_test_dir();
     fs::write(&input_path, "flowchart TD\n    A --> B\n").unwrap();
 
-    let mut cmd = cargo_bin_cmd!("mermaid");
+    let mut cmd = cargo_bin_cmd!("mmrs");
     cmd.current_dir(&temp_dir);
     cmd.args(["-i", input_path.to_str().unwrap(), "-w", "800"]);
     let output = cmd.output().unwrap();
@@ -308,7 +308,7 @@ fn test_cli_with_width() {
 
 #[test]
 fn test_cli_missing_input() {
-    let mut cmd = cargo_bin_cmd!("mermaid");
+    let mut cmd = cargo_bin_cmd!("mmrs");
     cmd.assert()
         .failure()
         .stderr(predicate::str::contains("required").or(predicate::str::contains("error")));
@@ -316,7 +316,7 @@ fn test_cli_missing_input() {
 
 #[test]
 fn test_cli_nonexistent_input_file() {
-    let mut cmd = cargo_bin_cmd!("mermaid");
+    let mut cmd = cargo_bin_cmd!("mmrs");
     cmd.args(["-i", "/nonexistent/path/file.mmd"]);
     cmd.assert().failure();
 }
@@ -328,7 +328,7 @@ fn test_cli_explicit_svg_format() {
 
     let custom_output = output_path.with_extension("custom");
 
-    let mut cmd = cargo_bin_cmd!("mermaid");
+    let mut cmd = cargo_bin_cmd!("mmrs");
     cmd.current_dir(&temp_dir);
     cmd.args([
         "-i",
