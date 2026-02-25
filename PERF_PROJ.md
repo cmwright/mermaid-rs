@@ -131,34 +131,70 @@ All tests green: 20/20 dagre-rust parity, 77/77 e2e, 1/1 examples_comparison.
 
 ---
 
-## Future Work
+## Phase 4: Sampling Profiler Analysis
 
-### Current profile breakdown (example5, 6.9ms avg)
+### Methodology
+Used macOS `sample` command (1ms sampling interval, ~4050 samples) on `profile_complex` binary running 500 iterations each of example5 and example7 fixtures in release mode with debug symbols.
+
+### Self-time by category (where the CPU actually spends time)
+| Category | % | Samples | Notes |
+|----------|---|---------|-------|
+| **malloc/free** | **35.4%** | 1357 | Heap alloc/dealloc from String clones, HashMap ops |
+| **memcpy/memmove/memset/memcmp** | **20.7%** | 791 | Copying strings, HashMap rehashing |
+| **ahash (string hashing)** | **15.0%** | 576 | Hashing String keys for every HashMap lookup |
+| other system (kernel/dyld) | 4.9% | 188 | |
+| bk::position_x | 3.0% | 115 | BK algorithm actual computation |
+| hashbrown insert/rehash/drop | 1.7% | 65 | HashMap structural ops |
+| Graph::set_node | 1.6% | 62 | 6+ string clones per node insert |
+| String::clone | 1.5% | 58 | Explicit string cloning |
+| network_simplex::init_cut_values | 1.0% | 40 | |
+| edge_args_to_id | 0.8% | 29 | String concatenation for edge lookup |
+| Graph::set_edge | 0.8% | 29 | |
+| order::cross_count | 0.7% | 28 | |
+| all other dagre functions | ~12% | ~460 | |
+
+**Key insight**: 71% of CPU time is memory management and string hashing overhead. Only ~10% is actual algorithmic work. The `String` node ID system (ported from JavaScript's string-keyed objects) is the dominant bottleneck.
+
+### Per-stage profile (example5, 6.6ms avg)
 | Stage | Time | % |
 |-------|------|---|
-| order (crossing minimization) | 2.6 ms | 38% |
-| position (Brandes-Kopf) | 1.9 ms | 27% |
-| rank_assign (network simplex) | 1.3 ms | 19% |
-| everything else | ~1.1 ms | 16% |
+| order (crossing minimization) | 2.5 ms | 38% |
+| position (Brandes-Kopf) | 1.8 ms | 28% |
+| rank_assign (network simplex) | 1.2 ms | 19% |
+| everything else | ~1.0 ms | 15% |
 
-### High-impact opportunities (not yet implemented)
+---
+
+## Phase 4: Integer Node/Edge IDs — IN PROGRESS
+
+Replace `String` node and edge identifiers with `u32` integer indices throughout the Graph data structure and all algorithm modules.
+
+### What changes
+- `Graph` internal storage: `HashMap<String, X>` → `Vec<X>` indexed by `u32`
+- Node IDs: `String` → `NodeId(u32)` newtype
+- Edge IDs: `String` → `EdgeId(u32)` newtype
+- Edge lookup: string concatenation (`edge_args_to_id`) → `(NodeId, NodeId)` tuple key
+- Algorithm-local data structures: `HashMap<String, String>` → `Vec<NodeId>` etc.
+
+### Expected impact
+- Eliminates ~35% malloc/free (integers are Copy, no heap allocation)
+- Eliminates ~21% memcpy (no string copying, Vec<T> with Copy types)
+- Eliminates ~15% ahash (Vec indexing instead of HashMap lookups)
+- Estimated **2-5x overall speedup** on layout
+
+### Files affected
+- `graph.rs` — core data structure
+- All algorithm modules (order/*, position/*, rank/*, util.rs, normalize.rs, etc.)
+- `mermaid-core` dagre integration layer
+
+---
+
+## Future Work (after Phase 4)
 
 **Incremental network simplex updates** (rank phase, est. 1.3-2x for ranking)
 - `exchange_edges` re-initializes the entire spanning tree on every pivot (full DFS for low/lim values + full postorder for cut values)
 - Only the affected subtree needs updating after a pivot — described in Gansner et al. paper
 - Files: `rank/network_simplex.rs:exchange_edges`, `init_low_lim_values`, `init_cut_values`
-
-**Cache/reuse layer matrix** (order phase, est. small)
-- `build_layer_matrix` is called every iteration of the order loop (4-8 times), iterating all nodes each time
-- Could be built once and incrementally updated when node orders change
-- Files: `util.rs:build_layer_matrix`, `order/mod.rs`
-
-**Reduce string allocations in BK algorithm** (position phase, est. medium)
-- `vertical_alignment` allocates 3 `HashMap<String, String>` of size N per pass (4 passes = 12 HashMaps)
-- `horizontal_compaction` builds a block graph (full Graph construction) per pass
-- `find_smallest_width_alignment` iterates all nodes 4 times
-- Could use integer-indexed arrays instead of string-keyed HashMaps
-- Files: `position/bk.rs`
 
 **Lightweight layer graph type** (order phase, est. medium)
 - `build_layer_graph` creates a full compound `LayoutGraph` per rank per sweep direction
