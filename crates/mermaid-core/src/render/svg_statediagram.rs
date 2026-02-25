@@ -420,11 +420,12 @@ fn render_transition(svg: &mut String, transition: &PositionedTransition, theme:
         let label_h = transition.label_height.unwrap_or(20.0);
         let _ = write!(
             svg,
-            r#"<rect x="{}" y="{}" width="{}" height="{}" rx="3" fill="rgba(232,232,232,0.8)"/>"#,
+            r#"<rect x="{}" y="{}" width="{}" height="{}" rx="3" fill="{}"/>"#,
             lx - label_w / 2.0,
             ly - label_h / 2.0,
             label_w,
             label_h,
+            theme.edge_label_background.to_css(),
         );
         svg.push('\n');
 
@@ -625,7 +626,7 @@ mod tests {
 
         assert!(svg.contains("go"), "should contain transition label text");
         assert!(
-            svg.contains("rgba(232,232,232,0.8)"),
+            svg.contains("#e8e8e8cc"),
             "should have label background rect"
         );
     }

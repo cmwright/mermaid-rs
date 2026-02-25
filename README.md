@@ -2,8 +2,6 @@
 
 A pure Rust implementation of the [Mermaid](https://mermaid.js.org/) diagram renderer. Converts `.mmd` files to SVG without requiring a browser, Node.js, or Puppeteer.
 
-> **Status:** Early stage — flowchart diagrams are supported. Other diagram types are planned.
-
 ## Quick Start
 
 ```bash
@@ -90,6 +88,7 @@ make serve-live-editor
 ```
 
 Features:
+
 - **Live preview** with 300ms debounced rendering
 - **Monaco Editor** with syntax highlighting
 - **4 themes** (default, dark, forest, neutral)

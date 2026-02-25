@@ -307,11 +307,12 @@ fn render_relationship(svg: &mut String, rel: &PositionedRelationship, theme: &T
         let label_h = rel.label_height.unwrap_or(20.0);
         let _ = write!(
             svg,
-            r#"<rect x="{}" y="{}" width="{}" height="{}" rx="3" fill="rgba(232,232,232,0.8)"/>"#,
+            r#"<rect x="{}" y="{}" width="{}" height="{}" rx="3" fill="{}"/>"#,
             lx - label_w / 2.0,
             ly - label_h / 2.0,
             label_w,
             label_h,
+            theme.edge_label_background.to_css(),
         );
         svg.push('\n');
 
@@ -723,10 +724,7 @@ mod tests {
 
         assert!(svg.contains("places"), "should contain relationship label");
         // Label should have a background rect
-        assert!(
-            svg.contains("rgba(232,232,232,0.8)"),
-            "label should have a background"
-        );
+        assert!(svg.contains("#e8e8e8cc"), "label should have a background");
     }
 
     #[test]

@@ -12,6 +12,7 @@ pub struct Theme {
     pub text_color: Color,
     pub font_family: String,
     pub font_size: f64,
+    pub edge_label_background: Color,
 
     // ── Diagram-specific ─────────────────────────────────────
     pub flowchart: FlowchartTheme,
@@ -70,6 +71,7 @@ impl Default for Theme {
             text_color: Color::Hex("#333333".into()),
             font_family: "'Hack', monospace".into(),
             font_size: 14.0,
+            edge_label_background: Color::Hex("#e8e8e8cc".into()),
             flowchart: FlowchartTheme {
                 primary_color: Color::Hex("#ECECFF".into()),
                 primary_border: Color::Hex("#9370DB".into()),
@@ -114,6 +116,7 @@ impl Theme {
             background: Color::Hex("#1f2020".into()),
             line_color: Color::Hex("#e0dfdf".into()),
             text_color: Color::Hex("#e0dfdf".into()),
+            edge_label_background: Color::Hex("#1f2020cc".into()),
             flowchart: FlowchartTheme {
                 primary_color: Color::Hex("#1f2020".into()),
                 primary_border: Color::Hex("#81B1DB".into()),
