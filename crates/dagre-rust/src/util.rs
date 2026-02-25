@@ -7,7 +7,7 @@
 
 use crate::graph::{GraphOptions, LayoutGraph};
 use crate::types::*;
-use std::collections::HashMap;
+use ahash::AHashMap as HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Global unique ID counter, mirroring JS `let idCounter = 0`.
@@ -15,12 +15,12 @@ static ID_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 /// Reset the ID counter (useful for tests to get deterministic output).
 pub fn reset_id_counter() {
-    ID_COUNTER.store(0, Ordering::SeqCst);
+    ID_COUNTER.store(0, Ordering::Relaxed);
 }
 
 /// Generates a unique ID with the given prefix. Mirrors JS `uniqueId`.
 pub fn unique_id(prefix: &str) -> String {
-    let id = ID_COUNTER.fetch_add(1, Ordering::SeqCst) + 1;
+    let id = ID_COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
     format!("{}{}", prefix, id)
 }
 
@@ -52,20 +52,26 @@ pub fn simplify(g: &LayoutGraph) -> LayoutGraph {
         simplified.set_node(v, g.node(v).cloned());
     }
 
-    for e in g.edges() {
-        let existing = simplified.edge(&e.v, &e.w, None);
+    for eid in g.edge_ids() {
+        let eobj = match g.edge_obj_by_id(eid) {
+            Some(e) => e,
+            None => continue,
+        };
+        let ev = &eobj.v;
+        let ew = &eobj.w;
+        let existing = simplified.edge(ev, ew, None);
         let (existing_weight, existing_minlen) = match existing {
             Some(val) => (val.weight, val.minlen),
             None => (0.0, 1.0),
         };
 
-        let label = g.edge_by_obj(&e).unwrap();
+        let label = g.edge_label_by_id(eid).unwrap();
         let weight = label.weight;
         let minlen = label.minlen;
 
         simplified.set_edge(
-            &e.v,
-            &e.w,
+            ev,
+            ew,
             Some(EdgeLabel {
                 weight: existing_weight + weight,
                 minlen: if existing_minlen > minlen {
@@ -97,9 +103,13 @@ pub fn as_non_compound_graph(g: &LayoutGraph) -> LayoutGraph {
         }
     }
 
-    for e in g.edges() {
-        if simplified.has_node(&e.v) && simplified.has_node(&e.w) {
-            simplified.set_edge_with_obj(&e, g.edge_by_obj(&e).cloned());
+    for eid in g.edge_ids() {
+        let eobj = match g.edge_obj_by_id(eid) {
+            Some(e) => e,
+            None => continue,
+        };
+        if simplified.has_node(&eobj.v) && simplified.has_node(&eobj.w) {
+            simplified.set_edge_with_obj(eobj, g.edge_label_by_id(eid).cloned());
         }
     }
 
@@ -206,8 +216,9 @@ pub fn normalize_ranks(g: &mut LayoutGraph) {
         .min()
         .unwrap_or(0);
 
-    for v in g.nodes() {
-        if let Some(node) = g.node_mut(&v)
+    let node_ids: Vec<String> = g.node_ids().to_vec();
+    for v in &node_ids {
+        if let Some(node) = g.node_mut(v)
             && let Some(rank) = node.rank
         {
             node.rank = Some(rank - min_rank);

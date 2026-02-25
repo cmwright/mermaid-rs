@@ -145,14 +145,20 @@ fn build_state<N: Default + Clone, E: Default + Clone, G: Default + Clone>(
         );
     }
 
-    for e in g.edges() {
-        let prev_weight = fas_graph.edge(&e.v, &e.w, None).copied().unwrap_or(0.0);
-        let weight = weight_fn(&e, g);
+    for eid in g.edge_ids() {
+        let eobj = match g.edge_obj_by_id(eid) {
+            Some(e) => e,
+            None => continue,
+        };
+        let ev = eobj.v.clone();
+        let ew = eobj.w.clone();
+        let prev_weight = fas_graph.edge(&ev, &ew, None).copied().unwrap_or(0.0);
+        let weight = weight_fn(eobj, g);
         let edge_weight = prev_weight + weight;
-        fas_graph.set_edge(&e.v, &e.w, Some(edge_weight), None);
+        fas_graph.set_edge(&ev, &ew, Some(edge_weight), None);
 
         // Update out for e.v
-        if let Some(v_label) = fas_graph.node_mut(&e.v) {
+        if let Some(v_label) = fas_graph.node_mut(&ev) {
             v_label.out_weight += weight;
             if v_label.out_weight > max_out {
                 max_out = v_label.out_weight;
@@ -160,7 +166,7 @@ fn build_state<N: Default + Clone, E: Default + Clone, G: Default + Clone>(
         }
 
         // Update in for e.w
-        if let Some(w_label) = fas_graph.node_mut(&e.w) {
+        if let Some(w_label) = fas_graph.node_mut(&ew) {
             w_label.in_weight += weight;
             if w_label.in_weight > max_in {
                 max_in = w_label.in_weight;

@@ -64,8 +64,7 @@ fn build_layer_graphs(
     use_in_edges: bool,
 ) -> Vec<(i64, LayoutGraph)> {
     // Build index of nodes by rank
-    let mut nodes_by_rank: std::collections::HashMap<i64, Vec<String>> =
-        std::collections::HashMap::new();
+    let mut nodes_by_rank: ahash::AHashMap<i64, Vec<String>> = ahash::AHashMap::new();
     for v in g.node_ids() {
         if let Some(node) = g.node(v) {
             if let Some(rank) = node.rank {

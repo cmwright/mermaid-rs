@@ -6,10 +6,10 @@ use crate::graph::{Edge, LayoutGraph};
 /// Assigns initial ranks using the longest path algorithm.
 /// Nodes are pushed to the lowest position possible.
 pub fn longest_path(g: &mut LayoutGraph) {
-    let mut visited = std::collections::HashSet::new();
+    let mut visited = ahash::AHashSet::new();
     let sources = g.sources();
 
-    fn dfs(g: &mut LayoutGraph, v: &str, visited: &mut std::collections::HashSet<String>) -> i64 {
+    fn dfs(g: &mut LayoutGraph, v: &str, visited: &mut ahash::AHashSet<String>) -> i64 {
         if visited.contains(v) {
             return g.node(v).and_then(|n| n.rank).unwrap_or(0);
         }

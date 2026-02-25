@@ -2,7 +2,7 @@
 //! Port of dagre's `order/init-order.js`.
 
 use crate::graph::LayoutGraph;
-use std::collections::HashSet;
+use ahash::AHashSet as HashSet;
 
 /// Assigns initial order by DFS from nodes sorted by rank.
 pub fn init_order(g: &LayoutGraph) -> Vec<Vec<String>> {

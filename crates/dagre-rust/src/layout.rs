@@ -269,14 +269,19 @@ fn update_input_graph(input_graph: &mut LayoutGraph, layout_graph: &LayoutGraph)
         }
     }
 
-    for e in input_graph.edges() {
-        let Some(ll) = layout_graph.edge_by_obj(&e) else {
+    let edge_ids: Vec<String> = input_graph.edge_ids().to_vec();
+    for eid in &edge_ids {
+        let eobj = match input_graph.edge_obj_by_id(eid) {
+            Some(e) => e.clone(),
+            None => continue,
+        };
+        let Some(ll) = layout_graph.edge_by_obj(&eobj) else {
             continue;
         };
         let points = ll.points.clone();
         let x = ll.x;
         let y = ll.y;
-        if let Some(il) = input_graph.edge_mut_by_obj(&e) {
+        if let Some(il) = input_graph.edge_label_mut_by_id(eid) {
             il.points = points;
             if let Some(xv) = x {
                 il.x = Some(xv);
@@ -349,8 +354,11 @@ fn build_layout_graph(input_graph: &LayoutGraph) -> LayoutGraph {
     }
 
     // Copy edges
-    for e in input_graph.edges() {
-        if let Some(el) = input_graph.edge_by_obj(&e) {
+    for eid in input_graph.edge_ids() {
+        let Some(eobj) = input_graph.edge_obj_by_id(eid) else {
+            continue;
+        };
+        if let Some(el) = input_graph.edge_label_by_id(eid) {
             let new_edge = EdgeLabel {
                 minlen: el.minlen,
                 weight: el.weight,
@@ -360,7 +368,7 @@ fn build_layout_graph(input_graph: &LayoutGraph) -> LayoutGraph {
                 labelpos: el.labelpos,
                 ..Default::default()
             };
-            g.set_edge_with_obj(&e, Some(new_edge));
+            g.set_edge_with_obj(eobj, Some(new_edge));
         }
     }
 
@@ -374,8 +382,9 @@ fn make_space_for_edge_labels(g: &mut LayoutGraph) {
     let rankdir = g.graph().rankdir;
     let rankdir_explicit = g.graph().rankdir_explicit;
 
-    for e in g.edges() {
-        if let Some(edge) = g.edge_mut_by_obj(&e) {
+    let edge_ids: Vec<String> = g.edge_ids().to_vec();
+    for eid in &edge_ids {
+        if let Some(edge) = g.edge_label_mut_by_id(eid) {
             edge.minlen *= 2.0;
 
             if edge.labelpos != LabelPos::Center {
@@ -400,20 +409,24 @@ fn make_space_for_edge_labels(g: &mut LayoutGraph) {
 }
 
 fn inject_edge_label_proxies(g: &mut LayoutGraph) {
-    let edges = g.edges();
-    for e in &edges {
+    let edge_ids: Vec<String> = g.edge_ids().to_vec();
+    for eid in &edge_ids {
+        let Some(eobj) = g.edge_obj_by_id(eid) else {
+            continue;
+        };
         let (width, height, v_rank, w_rank) = {
-            let edge = g.edge_by_obj(e).unwrap();
+            let edge = g.edge_label_by_id(eid).unwrap();
             let w = edge.width;
             let h = edge.height;
-            let vr = g.node(&e.v).and_then(|n| n.rank).unwrap_or(0) as f64;
-            let wr = g.node(&e.w).and_then(|n| n.rank).unwrap_or(0) as f64;
+            let vr = g.node(&eobj.v).and_then(|n| n.rank).unwrap_or(0) as f64;
+            let wr = g.node(&eobj.w).and_then(|n| n.rank).unwrap_or(0) as f64;
             (w, h, vr, wr)
         };
         if width != 0.0 && height != 0.0 {
+            let eobj = g.edge_obj_by_id(eid).unwrap();
             let label = NodeLabel {
                 rank: Some(((w_rank - v_rank) / 2.0 + v_rank) as i64),
-                e: Some(Edge::new(&e.v, &e.w, e.name.as_deref())),
+                e: Some(Edge::new(&eobj.v, &eobj.w, eobj.name.as_deref())),
                 ..Default::default()
             };
             util::add_dummy_node(g, DummyType::EdgeProxy, label, "_ep");
@@ -423,14 +436,18 @@ fn inject_edge_label_proxies(g: &mut LayoutGraph) {
 
 fn assign_rank_min_max(g: &mut LayoutGraph) {
     let mut max_rank: i64 = 0;
-    let nodes = g.nodes();
+    let node_ids: Vec<String> = g.node_ids().to_vec();
 
     let mut updates: Vec<(String, i64, i64)> = Vec::new();
-    for v in &nodes {
-        let node = g.node(v).cloned().unwrap_or_default();
-        if let Some(ref bt) = node.border_top {
+    for v in &node_ids {
+        // Extract only the fields we need rather than cloning the entire NodeLabel
+        let (bt, bb) = match g.node(v) {
+            Some(node) => (node.border_top.clone(), node.border_bottom.clone()),
+            None => continue,
+        };
+        if let Some(ref bt) = bt {
             let min_r = g.node(bt).and_then(|n| n.rank).unwrap_or(0);
-            let bb = node.border_bottom.as_deref().unwrap_or("");
+            let bb = bb.as_deref().unwrap_or("");
             let max_r = g.node(bb).and_then(|n| n.rank).unwrap_or(0);
             updates.push((v.clone(), min_r, max_r));
             if max_r > max_rank {
@@ -450,25 +467,28 @@ fn assign_rank_min_max(g: &mut LayoutGraph) {
 }
 
 fn remove_edge_label_proxies(g: &mut LayoutGraph) {
-    let nodes = g.nodes();
-    let mut to_remove: Vec<(String, NodeLabel)> = Vec::new();
+    let node_ids: Vec<String> = g.node_ids().to_vec();
+    let mut to_remove: Vec<(String, Option<i64>, Option<Edge>)> = Vec::new();
 
-    for v in &nodes {
-        let node = g.node(v).cloned().unwrap_or_default();
-        if node.dummy == Some(DummyType::EdgeProxy) {
-            to_remove.push((v.clone(), node));
+    for v in &node_ids {
+        let is_proxy = g
+            .node(v)
+            .map(|n| n.dummy == Some(DummyType::EdgeProxy))
+            .unwrap_or(false);
+        if is_proxy {
+            let node = g.node(v).unwrap();
+            to_remove.push((v.clone(), node.rank, node.e.clone()));
         }
     }
 
-    for (v, node) in to_remove {
-        let rank = node.rank.unwrap_or(0);
-        let (e_v, e_w, e_name) = match &node.e {
+    for (v, rank, e_opt) in to_remove {
+        let (e_v, e_w, e_name) = match &e_opt {
             Some(e) => (e.v.clone(), e.w.clone(), e.name.clone()),
             None => continue,
         };
 
         if let Some(edge) = g.edge_mut(&e_v, &e_w, e_name.as_deref()) {
-            edge.label_rank = Some(rank);
+            edge.label_rank = rank;
         }
         g.remove_node(&v);
     }
@@ -517,13 +537,13 @@ fn translate_graph(g: &mut LayoutGraph) {
         *max_y = max_y.max(y + h / 2.0);
     }
 
-    for v in g.node_ids().to_vec() {
-        if let Some(node) = g.node(&v) {
+    for v in g.node_ids() {
+        if let Some(node) = g.node(v) {
             get_extremes_node(node, &mut min_x, &mut max_x, &mut min_y, &mut max_y);
         }
     }
-    for e in g.edges() {
-        if let Some(edge) = g.edge_by_obj(&e)
+    for eid in g.edge_ids() {
+        if let Some(edge) = g.edge_label_by_id(eid)
             && edge.x.is_some()
         {
             get_extremes_edge(edge, &mut min_x, &mut max_x, &mut min_y, &mut max_y);
@@ -533,8 +553,9 @@ fn translate_graph(g: &mut LayoutGraph) {
     min_x -= margin_x;
     min_y -= margin_y;
 
-    for v in g.nodes() {
-        if let Some(node) = g.node_mut(&v) {
+    let node_ids: Vec<String> = g.node_ids().to_vec();
+    for v in &node_ids {
+        if let Some(node) = g.node_mut(v) {
             if let Some(x) = node.x {
                 node.x = Some(x - min_x);
             }
@@ -544,8 +565,9 @@ fn translate_graph(g: &mut LayoutGraph) {
         }
     }
 
-    for e in g.edges() {
-        if let Some(edge) = g.edge_mut_by_obj(&e) {
+    let edge_ids: Vec<String> = g.edge_ids().to_vec();
+    for eid in &edge_ids {
+        if let Some(edge) = g.edge_label_mut_by_id(eid) {
             for p in &mut edge.points {
                 p.x -= min_x;
                 p.y -= min_y;
@@ -565,29 +587,28 @@ fn translate_graph(g: &mut LayoutGraph) {
 }
 
 fn assign_node_intersects(g: &mut LayoutGraph) {
-    for e in g.edges() {
+    let edge_ids: Vec<String> = g.edge_ids().to_vec();
+    for eid in &edge_ids {
+        let eobj = match g.edge_obj_by_id(eid) {
+            Some(e) => e.clone(),
+            None => continue,
+        };
         let mut points = g
-            .edge_by_obj(&e)
+            .edge_label_by_id(eid)
             .map(|edge| edge.points.clone())
             .unwrap_or_default();
         let (vx, vy, vw, vh) = g
-            .node(&e.v)
+            .node(&eobj.v)
             .map(|n| (n.x.unwrap_or(0.0), n.y.unwrap_or(0.0), n.width, n.height))
             .unwrap_or((0.0, 0.0, 0.0, 0.0));
         let (wx, wy, ww, wh) = g
-            .node(&e.w)
+            .node(&eobj.w)
             .map(|n| (n.x.unwrap_or(0.0), n.y.unwrap_or(0.0), n.width, n.height))
             .unwrap_or((0.0, 0.0, 0.0, 0.0));
 
         let (p1, p2) = if points.is_empty() {
-            let pw = Point {
-                x: wx,
-                y: wy,
-            };
-            let pv = Point {
-                x: vx,
-                y: vy,
-            };
+            let pw = Point { x: wx, y: wy };
+            let pv = Point { x: vx, y: vy };
             (pw, pv)
         } else {
             (points[0], *points.last().unwrap())
@@ -614,15 +635,16 @@ fn assign_node_intersects(g: &mut LayoutGraph) {
         points.insert(0, start);
         points.push(end);
 
-        if let Some(edge_label) = g.edge_mut_by_obj(&e) {
+        if let Some(edge_label) = g.edge_label_mut_by_id(eid) {
             edge_label.points = points;
         }
     }
 }
 
 fn fixup_edge_label_coords(g: &mut LayoutGraph) {
-    for e in g.edges() {
-        if let Some(edge) = g.edge_mut_by_obj(&e)
+    let edge_ids: Vec<String> = g.edge_ids().to_vec();
+    for eid in &edge_ids {
+        if let Some(edge) = g.edge_label_mut_by_id(eid)
             && edge.x.is_some()
         {
             let labelpos = edge.labelpos;
@@ -646,8 +668,9 @@ fn fixup_edge_label_coords(g: &mut LayoutGraph) {
 }
 
 fn reverse_points_for_reversed_edges(g: &mut LayoutGraph) {
-    for e in g.edges() {
-        if let Some(edge) = g.edge_mut_by_obj(&e)
+    let edge_ids: Vec<String> = g.edge_ids().to_vec();
+    for eid in &edge_ids {
+        if let Some(edge) = g.edge_label_mut_by_id(eid)
             && edge.reversed
         {
             edge.points.reverse();
@@ -656,32 +679,33 @@ fn reverse_points_for_reversed_edges(g: &mut LayoutGraph) {
 }
 
 fn remove_border_nodes(g: &mut LayoutGraph) {
-    let nodes = g.nodes();
+    let node_ids: Vec<String> = g.node_ids().to_vec();
     let mut updates: Vec<(String, f64, f64, f64, f64)> = Vec::new();
 
-    for v in &nodes {
+    for v in &node_ids {
         let children = g.children(Some(v)).unwrap_or_default();
         if !children.is_empty() {
-            let node = g.node(v).cloned().unwrap_or_default();
+            // Extract only the fields we need rather than cloning the entire NodeLabel
+            let (bt, bb, l_node_name, r_node_name) = match g.node(v) {
+                Some(node) => (
+                    node.border_top.clone().unwrap_or_default(),
+                    node.border_bottom.clone().unwrap_or_default(),
+                    node.border_left
+                        .last()
+                        .and_then(|o| o.clone())
+                        .unwrap_or_default(),
+                    node.border_right
+                        .last()
+                        .and_then(|o| o.clone())
+                        .unwrap_or_default(),
+                ),
+                None => continue,
+            };
 
-            let bt = node.border_top.as_deref().unwrap_or("");
-            let bb = node.border_bottom.as_deref().unwrap_or("");
-
-            let l_node_name = node
-                .border_left
-                .last()
-                .and_then(|o| o.as_deref())
-                .unwrap_or("");
-            let r_node_name = node
-                .border_right
-                .last()
-                .and_then(|o| o.as_deref())
-                .unwrap_or("");
-
-            let lx = g.node(l_node_name).and_then(|n| n.x).unwrap_or(0.0);
-            let rx = g.node(r_node_name).and_then(|n| n.x).unwrap_or(0.0);
-            let ty = g.node(bt).and_then(|n| n.y).unwrap_or(0.0);
-            let by = g.node(bb).and_then(|n| n.y).unwrap_or(0.0);
+            let lx = g.node(&l_node_name).and_then(|n| n.x).unwrap_or(0.0);
+            let rx = g.node(&r_node_name).and_then(|n| n.x).unwrap_or(0.0);
+            let ty = g.node(&bt).and_then(|n| n.y).unwrap_or(0.0);
+            let by = g.node(&bb).and_then(|n| n.y).unwrap_or(0.0);
 
             let width = (rx - lx).abs();
             let height = (by - ty).abs();
@@ -702,13 +726,14 @@ fn remove_border_nodes(g: &mut LayoutGraph) {
     }
 
     let border_nodes: Vec<String> = g
-        .nodes()
-        .into_iter()
+        .node_ids()
+        .iter()
         .filter(|v| {
             g.node(v)
                 .map(|n| n.dummy == Some(DummyType::Border))
                 .unwrap_or(false)
         })
+        .cloned()
         .collect();
 
     for v in border_nodes {
@@ -717,19 +742,28 @@ fn remove_border_nodes(g: &mut LayoutGraph) {
 }
 
 fn remove_self_edges(g: &mut LayoutGraph) {
-    let self_edges: Vec<_> = g.edges().into_iter().filter(|e| e.v == e.w).collect();
+    let self_edge_ids: Vec<String> = g
+        .edge_ids()
+        .iter()
+        .filter(|eid| g.edge_obj_by_id(eid).map(|e| e.v == e.w).unwrap_or(false))
+        .cloned()
+        .collect();
 
-    for e in &self_edges {
-        let label = g.edge_by_obj(e).cloned();
-        if let Some(node) = g.node_mut(&e.v)
+    for eid in &self_edge_ids {
+        let eobj = match g.edge_obj_by_id(eid) {
+            Some(e) => e.clone(),
+            None => continue,
+        };
+        let label = g.edge_label_by_id(eid).cloned();
+        if let Some(node) = g.node_mut(&eobj.v)
             && let Some(label) = label
         {
             node.self_edges.push(SelfEdgeRecord {
-                e: Edge::new(&e.v, &e.w, e.name.as_deref()),
+                e: Edge::new(&eobj.v, &eobj.w, eobj.name.as_deref()),
                 label,
             });
         }
-        g.remove_edge_by_obj(e);
+        g.remove_edge_by_obj(&eobj);
     }
 }
 
@@ -742,13 +776,13 @@ fn insert_self_edges(g: &mut LayoutGraph) {
                 continue;
             }
 
-            let node = g.node(v).cloned().unwrap_or_default();
+            let (self_edges, rank) = match g.node(v) {
+                Some(n) => (n.self_edges.clone(), n.rank.unwrap_or(0)),
+                None => continue,
+            };
             if let Some(n) = g.node_mut(v) {
                 n.order = Some(i as i64 + order_shift);
             }
-
-            let self_edges = node.self_edges.clone();
-            let rank = node.rank.unwrap_or(0);
 
             for se in &self_edges {
                 order_shift += 1;
@@ -775,35 +809,50 @@ fn insert_self_edges(g: &mut LayoutGraph) {
 }
 
 fn position_self_edges(g: &mut LayoutGraph) {
-    let nodes = g.nodes();
-    let mut to_process: Vec<(String, NodeLabel)> = Vec::new();
+    let node_ids: Vec<String> = g.node_ids().to_vec();
+    // Collect only the data we need from self-edge dummy nodes
+    let mut to_process: Vec<(
+        String,
+        Option<f64>,
+        Option<f64>,
+        Option<Edge>,
+        Option<EdgeLabel>,
+    )> = Vec::new();
 
-    for v in &nodes {
-        let node = g.node(v).cloned().unwrap_or_default();
-        if node.dummy == Some(DummyType::SelfEdge) {
-            to_process.push((v.clone(), node));
+    for v in &node_ids {
+        let is_self_edge = g
+            .node(v)
+            .map(|n| n.dummy == Some(DummyType::SelfEdge))
+            .unwrap_or(false);
+        if is_self_edge {
+            let node = g.node(v).unwrap();
+            to_process.push((
+                v.clone(),
+                node.x,
+                node.y,
+                node.e.clone(),
+                node.self_edge_data.clone(),
+            ));
         }
     }
 
-    for (v, node) in to_process {
-        let e_ref = match &node.e {
-            Some(e) => e.clone(),
+    for (v, node_x, node_y, e_opt, self_edge_data) in to_process {
+        let e_ref = match e_opt {
+            Some(e) => e,
             None => continue,
         };
-        let self_node = g.node(&e_ref.v).cloned().unwrap_or_default();
-
-        let sx = self_node.x.unwrap_or(0.0);
-        let sw = self_node.width;
-        let sy = self_node.y.unwrap_or(0.0);
-        let sh = self_node.height;
+        let (sx, sw, sy, sh) = g
+            .node(&e_ref.v)
+            .map(|n| (n.x.unwrap_or(0.0), n.width, n.y.unwrap_or(0.0), n.height))
+            .unwrap_or((0.0, 0.0, 0.0, 0.0));
 
         let x = sx + sw / 2.0;
         let y = sy;
-        let node_x = node.x.unwrap_or(0.0);
-        let dx = node_x - x;
+        let nx = node_x.unwrap_or(0.0);
+        let dx = nx - x;
         let dy = sh / 2.0;
 
-        let mut label = node.self_edge_data.clone().unwrap_or_default();
+        let mut label = self_edge_data.unwrap_or_default();
         label.points = vec![
             Point {
                 x: x + 2.0 * dx / 3.0,
@@ -823,8 +872,8 @@ fn position_self_edges(g: &mut LayoutGraph) {
                 y: y + dy,
             },
         ];
-        label.x = Some(node_x);
-        label.y = node.y;
+        label.x = Some(nx);
+        label.y = node_y;
 
         g.set_edge(&e_ref.v, &e_ref.w, Some(label), e_ref.name.as_deref());
         g.remove_node(&v);

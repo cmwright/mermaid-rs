@@ -5,7 +5,7 @@ use crate::graph::{Edge, LayoutGraph};
 use crate::greedy_fas;
 use crate::types::*;
 use crate::util::unique_id;
-use std::collections::HashSet;
+use ahash::AHashSet as HashSet;
 
 /// Makes the graph acyclic by reversing edges in feedback arc set.
 pub fn run(g: &mut LayoutGraph) {
@@ -62,8 +62,8 @@ fn dfs_fas(g: &LayoutGraph) -> Vec<Edge> {
         stack.remove(v);
     }
 
-    for v in g.nodes() {
-        dfs(g, &v, &mut fas, &mut stack, &mut visited);
+    for v in g.node_ids() {
+        dfs(g, v, &mut fas, &mut stack, &mut visited);
     }
 
     fas
@@ -71,25 +71,29 @@ fn dfs_fas(g: &LayoutGraph) -> Vec<Edge> {
 
 /// Undoes the edge reversals performed by `run`.
 pub fn undo(g: &mut LayoutGraph) {
-    let edges_to_reverse: Vec<(Edge, EdgeLabel)> = g
-        .edges()
-        .into_iter()
-        .filter_map(|e| {
-            let label = g.edge_by_obj(&e)?.clone();
+    let edges_to_reverse: Vec<(String, EdgeLabel)> = g
+        .edge_ids()
+        .iter()
+        .filter_map(|eid| {
+            let label = g.edge_label_by_id(eid)?.clone();
             if label.reversed {
-                Some((e, label))
+                Some((eid.clone(), label))
             } else {
                 None
             }
         })
         .collect();
 
-    for (e, mut label) in edges_to_reverse {
-        g.remove_edge_by_obj(&e);
+    for (eid, mut label) in edges_to_reverse {
+        let eobj = match g.edge_obj_by_id(&eid) {
+            Some(e) => e.clone(),
+            None => continue,
+        };
+        g.remove_edge_by_obj(&eobj);
 
         let forward_name = label.forward_name.take();
         label.reversed = false;
 
-        g.set_edge(&e.w, &e.v, Some(label), forward_name.as_deref());
+        g.set_edge(&eobj.w, &eobj.v, Some(label), forward_name.as_deref());
     }
 }

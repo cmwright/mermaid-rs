@@ -2,7 +2,7 @@
 //! Port of dagre's `order/cross-count.js`.
 
 use crate::graph::LayoutGraph;
-use std::collections::HashMap;
+use ahash::AHashMap as HashMap;
 
 /// Counts weighted edge crossings across the entire layering.
 pub fn cross_count(g: &LayoutGraph, layering: &[Vec<String>]) -> i64 {

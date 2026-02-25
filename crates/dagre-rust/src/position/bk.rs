@@ -4,7 +4,7 @@
 use crate::graph::{Graph, LayoutGraph};
 use crate::types::*;
 use crate::util;
-use std::collections::{HashMap, HashSet};
+use ahash::{AHashMap as HashMap, AHashSet as HashSet};
 
 /// The block graph uses no node labels and f64 edge labels (separation values).
 type BlockGraph = Graph<(), f64, ()>;
@@ -101,19 +101,19 @@ fn find_type1_conflicts(g: &LayoutGraph, layering: &[Vec<String>]) -> Conflicts 
                         let scan_node = &layer[scan_idx];
                         if let Some(preds) = g.predecessor_map(scan_node) {
                             for u in preds.keys() {
-                            let u_pos = g
-                                .node(u)
-                                .and_then(|n| n.order)
-                                .map(|o| o as u64)
-                                .unwrap_or(0) as usize;
-                            let u_dummy = g.node(u).map(|n| n.dummy.is_some()).unwrap_or(false);
-                            let scan_dummy = g
-                                .node(scan_node)
-                                .map(|n| n.dummy.is_some())
-                                .unwrap_or(false);
-                            if (u_pos < k0 || k1 < u_pos) && !(u_dummy && scan_dummy) {
-                                add_conflict(&mut conflicts, u, scan_node);
-                            }
+                                let u_pos =
+                                    g.node(u)
+                                        .and_then(|n| n.order)
+                                        .map(|o| o as u64)
+                                        .unwrap_or(0) as usize;
+                                let u_dummy = g.node(u).map(|n| n.dummy.is_some()).unwrap_or(false);
+                                let scan_dummy = g
+                                    .node(scan_node)
+                                    .map(|n| n.dummy.is_some())
+                                    .unwrap_or(false);
+                                if (u_pos < k0 || k1 < u_pos) && !(u_dummy && scan_dummy) {
+                                    add_conflict(&mut conflicts, u, scan_node);
+                                }
                             }
                         }
                     }
@@ -196,9 +196,9 @@ fn scan_type2(
             if let Some(preds) = g.predecessor_map(v) {
                 for u in preds.keys() {
                     let u_dummy = g.node(u).map(|n| n.dummy.is_some()).unwrap_or(false);
-                if u_dummy {
+                    if u_dummy {
                         let u_order = g.node(u).and_then(|n| n.order).unwrap_or(0);
-                    if u_order < prev_north_border || u_order > next_north_border {
+                        if u_order < prev_north_border || u_order > next_north_border {
                             add_conflict(conflicts, u, v);
                         }
                     }
@@ -214,7 +214,11 @@ fn find_other_inner_segment_node<'a>(g: &'a LayoutGraph, v: &str) -> Option<&'a 
         g.predecessor_map(v).and_then(|preds| {
             preds
                 .keys()
-                .find(|u| g.node(u.as_str()).map(|n| n.dummy.is_some()).unwrap_or(false))
+                .find(|u| {
+                    g.node(u.as_str())
+                        .map(|n| n.dummy.is_some())
+                        .unwrap_or(false)
+                })
                 .map(|u| u.as_str())
         })
     } else {
@@ -319,7 +323,7 @@ fn horizontal_compaction(
     let block_g = build_block_graph(g, layering, root, reverse_sep);
 
     // Pass 1: assign smallest coordinates (topological order using predecessors)
-    let mut stack: Vec<String> = block_g.nodes();
+    let mut stack: Vec<String> = block_g.node_ids().to_vec();
     let mut visited: HashSet<String> = HashSet::new();
 
     while let Some(elem) = stack.pop() {
@@ -354,7 +358,7 @@ fn horizontal_compaction(
         BorderType::Right
     };
 
-    stack = block_g.nodes();
+    stack = block_g.node_ids().to_vec();
     visited.clear();
 
     while let Some(elem) = stack.pop() {
@@ -505,28 +509,28 @@ fn align_coordinates(
     let align_to_max = align_to.values().copied().fold(f64::NEG_INFINITY, f64::max);
 
     for (key, horiz) in [("ul", "l"), ("ur", "r"), ("dl", "l"), ("dr", "r")] {
-            let Some(xs) = xss.get(&key) else {
-                continue;
-            };
-            if xs == align_to {
-                continue;
-            }
-            let xs_min = xs.values().copied().fold(f64::INFINITY, f64::min);
-            let xs_max = xs.values().copied().fold(f64::NEG_INFINITY, f64::max);
+        let Some(xs) = xss.get(&key) else {
+            continue;
+        };
+        if xs == align_to {
+            continue;
+        }
+        let xs_min = xs.values().copied().fold(f64::INFINITY, f64::min);
+        let xs_max = xs.values().copied().fold(f64::NEG_INFINITY, f64::max);
 
-            let delta = if horiz == "l" {
-                align_to_min - xs_min
-            } else {
-                align_to_max - xs_max
-            };
+        let delta = if horiz == "l" {
+            align_to_min - xs_min
+        } else {
+            align_to_max - xs_max
+        };
 
-            if delta != 0.0 {
-                if let Some(xs) = xss.get_mut(&key) {
-                    for value in xs.values_mut() {
-                        *value += delta;
-                    }
+        if delta != 0.0 {
+            if let Some(xs) = xss.get_mut(&key) {
+                for value in xs.values_mut() {
+                    *value += delta;
                 }
             }
+        }
     }
 }
 

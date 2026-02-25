@@ -21,11 +21,11 @@ fn dfs(g: &mut LayoutGraph, v: &str) {
         }
     }
 
-    let node = g.node(v).cloned().unwrap_or_default();
-    if node.min_rank.is_some() {
-        let min_rank = node.min_rank.unwrap_or(0);
-        let max_rank = node.max_rank.unwrap_or(0);
-
+    let (min_rank_opt, min_rank, max_rank) = match g.node(v) {
+        Some(n) => (n.min_rank, n.min_rank.unwrap_or(0), n.max_rank.unwrap_or(0)),
+        None => return,
+    };
+    if min_rank_opt.is_some() {
         // Initialize borderLeft and borderRight arrays
         if let Some(node_mut) = g.node_mut(v) {
             node_mut.border_left = Vec::new();
@@ -52,11 +52,15 @@ fn add_border_node_for_sg(g: &mut LayoutGraph, is_left: bool, prefix: &str, sg: 
 
     // Get prev from sgNode's border array at rank - 1
     let prev = {
-        let node = g.node(sg).cloned().unwrap_or_default();
-        let arr = if is_left {
-            &node.border_left
-        } else {
-            &node.border_right
+        let arr = match g.node(sg) {
+            Some(n) => {
+                if is_left {
+                    &n.border_left
+                } else {
+                    &n.border_right
+                }
+            }
+            None => return,
         };
         let idx = (rank - 1) as usize;
         arr.get(idx).and_then(|o| o.clone())

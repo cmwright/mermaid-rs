@@ -23,28 +23,32 @@ pub fn undo(g: &mut LayoutGraph) {
 }
 
 fn swap_width_height(g: &mut LayoutGraph) {
-    for v in g.nodes() {
-        if let Some(node) = g.node_mut(&v) {
+    let node_ids: Vec<String> = g.node_ids().to_vec();
+    for v in &node_ids {
+        if let Some(node) = g.node_mut(v) {
             std::mem::swap(&mut node.width, &mut node.height);
         }
     }
-    for e in g.edges() {
-        if let Some(label) = g.edge_mut_by_obj(&e) {
+    let edge_ids: Vec<String> = g.edge_ids().to_vec();
+    for eid in &edge_ids {
+        if let Some(label) = g.edge_label_mut_by_id(eid) {
             std::mem::swap(&mut label.width, &mut label.height);
         }
     }
 }
 
 fn reverse_y(g: &mut LayoutGraph) {
-    for v in g.nodes() {
-        if let Some(node) = g.node_mut(&v)
+    let node_ids: Vec<String> = g.node_ids().to_vec();
+    for v in &node_ids {
+        if let Some(node) = g.node_mut(v)
             && let Some(y) = node.y
         {
             node.y = Some(-y);
         }
     }
-    for e in g.edges() {
-        if let Some(label) = g.edge_mut_by_obj(&e) {
+    let edge_ids: Vec<String> = g.edge_ids().to_vec();
+    for eid in &edge_ids {
+        if let Some(label) = g.edge_label_mut_by_id(eid) {
             for p in &mut label.points {
                 p.y = -p.y;
             }
@@ -56,13 +60,15 @@ fn reverse_y(g: &mut LayoutGraph) {
 }
 
 fn swap_xy(g: &mut LayoutGraph) {
-    for v in g.nodes() {
-        if let Some(node) = g.node_mut(&v) {
+    let node_ids: Vec<String> = g.node_ids().to_vec();
+    for v in &node_ids {
+        if let Some(node) = g.node_mut(v) {
             std::mem::swap(&mut node.x, &mut node.y);
         }
     }
-    for e in g.edges() {
-        if let Some(label) = g.edge_mut_by_obj(&e) {
+    let edge_ids: Vec<String> = g.edge_ids().to_vec();
+    for eid in &edge_ids {
+        if let Some(label) = g.edge_label_mut_by_id(eid) {
             for p in &mut label.points {
                 std::mem::swap(&mut p.x, &mut p.y);
             }

@@ -3,7 +3,7 @@
 
 use crate::graph::ConstraintGraph;
 use crate::order::barycenter::BarycenterEntry;
-use std::collections::HashMap;
+use ahash::AHashMap as HashMap;
 
 #[derive(Debug, Clone)]
 pub struct ResolvedEntry {
@@ -47,8 +47,11 @@ pub fn resolve_conflicts(entries: &[BarycenterEntry], cg: &ConstraintGraph) -> V
     }
 
     // Add constraint edges
-    for e in cg.edges() {
-        if let (Some(&v_idx), Some(&w_idx)) = (mapped.get(&e.v), mapped.get(&e.w)) {
+    for eid in cg.edge_ids() {
+        let Some(eobj) = cg.edge_obj_by_id(eid) else {
+            continue;
+        };
+        if let (Some(&v_idx), Some(&w_idx)) = (mapped.get(&eobj.v), mapped.get(&eobj.w)) {
             entries_vec[w_idx].indegree += 1;
             entries_vec[v_idx].out_entries.push(w_idx);
         }

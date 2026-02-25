@@ -2,7 +2,7 @@
 //! Port of dagre's `parent-dummy-chains.js`.
 
 use crate::graph::LayoutGraph;
-use std::collections::HashMap;
+use ahash::AHashMap as HashMap;
 
 /// Assigns compound parents to dummy nodes along long edge chains.
 pub fn parent_dummy_chains(g: &mut LayoutGraph) {
@@ -13,10 +13,9 @@ pub fn parent_dummy_chains(g: &mut LayoutGraph) {
     for chain_start in dummy_chains {
         let mut v = chain_start;
 
-        let node = g.node(&v).cloned().unwrap_or_default();
-        let edge_obj = node
-            .edge_obj
-            .clone()
+        let edge_obj = g
+            .node(&v)
+            .and_then(|n| n.edge_obj.clone())
             .unwrap_or_else(|| crate::graph::Edge::new("", "", None));
         let edge_obj_v = edge_obj.v.clone();
         let edge_obj_w = edge_obj.w.clone();
@@ -28,8 +27,7 @@ pub fn parent_dummy_chains(g: &mut LayoutGraph) {
         let mut ascending = true;
 
         while v != edge_obj_w {
-            let node = g.node(&v).cloned().unwrap_or_default();
-            let node_rank = node.rank.unwrap_or(0);
+            let node_rank = g.node(&v).and_then(|n| n.rank).unwrap_or(0);
 
             if ascending {
                 // JS: while ((pathV = path[pathIdx]) !== lca && g.node(pathV).maxRank < node.rank)

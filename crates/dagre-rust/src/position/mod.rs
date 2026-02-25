@@ -20,9 +20,9 @@ pub fn position(g: &mut LayoutGraph) {
         }
     }
     // Copy y from ncg to g
-    for v in ncg.nodes() {
-        if let Some(y) = ncg.node(&v).and_then(|n| n.y)
-            && let Some(node) = g.node_mut(&v)
+    for v in ncg.node_ids() {
+        if let Some(y) = ncg.node(v).and_then(|n| n.y)
+            && let Some(node) = g.node_mut(v)
         {
             node.y = Some(y);
         }

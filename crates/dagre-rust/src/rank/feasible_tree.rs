@@ -13,7 +13,7 @@ pub fn feasible_tree(g: &mut LayoutGraph) -> LayoutGraph {
         compound: false,
     });
 
-    let start = g.nodes()[0].clone();
+    let start = g.node_ids()[0].clone();
     let size = g.node_count();
     t.set_node(&start, Some(NodeLabel::default()));
 
@@ -59,7 +59,7 @@ fn tight_tree(t: &mut LayoutGraph, g: &LayoutGraph) -> usize {
         }
     }
 
-    let nodes = t.nodes();
+    let nodes: Vec<String> = t.node_ids().to_vec();
     for v in &nodes {
         dfs(t, g, v);
     }
@@ -88,9 +88,9 @@ fn find_min_slack_edge(t: &LayoutGraph, g: &LayoutGraph) -> crate::graph::Edge {
 }
 
 fn shift_ranks(t: &LayoutGraph, g: &mut LayoutGraph, delta: i64) {
-    for v in t.nodes() {
-        let rank = g.node(&v).and_then(|n| n.rank).unwrap_or(0);
-        if let Some(node) = g.node_mut(&v) {
+    for v in t.node_ids() {
+        let rank = g.node(v).and_then(|n| n.rank).unwrap_or(0);
+        if let Some(node) = g.node_mut(v) {
             node.rank = Some(rank + delta);
         }
     }

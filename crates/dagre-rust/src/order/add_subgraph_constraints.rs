@@ -2,7 +2,7 @@
 //! Port of dagre's `order/add-subgraph-constraints.js`.
 
 use crate::graph::{ConstraintGraph, LayoutGraph};
-use std::collections::HashMap;
+use ahash::AHashMap as HashMap;
 
 /// Adds ordering constraints between subgraphs based on the sorted layer.
 pub fn add_subgraph_constraints(g: &LayoutGraph, cg: &mut ConstraintGraph, vs: &[String]) {

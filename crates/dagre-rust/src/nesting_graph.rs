@@ -4,7 +4,7 @@
 use crate::graph::LayoutGraph;
 use crate::types::*;
 use crate::util::{add_border_node, add_dummy_node};
-use std::collections::HashMap;
+use ahash::AHashMap as HashMap;
 
 /// Creates the nesting graph structure for compound graphs.
 pub fn run(g: &mut LayoutGraph) {
@@ -17,9 +17,9 @@ pub fn run(g: &mut LayoutGraph) {
     g.graph_mut().nesting_root = Some(root.clone());
 
     // Multiply minlen by nodeSep
-    let edges = g.edges();
-    for e in &edges {
-        if let Some(label) = g.edge_mut_by_obj(e) {
+    let edge_ids: Vec<String> = g.edge_ids().to_vec();
+    for eid in &edge_ids {
+        if let Some(label) = g.edge_label_mut_by_id(eid) {
             label.minlen *= node_sep as f64;
         }
     }
@@ -78,22 +78,16 @@ fn dfs(
     for child in &children {
         dfs(g, root, node_sep, weight, height, depths, child);
 
-        let child_node = g.node(child).cloned().unwrap_or_default();
-        let child_top = child_node
-            .border_top
-            .as_deref()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| child.clone());
-        let child_bottom = child_node
-            .border_bottom
-            .as_deref()
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| child.clone());
-        let this_weight = if child_node.border_top.is_some() {
-            weight
-        } else {
-            2.0 * weight
+        // Extract only the fields we need rather than cloning the full NodeLabel
+        let (child_top, child_bottom, has_border_top) = match g.node(child) {
+            Some(n) => (
+                n.border_top.clone().unwrap_or_else(|| child.clone()),
+                n.border_bottom.clone().unwrap_or_else(|| child.clone()),
+                n.border_top.is_some(),
+            ),
+            None => (child.clone(), child.clone(), false),
         };
+        let this_weight = if has_border_top { weight } else { 2.0 * weight };
         let minlen = if child_top != child_bottom {
             1
         } else {
@@ -161,9 +155,9 @@ fn tree_depths(g: &LayoutGraph) -> HashMap<String, usize> {
 }
 
 fn sum_weights(g: &LayoutGraph) -> f64 {
-    g.edges()
+    g.edge_ids()
         .iter()
-        .filter_map(|e| g.edge_by_obj(e).map(|l| l.weight))
+        .filter_map(|eid| g.edge_label_by_id(eid).map(|l| l.weight))
         .sum()
 }
 
@@ -178,13 +172,20 @@ pub fn cleanup(g: &mut LayoutGraph) {
     g.graph_mut().nesting_root = None;
 
     // Remove nesting edges
-    let nesting_edges: Vec<_> = g
-        .edges()
-        .into_iter()
-        .filter(|e| g.edge_by_obj(e).map(|l| l.nesting_edge).unwrap_or(false))
+    let nesting_edge_ids: Vec<String> = g
+        .edge_ids()
+        .iter()
+        .filter(|eid| {
+            g.edge_label_by_id(eid)
+                .map(|l| l.nesting_edge)
+                .unwrap_or(false)
+        })
+        .cloned()
         .collect();
 
-    for e in nesting_edges {
-        g.remove_edge_by_obj(&e);
+    for eid in &nesting_edge_ids {
+        if let Some(eobj) = g.edge_obj_by_id(eid).cloned() {
+            g.remove_edge_by_obj(&eobj);
+        }
     }
 }

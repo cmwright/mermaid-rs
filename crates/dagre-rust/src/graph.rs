@@ -7,8 +7,8 @@
 //! - Generic node/edge/graph labels with Default + Clone bounds
 //! - Insertion-order iteration for nodes and edges
 
+use ahash::AHashMap as HashMap;
 use indexmap::IndexMap;
-use std::collections::HashMap;
 
 /// Sentinel value for the root of a compound graph (mirrors JS `"\0"`).
 const GRAPH_NODE: &str = "\0";
@@ -409,7 +409,7 @@ impl<N: Default + Clone, E: Default + Clone, G: Default + Clone> Graph<N, E, G> 
 
     pub fn neighbors(&self, v: &str) -> Option<Vec<String>> {
         self.predecessors(v).map(|preds| {
-            let mut seen = std::collections::HashSet::new();
+            let mut seen = ahash::AHashSet::new();
             let mut result = Vec::new();
             for p in &preds {
                 if seen.insert(p.clone()) {
@@ -524,6 +524,11 @@ impl<N: Default + Clone, E: Default + Clone, G: Default + Clone> Graph<N, E, G> 
     /// Returns edge label by edge ID (no edge cloning).
     pub fn edge_label_by_id(&self, edge_id: &str) -> Option<&E> {
         self.edge_labels.get(edge_id)
+    }
+
+    /// Returns mutable edge label by edge ID (no edge cloning).
+    pub fn edge_label_mut_by_id(&mut self, edge_id: &str) -> Option<&mut E> {
+        self.edge_labels.get_mut(edge_id)
     }
 
     /// Set an edge by (v, w) with optional name and label.
@@ -800,7 +805,8 @@ fn edge_args_to_id(is_directed: bool, v: &str, w: &str, name: Option<&str>) -> S
         (v, w)
     };
     let name_part = name.unwrap_or(DEFAULT_EDGE_NAME);
-    let mut id = String::with_capacity(v.len() + w.len() + name_part.len() + EDGE_KEY_DELIM.len() * 2);
+    let mut id =
+        String::with_capacity(v.len() + w.len() + name_part.len() + EDGE_KEY_DELIM.len() * 2);
     id.push_str(v);
     id.push_str(EDGE_KEY_DELIM);
     id.push_str(w);

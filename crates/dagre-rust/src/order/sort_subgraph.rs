@@ -5,7 +5,7 @@ use crate::graph::{ConstraintGraph, LayoutGraph};
 use crate::order::barycenter;
 use crate::order::resolve_conflicts;
 use crate::order::sort;
-use std::collections::HashMap;
+use ahash::AHashMap as HashMap;
 
 /// Recursively sorts a subgraph's children.
 pub fn sort_subgraph(

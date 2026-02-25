@@ -26,9 +26,9 @@ pub fn network_simplex(g: &mut LayoutGraph) {
     }
 
     // Copy ranks back to the original graph
-    for v in sg.nodes() {
-        if let Some(rank) = sg.node(&v).and_then(|n| n.rank) {
-            g.node_mut(&v).unwrap().rank = Some(rank);
+    for v in sg.node_ids() {
+        if let Some(rank) = sg.node(v).and_then(|n| n.rank) {
+            g.node_mut(v).unwrap().rank = Some(rank);
         }
     }
 }
@@ -49,9 +49,7 @@ fn init_cut_values(t: &mut LayoutGraph, g: &LayoutGraph) {
 }
 
 fn assign_cut_value(t: &mut LayoutGraph, g: &LayoutGraph, child: &str) {
-    let parent = t
-        .node(child)
-        .and_then(|n| n.parent_node.as_deref());
+    let parent = t.node(child).and_then(|n| n.parent_node.as_deref());
 
     if let Some(parent) = parent {
         let parent = parent.to_string();

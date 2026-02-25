@@ -10,9 +10,14 @@ pub fn run(g: &mut LayoutGraph) {
     // Initialize dummyChains on graph label
     g.graph_mut().dummy_chains = Vec::new();
 
-    let edges = g.edges();
-    for e in edges {
-        normalize_edge(g, &e);
+    // Snapshot edge IDs — normalize_edge removes edges and adds nodes/edges
+    let edge_ids: Vec<String> = g.edge_ids().to_vec();
+    for eid in &edge_ids {
+        let eobj = match g.edge_obj_by_id(eid) {
+            Some(e) => e.clone(),
+            None => continue,
+        };
+        normalize_edge(g, &eobj);
     }
 }
 
@@ -96,14 +101,19 @@ pub fn undo(g: &mut LayoutGraph) {
 
     for chain_start in dummy_chains {
         let mut v = chain_start;
-        let node = g.node(&v).cloned().unwrap_or_default();
-        let orig_label = node.edge_label.map(|b| *b).unwrap_or_default();
-
-        // Reconstruct edge obj
-        let edge_obj = node
-            .edge_obj
-            .clone()
-            .unwrap_or_else(|| Edge::new("", "", None));
+        // Extract only the fields we need from the chain start node
+        let (orig_label, edge_obj) = match g.node(&v) {
+            Some(n) => (
+                n.edge_label
+                    .as_ref()
+                    .map(|b| (**b).clone())
+                    .unwrap_or_default(),
+                n.edge_obj
+                    .clone()
+                    .unwrap_or_else(|| Edge::new("", "", None)),
+            ),
+            None => continue,
+        };
         let edge_obj_v = edge_obj.v.clone();
         let edge_obj_w = edge_obj.w.clone();
         let edge_obj_name = edge_obj.name.clone();
@@ -118,8 +128,18 @@ pub fn undo(g: &mut LayoutGraph) {
         let mut orig_label = orig_label;
 
         loop {
-            let node = g.node(&v).cloned().unwrap_or_default();
-            let is_dummy = node.dummy.is_some();
+            // Extract fields we need before potentially removing the node
+            let (is_dummy, x, y, dummy_type, width, height) = match g.node(&v) {
+                Some(n) => (
+                    n.dummy.is_some(),
+                    n.x.unwrap_or(0.0),
+                    n.y.unwrap_or(0.0),
+                    n.dummy,
+                    n.width,
+                    n.height,
+                ),
+                None => break,
+            };
 
             if !is_dummy {
                 break;
@@ -133,16 +153,14 @@ pub fn undo(g: &mut LayoutGraph) {
             g.remove_node(&v);
 
             // Push point
-            let x = node.x.unwrap_or(0.0);
-            let y = node.y.unwrap_or(0.0);
             orig_label.points.push(Point { x, y });
 
             // If edge-label dummy, copy position info
-            if node.dummy == Some(DummyType::EdgeLabel) {
+            if dummy_type == Some(DummyType::EdgeLabel) {
                 orig_label.x = Some(x);
                 orig_label.y = Some(y);
-                orig_label.width = node.width;
-                orig_label.height = node.height;
+                orig_label.width = width;
+                orig_label.height = height;
             }
 
             v = w;
