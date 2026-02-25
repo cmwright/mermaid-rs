@@ -2,20 +2,29 @@
 
 A pure Rust implementation of the [Mermaid](https://mermaid.js.org/) diagram renderer. Converts `.mmd` files to SVG without requiring a browser, Node.js, or Puppeteer.
 
+## Installation
+
+```bash
+cargo install --git https://github.com/cmwright/mermaid-rs mermaid-cli
+```
+
+This installs the `mmrs` binary.
+
 ## Quick Start
 
 ```bash
-# Build
-cargo build --release
-
 # Render a diagram
-cargo run -- -i diagram.mmd -o diagram.svg
-
-# Or use the binary directly
-./target/release/mermaid -i diagram.mmd -o diagram.svg
+mmrs -i diagram.mmd -o diagram.svg
 
 # Read from stdin
-cat diagram.mmd | cargo run -- -i - -o output.svg
+cat diagram.mmd | mmrs -i - -o output.svg
+```
+
+### Building from source
+
+```bash
+cargo build --release
+./target/release/mmrs -i diagram.mmd -o diagram.svg
 ```
 
 ### CLI Options
