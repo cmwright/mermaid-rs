@@ -1,5 +1,5 @@
-use std::collections::{HashMap, HashSet};
 use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 
 use petgraph::graph::{DiGraph, NodeIndex};
 
@@ -630,7 +630,8 @@ fn compute_node_size(shape: &NodeShape, text: &TextMetrics) -> (f64, f64) {
         | NodeShape::Cylinder => (base_w + RECT_LABEL_EXTRA_WIDTH, base_h),
         // Mermaid question.ts: s = (bbox.width + padding) + (bbox.height + padding)
         NodeShape::Diamond => {
-            let mermaid_s = (text.width + MERMAID_NODE_PADDING) + (text.height + MERMAID_NODE_PADDING);
+            let mermaid_s =
+                (text.width + MERMAID_NODE_PADDING) + (text.height + MERMAID_NODE_PADDING);
             // For a diamond with equal diagonals s, inscribed axis-aligned rect constraint is:
             // rect_w + rect_h <= s
             let guard_w = text.width * SHAPE_TEXT_WIDTH_GUARD + 2.0 * MIN_TEXT_INSET;
@@ -696,10 +697,16 @@ fn edge_label_dimensions(label_text: &str, measurer: &TextMeasurer<'_>) -> (f64,
     const EDGE_LABEL_PAD: f64 = 10.0;
     let plain = plain_text_for_measurement(label_text);
     let metrics = measure_text_block(&plain, measurer);
-    (metrics.width + EDGE_LABEL_PAD, metrics.height + EDGE_LABEL_PAD)
+    (
+        metrics.width + EDGE_LABEL_PAD,
+        metrics.height + EDGE_LABEL_PAD,
+    )
 }
 
-fn build_display_label_and_metrics(raw_label: &str, measurer: &TextMeasurer<'_>) -> (String, TextMetrics) {
+fn build_display_label_and_metrics(
+    raw_label: &str,
+    measurer: &TextMeasurer<'_>,
+) -> (String, TextMetrics) {
     let plain = plain_text_for_measurement(raw_label);
     let wrapped_text = measurer.wrap_text(&plain, MAX_NODE_TEXT_WIDTH);
     let label = if wrapped_text != plain {
@@ -1138,7 +1145,8 @@ mod tests {
             };
 
             let (cw, ch) = compute_node_size(&NodeShape::Circle, &metrics);
-            let rect_diag = (metrics.width * metrics.width + metrics.height * metrics.height).sqrt();
+            let rect_diag =
+                (metrics.width * metrics.width + metrics.height * metrics.height).sqrt();
             assert!(
                 cw >= rect_diag && ch >= rect_diag,
                 "circle too small for label '{label}': node=({cw},{ch}) text=({}, {}) diag={rect_diag}",
@@ -1252,7 +1260,9 @@ mod tests {
         (v * 1000.0).round() as i64
     }
 
-    fn build_graph_from_numeric_ref_input(reference: &MermaidDagreInputRef) -> dagre_rust::LayoutGraph {
+    fn build_graph_from_numeric_ref_input(
+        reference: &MermaidDagreInputRef,
+    ) -> dagre_rust::LayoutGraph {
         let mut g = dagre_rust::Graph::with_options(&dagre_rust::GraphOptions {
             directed: true,
             multigraph: true,
@@ -1393,11 +1403,8 @@ mod tests {
         assert!(approx_eq(reference.graph.marginx, gl.marginx, 1e-6));
         assert!(approx_eq(reference.graph.marginy, gl.marginy, 1e-6));
 
-        let expected_nodes: HashMap<_, _> = reference
-            .nodes
-            .iter()
-            .map(|n| (n.id.as_str(), n))
-            .collect();
+        let expected_nodes: HashMap<_, _> =
+            reference.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
         assert_eq!(expected_nodes.len(), g.nodes().len());
 
         for node_id in g.nodes() {
@@ -1424,11 +1431,7 @@ mod tests {
                 let el = g
                     .edge_by_obj(&edge)
                     .unwrap_or_else(|| panic!("missing edge label for {} -> {}", edge.v, edge.w));
-                (
-                    edge.v.clone(),
-                    edge.w.clone(),
-                    milli(el.minlen),
-                )
+                (edge.v.clone(), edge.w.clone(), milli(el.minlen))
             })
             .collect();
         let actual_edges: HashSet<_> = actual_edges
@@ -1459,11 +1462,8 @@ mod tests {
         assert!(approx_eq(reference.graph.marginx, gl.marginx, 1e-6));
         assert!(approx_eq(reference.graph.marginy, gl.marginy, 1e-6));
 
-        let expected_nodes: HashMap<_, _> = reference
-            .nodes
-            .iter()
-            .map(|n| (n.id.as_str(), n))
-            .collect();
+        let expected_nodes: HashMap<_, _> =
+            reference.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
         assert!(
             g.nodes().len() >= expected_nodes.len(),
             "expected at least {} nodes, got {}",
@@ -1495,11 +1495,7 @@ mod tests {
                 let el = g
                     .edge_by_obj(&edge)
                     .unwrap_or_else(|| panic!("missing edge label for {} -> {}", edge.v, edge.w));
-                (
-                    edge.v.clone(),
-                    edge.w.clone(),
-                    milli(el.minlen),
-                )
+                (edge.v.clone(), edge.w.clone(), milli(el.minlen))
             })
             .collect();
         let actual_edges: HashSet<_> = actual_edges
@@ -1537,11 +1533,8 @@ mod tests {
         assert!(approx_eq(reference.graph.marginx, gl.marginx, 1e-6));
         assert!(approx_eq(reference.graph.marginy, gl.marginy, 1e-6));
 
-        let expected_nodes: HashMap<_, _> = reference
-            .nodes
-            .iter()
-            .map(|n| (n.id.as_str(), n))
-            .collect();
+        let expected_nodes: HashMap<_, _> =
+            reference.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
         assert_eq!(expected_nodes.len(), g.nodes().len());
 
         for node_id in g.nodes() {
@@ -1568,11 +1561,7 @@ mod tests {
                 let el = g
                     .edge_by_obj(&edge)
                     .unwrap_or_else(|| panic!("missing edge label for {} -> {}", edge.v, edge.w));
-                (
-                    edge.v.clone(),
-                    edge.w.clone(),
-                    milli(el.minlen),
-                )
+                (edge.v.clone(), edge.w.clone(), milli(el.minlen))
             })
             .collect();
         let actual_edges: HashSet<_> = actual_edges
@@ -1624,7 +1613,11 @@ mod tests {
                 "node y mismatch for {}",
                 expected.id
             );
-            assert!(approx_eq(nl.width, expected.width, 1e-6), "node width mismatch for {}", expected.id);
+            assert!(
+                approx_eq(nl.width, expected.width, 1e-6),
+                "node width mismatch for {}",
+                expected.id
+            );
             assert!(
                 approx_eq(nl.height, expected.height, 1e-6),
                 "node height mismatch for {}",
@@ -1643,10 +1636,18 @@ mod tests {
                 .edges()
                 .into_iter()
                 .find(|e| e.v == expected.from && e.w == expected.to)
-                .unwrap_or_else(|| panic!("missing edge in dagre output: {} -> {}", expected.from, expected.to));
-            let el = g
-                .edge_by_obj(&edge_obj)
-                .unwrap_or_else(|| panic!("missing edge label for {} -> {}", expected.from, expected.to));
+                .unwrap_or_else(|| {
+                    panic!(
+                        "missing edge in dagre output: {} -> {}",
+                        expected.from, expected.to
+                    )
+                });
+            let el = g.edge_by_obj(&edge_obj).unwrap_or_else(|| {
+                panic!(
+                    "missing edge label for {} -> {}",
+                    expected.from, expected.to
+                )
+            });
 
             assert!(
                 approx_eq(el.minlen, expected.minlen, 1e-6),
@@ -1661,7 +1662,9 @@ mod tests {
                 expected.from,
                 expected.to
             );
-            for (idx, (actual_p, expected_p)) in el.points.iter().zip(expected.points.iter()).enumerate() {
+            for (idx, (actual_p, expected_p)) in
+                el.points.iter().zip(expected.points.iter()).enumerate()
+            {
                 assert!(
                     approx_eq(actual_p.x, expected_p.x, 1e-6),
                     "edge point[{idx}] x mismatch for {} -> {}",
@@ -1738,11 +1741,8 @@ mod tests {
         const NODE_DIM_TOLERANCE: f64 = 20.0;
         const EDGE_DIM_TOLERANCE: f64 = 20.0;
 
-        let expected_nodes: HashMap<_, _> = reference
-            .nodes
-            .iter()
-            .map(|n| (n.id.as_str(), n))
-            .collect();
+        let expected_nodes: HashMap<_, _> =
+            reference.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
         assert_eq!(expected_nodes.len(), g.nodes().len());
         for node_id in g.nodes() {
             let expected = expected_nodes
@@ -1781,12 +1781,9 @@ mod tests {
                 .edge_by_obj(&edge)
                 .unwrap_or_else(|| panic!("missing edge label for {} -> {}", edge.v, edge.w));
             let key = (edge.v.as_str(), edge.w.as_str());
-            let expected = expected_edges.get(&key).unwrap_or_else(|| {
-                panic!(
-                    "missing expected edge for {} -> {}",
-                    edge.v, edge.w
-                )
-            });
+            let expected = expected_edges
+                .get(&key)
+                .unwrap_or_else(|| panic!("missing expected edge for {} -> {}", edge.v, edge.w));
 
             assert!(
                 approx_eq(expected.width, el.width, EDGE_DIM_TOLERANCE),
@@ -1808,11 +1805,8 @@ mod tests {
     #[ignore = "debug helper for size parity tuning"]
     fn debug_example5_node_size_diffs_against_mermaidjs() {
         let (g, reference) = build_example5_dagre_and_ref();
-        let expected_nodes: HashMap<_, _> = reference
-            .nodes
-            .iter()
-            .map(|n| (n.id.as_str(), n))
-            .collect();
+        let expected_nodes: HashMap<_, _> =
+            reference.nodes.iter().map(|n| (n.id.as_str(), n)).collect();
 
         let mut deltas = Vec::new();
         for node_id in g.nodes() {

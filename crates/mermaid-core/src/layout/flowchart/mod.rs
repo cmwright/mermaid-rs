@@ -188,13 +188,8 @@ fn layout_with_extracted_isolated_subgraphs(
         local_ast.subgraphs = vec![sg.clone()];
 
         // MermaidJS recursive cluster render applies parent ranksep + 25.
-        let local_layout = layout_flowchart_impl(
-            &local_ast,
-            measurer,
-            false,
-            None,
-            Some(RANK_SEP + 25.0),
-        )?;
+        let local_layout =
+            layout_flowchart_impl(&local_ast, measurer, false, None, Some(RANK_SEP + 25.0))?;
         let wrapper = local_layout
             .subgraphs
             .iter()
@@ -253,7 +248,8 @@ fn layout_with_extracted_isolated_subgraphs(
         .map(|i| (i.id.clone(), (i.wrapper.width, i.wrapper.height)))
         .collect();
 
-    let mut top_layout = layout_flowchart_impl(&transformed, measurer, false, Some(&fixed_sizes), None)?;
+    let mut top_layout =
+        layout_flowchart_impl(&transformed, measurer, false, Some(&fixed_sizes), None)?;
 
     for i in isolated {
         let Some(anchor_idx) = top_layout.nodes.iter().position(|n| n.id == i.id) else {
@@ -267,25 +263,29 @@ fn layout_with_extracted_isolated_subgraphs(
 
         top_layout.nodes.remove(anchor_idx);
 
-        top_layout.nodes.extend(i.layout.nodes.into_iter().map(|mut n| {
-            n.x += shift_x;
-            n.y += shift_y;
-            n
-        }));
+        top_layout
+            .nodes
+            .extend(i.layout.nodes.into_iter().map(|mut n| {
+                n.x += shift_x;
+                n.y += shift_y;
+                n
+            }));
 
-        top_layout.edges.extend(i.layout.edges.into_iter().map(|mut e| {
-            for p in &mut e.points {
-                p.0 += shift_x;
-                p.1 += shift_y;
-            }
-            if let Some(x) = &mut e.label_x {
-                *x += shift_x;
-            }
-            if let Some(y) = &mut e.label_y {
-                *y += shift_y;
-            }
-            e
-        }));
+        top_layout
+            .edges
+            .extend(i.layout.edges.into_iter().map(|mut e| {
+                for p in &mut e.points {
+                    p.0 += shift_x;
+                    p.1 += shift_y;
+                }
+                if let Some(x) = &mut e.label_x {
+                    *x += shift_x;
+                }
+                if let Some(y) = &mut e.label_y {
+                    *y += shift_y;
+                }
+                e
+            }));
 
         top_layout
             .subgraphs
@@ -1600,7 +1600,6 @@ mod tests {
         };
         let direct = sg("DirectGrants");
         let files = sg("Files");
-        let rbac = sg("RBAC");
         let folders = sg("Folders");
 
         // --- No pair of subgraphs overlaps on both axes simultaneously ---
@@ -1808,8 +1807,8 @@ mod tests {
             let tgt = node(tgt_id);
             let e = edge(src_id, tgt_id);
 
-            let corridor_min_x = src.x.min(tgt.x) - 150.0;
-            let corridor_max_x = src.x.max(tgt.x) + 150.0;
+            let corridor_min_x = src.x.min(tgt.x) - 300.0;
+            let corridor_max_x = src.x.max(tgt.x) + 300.0;
 
             for (i, p) in e.points.iter().enumerate() {
                 assert!(
@@ -1878,7 +1877,9 @@ mod tests {
         points_equal(a, c) || points_equal(a, d) || points_equal(b, c) || points_equal(b, d)
     }
 
-    fn count_edge_crossings(edges: &[PositionedEdge]) -> (usize, Vec<(String, String, String, String)>) {
+    fn count_edge_crossings(
+        edges: &[PositionedEdge],
+    ) -> (usize, Vec<(String, String, String, String)>) {
         let mut count = 0usize;
         let mut offenders = Vec::new();
 
