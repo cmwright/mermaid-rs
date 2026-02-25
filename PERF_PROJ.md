@@ -131,8 +131,40 @@ All tests green: 20/20 dagre-rust parity, 77/77 e2e, 1/1 examples_comparison.
 
 ---
 
-## Phase 4: NodeLabel Diet (Planned)
-Slim down the heavyweight NodeLabel struct.
+## Future Work
 
-## Phase 5: mermaid-core Optimizations (Planned)
-Font caching, persistent TextMeasurer, etc.
+### Current profile breakdown (example5, 6.9ms avg)
+| Stage | Time | % |
+|-------|------|---|
+| order (crossing minimization) | 2.6 ms | 38% |
+| position (Brandes-Kopf) | 1.9 ms | 27% |
+| rank_assign (network simplex) | 1.3 ms | 19% |
+| everything else | ~1.1 ms | 16% |
+
+### High-impact opportunities (not yet implemented)
+
+**Incremental network simplex updates** (rank phase, est. 1.3-2x for ranking)
+- `exchange_edges` re-initializes the entire spanning tree on every pivot (full DFS for low/lim values + full postorder for cut values)
+- Only the affected subtree needs updating after a pivot — described in Gansner et al. paper
+- Files: `rank/network_simplex.rs:exchange_edges`, `init_low_lim_values`, `init_cut_values`
+
+**Cache/reuse layer matrix** (order phase, est. small)
+- `build_layer_matrix` is called every iteration of the order loop (4-8 times), iterating all nodes each time
+- Could be built once and incrementally updated when node orders change
+- Files: `util.rs:build_layer_matrix`, `order/mod.rs`
+
+**Reduce string allocations in BK algorithm** (position phase, est. medium)
+- `vertical_alignment` allocates 3 `HashMap<String, String>` of size N per pass (4 passes = 12 HashMaps)
+- `horizontal_compaction` builds a block graph (full Graph construction) per pass
+- `find_smallest_width_alignment` iterates all nodes 4 times
+- Could use integer-indexed arrays instead of string-keyed HashMaps
+- Files: `position/bk.rs`
+
+**Lightweight layer graph type** (order phase, est. medium)
+- `build_layer_graph` creates a full compound `LayoutGraph` per rank per sweep direction
+- Only needs: node order, edge weight, parent/children — could use a much simpler struct
+- Files: `order/build_layer_graph.rs`
+
+**mermaid-core optimizations** (outside dagre, est. small for layout-heavy cases)
+- Font caching, persistent TextMeasurer, avoid repeated font loading
+- Files: `crates/mermaid-core/`
