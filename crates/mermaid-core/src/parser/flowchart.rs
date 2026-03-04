@@ -4,6 +4,7 @@ use pest_derive::Parser;
 use crate::ast::common::{parse_style_string, StyleProperties};
 use crate::ast::flowchart::*;
 use crate::error::{extract_snippet, MermaidError, Result};
+use crate::parser::diagnostics::{build_parse_message, ParseContext};
 
 #[derive(Parser)]
 #[grammar = "parser/flowchart.pest"]
@@ -16,20 +17,27 @@ pub fn parse_flowchart(source: &str) -> Result<FlowchartAst> {
             pest::error::LineColLocation::Pos((l, c)) => (l, c),
             pest::error::LineColLocation::Span((l, c), _) => (l, c),
         };
+        let message = build_parse_message(
+            source,
+            &e,
+            flowchart_rule_label,
+            &[hint_reserved_end_identifier],
+        );
         MermaidError::Parse {
             line,
             col,
-            message: format!("{}", e),
+            message,
             source_snippet: Some(extract_snippet(source, line)),
         }
     })?;
 
     let mut ast = FlowchartAst::default();
+    let mut generated_subgraph_id = 0usize;
 
     for pair in pairs {
         if pair.as_rule() == Rule::flowchart {
             for inner in pair.into_inner() {
-                process_top_level(&mut ast, inner)?;
+                process_top_level(&mut ast, inner, &mut generated_subgraph_id)?;
             }
         }
     }
@@ -37,7 +45,45 @@ pub fn parse_flowchart(source: &str) -> Result<FlowchartAst> {
     Ok(ast)
 }
 
-fn process_top_level(ast: &mut FlowchartAst, pair: pest::iterators::Pair<'_, Rule>) -> Result<()> {
+fn flowchart_rule_label(rule: Rule) -> Option<&'static str> {
+    match rule {
+        Rule::diagram_header => Some("diagram header"),
+        Rule::direction => Some("direction (TB/TD/BT/LR/RL)"),
+        Rule::statement => Some("statement"),
+        Rule::node_stmt | Rule::node_def | Rule::node_id => Some("node declaration"),
+        Rule::link_chain | Rule::edge | Rule::edge_operator => Some("edge declaration"),
+        Rule::subgraph_block => Some("subgraph block"),
+        Rule::class_def_stmt => Some("classDef statement"),
+        Rule::class_assign_stmt => Some("class assignment"),
+        Rule::style_stmt => Some("style statement"),
+        Rule::link_style_stmt => Some("linkStyle statement"),
+        _ => None,
+    }
+}
+
+fn hint_reserved_end_identifier(ctx: &ParseContext<'_, Rule>) -> Option<String> {
+    if ctx.line == 0 || ctx.col == 0 {
+        return None;
+    }
+
+    if ctx.line_text.trim() == "end" {
+        return None;
+    }
+
+    if ctx.token.as_deref() == Some("end") {
+        return Some(
+            "`end` is reserved in flowcharts (used to close `subgraph`). Rename the node id (e.g. `finish` or `endNode`).".to_string(),
+        );
+    }
+
+    None
+}
+
+fn process_top_level(
+    ast: &mut FlowchartAst,
+    pair: pest::iterators::Pair<'_, Rule>,
+    generated_subgraph_id: &mut usize,
+) -> Result<()> {
     match pair.as_rule() {
         Rule::diagram_header => {
             for inner in pair.into_inner() {
@@ -54,7 +100,7 @@ fn process_top_level(ast: &mut FlowchartAst, pair: pest::iterators::Pair<'_, Rul
             upsert_node(&mut ast.nodes, node);
         }
         Rule::subgraph_block => {
-            let sg = parse_subgraph(pair)?;
+            let sg = parse_subgraph(pair, generated_subgraph_id)?;
             ast.subgraphs.push(sg);
         }
         Rule::class_def_stmt => {
@@ -408,7 +454,10 @@ fn normalize_edge_label(raw: &str) -> String {
     trimmed.to_string()
 }
 
-fn parse_subgraph(pair: pest::iterators::Pair<'_, Rule>) -> Result<SubgraphDef> {
+fn parse_subgraph(
+    pair: pest::iterators::Pair<'_, Rule>,
+    generated_subgraph_id: &mut usize,
+) -> Result<SubgraphDef> {
     let mut id = String::new();
     let mut label: Option<String> = None;
     let mut direction: Option<Direction> = None;
@@ -439,11 +488,16 @@ fn parse_subgraph(pair: pest::iterators::Pair<'_, Rule>) -> Result<SubgraphDef> 
                 upsert_node(&mut nodes, node);
             }
             Rule::subgraph_block => {
-                let sg = parse_subgraph(inner)?;
+                let sg = parse_subgraph(inner, generated_subgraph_id)?;
                 subgraphs.push(sg);
             }
             _ => {}
         }
+    }
+
+    if id.is_empty() {
+        *generated_subgraph_id += 1;
+        id = format!("subgraph_{}", *generated_subgraph_id);
     }
 
     Ok(SubgraphDef {
@@ -921,6 +975,21 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_subgraph_with_quoted_label_only() {
+        let source = r#"flowchart LR
+    subgraph "LangGraph Runtime"
+        A --> B
+    end"#;
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.subgraphs.len(), 1);
+        assert_eq!(
+            ast.subgraphs[0].label.as_deref(),
+            Some("LangGraph Runtime")
+        );
+        assert_eq!(ast.subgraphs[0].id, "subgraph_1");
+    }
+
+    #[test]
     fn test_upsert_node_updates_existing() {
         let mut nodes = vec![NodeDef {
             id: "A".to_string(),
@@ -954,6 +1023,41 @@ mod tests {
     fn test_parse_direction_empty_and_whitespace() {
         let result = parse_direction("  ");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reserved_end_node_id_has_helpful_hint() {
+        let source = r#"flowchart LR
+    post --> end["Stream final answer + state updates"]"#;
+        let result = parse_flowchart(source);
+        assert!(result.is_err());
+        if let Err(crate::error::MermaidError::Parse { message, .. }) = result {
+            assert!(message.contains("Hint: `end` is reserved"));
+            assert!(message.contains("finish"));
+        }
+    }
+
+    #[test]
+    fn test_reserved_end_bare_node_has_helpful_hint() {
+        let source = r#"flowchart LR
+    post --> end"#;
+        let result = parse_flowchart(source);
+        assert!(result.is_err());
+        if let Err(crate::error::MermaidError::Parse { message, .. }) = result {
+            assert!(message.contains("Hint: `end` is reserved"));
+        }
+    }
+
+    #[test]
+    fn test_unforeseen_syntax_uses_fallback_message() {
+        let source = r#"flowchart LR
+    A -?> B"#;
+        let result = parse_flowchart(source);
+        assert!(result.is_err());
+        if let Err(crate::error::MermaidError::Parse { message, .. }) = result {
+            assert!(message.contains("Unexpected syntax near"));
+            assert!(message.contains("Expected one of"));
+        }
     }
 
     #[test]

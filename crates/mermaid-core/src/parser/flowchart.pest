@@ -44,15 +44,17 @@ directive_body = @{ (!"}" ~ ANY)* }
 // ── Subgraphs ───────────────────────────────────────────────
 
 subgraph_block = {
-    "subgraph" ~ subgraph_id ~ subgraph_label? ~ NEWLINE+ ~
+    "subgraph" ~ subgraph_header ~ NEWLINE+ ~
     subgraph_direction? ~
     (statement ~ stmt_sep)* ~ statement? ~
     NEWLINE* ~ "end"
 }
 
+subgraph_header = _{ subgraph_id ~ subgraph_label? | subgraph_label }
+
 subgraph_id = @{ identifier }
 
-subgraph_label = { "[\"" ~ quoted_text ~ "\"]" | "[" ~ bracket_text ~ "]" }
+subgraph_label = { "[\"" ~ quoted_text ~ "\"]" | "[" ~ bracket_text ~ "]" | "\"" ~ quoted_text ~ "\"" }
 
 subgraph_direction = { "direction" ~ direction ~ NEWLINE+ }
 

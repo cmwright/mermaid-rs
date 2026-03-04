@@ -1,3 +1,4 @@
+pub(crate) mod diagnostics;
 pub mod architecture;
 pub mod er_diagram;
 pub mod flowchart;
