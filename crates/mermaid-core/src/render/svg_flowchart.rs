@@ -80,11 +80,19 @@ pub fn render_svg(graph: &PositionedGraph, theme: &Theme) -> Result<String> {
             .then(a.id.cmp(&b.id))
     });
 
-    // Mermaid-like layer grouping: clusters, edge paths, edge labels, nodes.
+    // Layer grouping: clusters (bg), nodes, edge paths, then edge labels on top.
+    // Edges render above nodes so arrows aren't hidden behind node shapes.
     svg.push_str(r#"<g class="clusters">"#);
     svg.push('\n');
     for sg in &subgraphs {
         render_subgraph(&mut svg, sg, theme);
+    }
+    svg.push_str("</g>\n");
+
+    svg.push_str(r#"<g class="nodes">"#);
+    svg.push('\n');
+    for node in &nodes {
+        render_node(&mut svg, node, theme);
     }
     svg.push_str("</g>\n");
 
@@ -99,13 +107,6 @@ pub fn render_svg(graph: &PositionedGraph, theme: &Theme) -> Result<String> {
     svg.push('\n');
     for edge in &edges {
         render_edge_label(&mut svg, edge, theme);
-    }
-    svg.push_str("</g>\n");
-
-    svg.push_str(r#"<g class="nodes">"#);
-    svg.push('\n');
-    for node in &nodes {
-        render_node(&mut svg, node, theme);
     }
     svg.push_str("</g>\n");
 

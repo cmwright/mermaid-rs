@@ -31,6 +31,12 @@ pub fn collect_all_nodes(
     let sg_ids = subgraph_ids_recursive(&ast.subgraphs);
 
     for node in &ast.nodes {
+        // Skip bare node references whose ID matches a subgraph — the parser
+        // creates these when an edge references a subgraph ID (e.g. `A --> SG`).
+        // They must not be materialised as regular nodes.
+        if sg_ids.contains(&node.id) {
+            continue;
+        }
         let style = resolve_node_style(
             node,
             class_defs,
@@ -593,7 +599,7 @@ fn register_subgraphs_recursive(
     }
 }
 
-fn subgraph_ids_recursive(subgraphs: &[SubgraphDef]) -> std::collections::HashSet<String> {
+pub fn subgraph_ids_recursive(subgraphs: &[SubgraphDef]) -> std::collections::HashSet<String> {
     let mut ids = std::collections::HashSet::new();
     for sg in subgraphs {
         ids.insert(sg.id.clone());

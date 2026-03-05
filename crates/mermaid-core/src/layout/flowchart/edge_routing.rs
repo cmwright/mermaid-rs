@@ -237,10 +237,31 @@ fn route_short_edge(
     let start = from_side
         .map(|s| intersect_shape_with_fixed_side(from, s))
         .unwrap_or_else(|| intersect_shape(from, to.x, to.y));
+
+    // When the source is inside the target (e.g. node inside a subgraph),
+    // the standard center-to-center intersection exits the target on the
+    // wrong side (toward the source). Instead, intersect outward: from
+    // the target center in the same direction as source→target.
     let end = to_side
         .map(|s| intersect_shape_with_fixed_side(to, s))
-        .unwrap_or_else(|| intersect_shape(to, from.x, from.y));
+        .unwrap_or_else(|| {
+            if node_contains(to, from.x, from.y) {
+                // Source inside target: exit target on the far side
+                let far_x = to.x + (to.x - from.x);
+                let far_y = to.y + (to.y - from.y);
+                intersect_shape(to, far_x, far_y)
+            } else {
+                intersect_shape(to, from.x, from.y)
+            }
+        });
     vec![start, end]
+}
+
+/// Check if a point (px, py) is inside a node's bounding box.
+fn node_contains(node: &PositionedNode, px: f64, py: f64) -> bool {
+    let hw = node.width / 2.0;
+    let hh = node.height / 2.0;
+    px >= node.x - hw && px <= node.x + hw && py >= node.y - hh && py <= node.y + hh
 }
 
 fn intersect_shape_with_fixed_side(node: &PositionedNode, side: EdgeSide) -> (f64, f64) {

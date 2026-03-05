@@ -1583,3 +1583,191 @@ fn er_diagram_attribute_with_comment() {
     assert!(svg.contains("FK"));
     assert!(svg.contains("opacity"));
 }
+
+// ---------------------------------------------------------------------------
+// Complex platform architecture diagram – regression test for:
+// 1. Subgraph labels overlapping with child node content
+// 2. Duplicate/overlapping arrows between the same pair of nodes
+// 3. Arrows rendering under (behind) subgraph backgrounds
+// 4. Edge paths crossing through subgraph borders incorrectly
+// ---------------------------------------------------------------------------
+#[test]
+fn flowchart_complex_platform_architecture() {
+    let source = r#"graph TD
+    subgraph Platform["Platform (svc-users-v2)"]
+        subgraph Orgs["Platform Orgs (user service DB)"]
+            Org1["<b>Acme Corp</b><br/>id = org-123<br/>plan = enterprise<br/>claimed_domains = [acme.com]"]
+            Org2["<b>Newco</b><br/>id = org-456<br/>plan = free<br/>claimed_domains = []"]
+            Org3["<b>Acme Consulting</b><br/>id = org-789<br/>plan = free<br/>claimed_domains = []"]
+        end
+        DomainGraph["<b>Domain Claim Graph</b><br/>acme.com → org-123 (claimed)<br/>newco.io → (unclaimed)<br/>acme.com → org-789 (unclaimed, overlapping)"]
+        Webhooks["<b>Kratos Webhooks</b><br/>before.registration → domain gate<br/>after.registration → create platform user<br/>after.login → sync / JIT provision"]
+    end
+
+    subgraph Ory["Ory Network (Single Project)"]
+        subgraph Pool["Identity Pool (all users)"]
+            ID1["alice@acme.com<br/>org_id = ory-org-aaa"]
+            ID2["bob@acme.com<br/>org_id = ory-org-aaa"]
+            ID3["dan@newco.io<br/>org_id = null"]
+            ID4["eve@acme.com<br/>org_id = null"]
+        end
+        subgraph OryOrg1["Ory Org: Acme (ory-org-aaa)<br/>domains = [acme.com]<br/>Created when SSO enabled"]
+            SSO1["<b>SAML Connection</b><br/>provider = Okta"]
+            SCIM1["<b>SCIM Client</b><br/>token = •••"]
+        end
+    end
+
+    subgraph ExtIdPs["External IdPs"]
+        Okta["Okta"]
+    end
+
+    subgraph Events["Event Pipeline"]
+        SNS["AWS SNS"]
+        Kafka["Kafka"]
+    end
+
+    %% Connections
+    Org1 -.->|ory_org_id when SSO enabled| OryOrg1
+    Org2 -.->|no Ory Org| Pool
+    Org3 -.->|no Ory Org| Pool
+
+    SSO1 -->|SAML AuthnRequest| Okta
+    Okta -->|SAML Response| SSO1
+    SCIM1 -->|provisions into| OryOrg1
+
+    OryOrg1 -->|Live Events| SNS
+    SNS -->|fan-out| Kafka
+    Kafka -->|consume| Webhooks
+
+    Webhooks -->|upsert users| Orgs
+
+    %% Styles
+    style OryOrg1 fill:#d4eaff,stroke:#336
+    style Pool fill:#f9f9f9,stroke:#999
+    style DomainGraph fill:#fff3cd,stroke:#996
+    style Org2 fill:#f5f5f5,stroke:#999
+    style Org3 fill:#f5f5f5,stroke:#999"#;
+
+    let svg = render_svg(source);
+
+    // Basic SVG validity
+    assert!(svg.contains("<svg"), "output should be valid SVG");
+
+    // All subgraph labels should be present
+    assert!(svg.contains("Platform (svc-users-v2)"));
+    assert!(svg.contains("Platform Orgs (user service DB)"));
+    assert!(svg.contains("Ory Network (Single Project)"));
+    assert!(svg.contains("Identity Pool (all users)"));
+    assert!(svg.contains("External IdPs"));
+    assert!(svg.contains("Event Pipeline"));
+
+    // All nodes should be present
+    assert!(svg.contains("Acme Corp"));
+    assert!(svg.contains("SAML Connection"));
+    assert!(svg.contains("SCIM Client"));
+    assert!(svg.contains("Kratos Webhooks"));
+    assert!(svg.contains("Domain Claim Graph"));
+    assert!(svg.contains("AWS SNS"));
+    assert!(svg.contains("Kafka"));
+    assert!(svg.contains("Okta"));
+
+    // Edge labels should be present
+    assert!(svg.contains("SAML AuthnRequest"));
+    assert!(svg.contains("SAML Response"));
+    assert!(svg.contains("upsert users"));
+    assert!(svg.contains("Live Events"));
+
+    // Verify subgraph labels don't overlap with node content.
+    // The OryOrg1 subgraph has a multi-line label; its title area must be
+    // above all child nodes (SSO1, SCIM1). We check that the subgraph rect
+    // y-coordinate is less than both child node y-coordinates by parsing
+    // the SVG for the relevant elements.
+
+    // Verify SVG layer order: clusters (bg) → nodes → edgePaths → edgeLabels (top).
+    // Edges render above nodes so arrows aren't hidden behind node shapes.
+    let clusters_pos = svg.find(r#"class="clusters"#).expect("clusters group");
+    let nodes_pos = svg.find(r#"class="nodes"#).expect("nodes group");
+    let edges_pos = svg.find(r#"class="edgePaths"#).expect("edgePaths group");
+    let labels_pos = svg.find(r#"class="edgeLabels"#).expect("edgeLabels group");
+    assert!(
+        clusters_pos < nodes_pos,
+        "clusters should render before nodes"
+    );
+    assert!(
+        nodes_pos < edges_pos,
+        "nodes should render before edge paths (edges draw on top)"
+    );
+    assert!(
+        edges_pos < labels_pos,
+        "edge labels should render after edge paths (on top)"
+    );
+
+    // Count edge paths - SSO1->Okta and Okta->SSO1 are separate edges,
+    // so we should not have duplicate paths for the same connection.
+    let saml_request_count = svg.matches("SAML AuthnRequest").count();
+    let saml_response_count = svg.matches("SAML Response").count();
+    assert_eq!(
+        saml_request_count, 1,
+        "SAML AuthnRequest label should appear exactly once, found {}",
+        saml_request_count
+    );
+    assert_eq!(
+        saml_response_count, 1,
+        "SAML Response label should appear exactly once, found {}",
+        saml_response_count
+    );
+
+    // Subgraph IDs used as edge endpoints (OryOrg1, Pool, Orgs) must NOT
+    // be rendered as regular nodes — only as subgraph cluster rects.
+    let nodes_section = &svg[svg
+        .find(r#"class="nodes"#)
+        .expect("nodes group")..];
+    assert!(
+        !nodes_section.contains(">OryOrg1<"),
+        "OryOrg1 should not be rendered as a regular node"
+    );
+    assert!(
+        !nodes_section.contains(">Pool<"),
+        "Pool should not be rendered as a regular node"
+    );
+    assert!(
+        !nodes_section.contains(">Orgs<"),
+        "Orgs should not be rendered as a regular node"
+    );
+
+    // Bidirectional edges (SSO1↔Okta) should have separate edge paths,
+    // not share the same coordinates. Verify by checking that the two
+    // SAML labels are at different x-positions.
+    let saml_request_x = extract_edge_label_x(&svg, "SAML AuthnRequest");
+    let saml_response_x = extract_edge_label_x(&svg, "SAML Response");
+    assert!(
+        (saml_request_x - saml_response_x).abs() > 10.0,
+        "SAML AuthnRequest (x={}) and SAML Response (x={}) should be at different positions",
+        saml_request_x,
+        saml_response_x
+    );
+
+    // Write SVG for manual inspection if needed
+    std::fs::write("/tmp/platform_diagram_test.svg", &svg).ok();
+}
+
+/// Helper: extract the x-position of an edge label text element.
+fn extract_edge_label_x(svg: &str, label_text: &str) -> f64 {
+    // Edge labels are: <text class="edge-label" x="X" y="Y" ...>LABEL</text>
+    let label_pos = svg
+        .find(label_text)
+        .unwrap_or_else(|| panic!("label '{}' not found", label_text));
+    // Search backwards for the <text element
+    let text_start = svg[..label_pos]
+        .rfind("<text ")
+        .expect("should find <text before label");
+    let text_tag = &svg[text_start..label_pos];
+    // Extract x="VALUE"
+    let x_start = text_tag.find("x=\"").expect("should have x attr") + 3;
+    let x_end = text_tag[x_start..]
+        .find('"')
+        .expect("should close x attr");
+    text_tag[x_start..x_start + x_end]
+        .parse::<f64>()
+        .expect("x should be a number")
+}

@@ -73,43 +73,71 @@ fn layout_flowchart_impl(
     let mut positioned_nodes = build_positioned_nodes_from_dagre(&dagre_graph, &node_data_map);
     let extraction = extract_edge_data_from_dagre(&dagre_graph);
 
-    // 7. Extract subgraph positions from dagre compound layout,
-    //    then fall back to bounding-box computation for any subgraphs
-    //    dagre didn't position (e.g. those with no children).
-    let mut positioned_subgraphs =
-        build_positioned_subgraphs_from_dagre(&dagre_graph, &ast.subgraphs, &ast.style_overrides);
-    // If dagre didn't produce positions for some subgraphs, compute fallbacks
-    // and merge only the missing IDs, preserving dagre-derived positions.
-    if positioned_subgraphs.len() < count_subgraphs(&ast.subgraphs) {
-        let fallback_subgraphs = compound::position_subgraphs(
-            &ast.subgraphs,
-            &positioned_nodes,
-            &ast.style_overrides,
-            measurer,
-            &membership,
-        );
-        let dagre_by_id: HashMap<String, PositionedSubgraph> = positioned_subgraphs
-            .drain(..)
-            .map(|s| (s.id.clone(), s))
-            .collect();
-        positioned_subgraphs = fallback_subgraphs
-            .into_iter()
-            .map(|s| dagre_by_id.get(&s.id).cloned().unwrap_or(s))
-            .collect();
+    // 7. Compute subgraph bounding boxes from positioned nodes.
+    //    compound::position_subgraphs processes children before parents,
+    //    correctly handles multi-line title heights, and ensures parent
+    //    subgraphs fully contain their children.
+    let mut positioned_subgraphs = compound::position_subgraphs(
+        &ast.subgraphs,
+        &positioned_nodes,
+        &ast.style_overrides,
+        measurer,
+        &membership,
+    );
+
+    // 7.5. Create synthetic positioned-node entries for subgraph IDs that are
+    //      edge endpoints so that edge routing can find them.  Dagre's
+    //      raw_points already contain correct border-intersection paths;
+    //      these synthetic nodes just need to exist for the lookup.
+    let sg_ids = graph_builder::subgraph_ids_recursive(&ast.subgraphs);
+    for edge in &all_edges {
+        for id in [&edge.from, &edge.to] {
+            if sg_ids.contains(id)
+                && !positioned_nodes.iter().any(|n| n.id == *id)
+            {
+                if let Some(sg) = positioned_subgraphs.iter().find(|s| s.id == *id) {
+                    positioned_nodes.push(PositionedNode {
+                        id: sg.id.clone(),
+                        label: sg.label.clone().unwrap_or_default(),
+                        shape: crate::ast::flowchart::NodeShape::Rectangle,
+                        style: sg.style.clone(),
+                        x: sg.x + sg.width / 2.0,
+                        y: sg.y + sg.height / 2.0,
+                        width: sg.width,
+                        height: sg.height,
+                    });
+                }
+            }
+        }
     }
 
-    // 8. Route edges using dagre bend points
+    // 8. Route edges using dagre bend points.
+    //    For edges involving subgraph endpoints, remove dagre's raw/bend points
+    //    so route_edges falls back to direct geometric routing. Dagre's compound
+    //    border-node routing produces unintuitive paths for child→parent edges.
+    let mut raw_points = extraction.raw_points;
+    let mut bend_pts = extraction.bend_points;
+    for edge in &all_edges {
+        if sg_ids.contains(&edge.from) || sg_ids.contains(&edge.to) {
+            let key = (edge.from.clone(), edge.to.clone());
+            raw_points.remove(&key);
+            bend_pts.remove(&key);
+        }
+    }
     let mut positioned_edges = edge_routing::route_edges(
         &positioned_nodes,
         &all_edges,
         is_horizontal,
-        &extraction.raw_points,
-        &extraction.bend_points,
+        &raw_points,
+        &bend_pts,
         &extraction.label_positions,
         &extraction.label_dimensions,
     );
 
-    // 8.5. Adjust edge labels to avoid subgraph border/title overlaps
+    // 8.5. Remove synthetic subgraph-as-node entries so they aren't rendered.
+    positioned_nodes.retain(|n| !sg_ids.contains(&n.id));
+
+    // 8.6. Adjust edge labels to avoid subgraph border/title overlaps
     edge_routing::adjust_labels_for_subgraph_boundaries(
         &mut positioned_edges,
         &positioned_subgraphs,
@@ -400,47 +428,73 @@ pub(crate) fn extract_edge_data_from_dagre(g: &dagre_rust::LayoutGraph) -> Dagre
     let mut label_positions = HashMap::new();
     let mut label_dimensions = HashMap::new();
 
+    // Two-pass extraction: first store all forward (actual) edge data,
+    // then fill in reversed entries only where the reverse direction has
+    // no real edge.  This prevents bidirectional edges (A→B, B→A) from
+    // clobbering each other's dagre-computed layouts.
+    struct ForwardEdge {
+        key: (String, String),
+        raw: Option<Vec<(f64, f64)>>,
+        bps: Option<Vec<(f64, f64)>>,
+    }
+    let mut forward_edges = Vec::new();
+
     for edge in g.edges() {
         let Some(el) = g.edge_by_obj(&edge) else {
             continue;
         };
 
-        // Preserve full dagre polyline for parity-first rendering on rect-like nodes.
-        if el.points.len() >= 2 {
-            let raw: Vec<(f64, f64)> = el.points.iter().map(|p| (p.x, p.y)).collect();
-            raw_points.insert((edge.v.clone(), edge.w.clone()), raw.clone());
-            let rev_raw: Vec<_> = raw.into_iter().rev().collect();
-            raw_points.insert((edge.w.clone(), edge.v.clone()), rev_raw);
-        }
+        let key = (edge.v.clone(), edge.w.clone());
+        let raw = if el.points.len() >= 2 {
+            let pts: Vec<(f64, f64)> = el.points.iter().map(|p| (p.x, p.y)).collect();
+            raw_points.insert(key.clone(), pts.clone());
+            Some(pts)
+        } else {
+            None
+        };
 
-        // Extract interior bend points from edge.points, stripping the first
-        // and last entries which are dagre's rect-intersection endpoints
-        // (added by assign_node_intersects). Our edge router computes its own
-        // shape-aware intersections, so we only need the interior waypoints
-        // from dummy nodes. For short edges (adjacent ranks), dagre only has
-        // 2 intersection points — stripping leaves nothing, so they correctly
-        // fall through to route_short_edge which applies S-curve avoidance.
-        if el.points.len() > 2 {
-            let bps: Vec<(f64, f64)> = el.points[1..el.points.len() - 1]
+        let bps = if el.points.len() > 2 {
+            let pts: Vec<(f64, f64)> = el.points[1..el.points.len() - 1]
                 .iter()
                 .map(|p| (p.x, p.y))
                 .collect();
-            bend_points.insert((edge.v.clone(), edge.w.clone()), bps.clone());
-            let rev: Vec<_> = bps.into_iter().rev().collect();
-            bend_points.insert((edge.w.clone(), edge.v.clone()), rev);
-        }
+            bend_points.insert(key.clone(), pts.clone());
+            Some(pts)
+        } else {
+            None
+        };
+
+        forward_edges.push(ForwardEdge { key, raw, bps });
 
         // Extract label position
         if let (Some(x), Some(y)) = (el.x, el.y) {
             let key = (edge.v.clone(), edge.w.clone());
             label_positions.insert(key.clone(), (x, y));
-            label_positions.insert((edge.w.clone(), edge.v.clone()), (x, y));
+            // Only fill reverse if no real edge exists in that direction
+            let rev_key = (edge.w.clone(), edge.v.clone());
+            label_positions.entry(rev_key.clone()).or_insert((x, y));
 
             // Store label dimensions
             if el.width > 0.0 || el.height > 0.0 {
                 label_dimensions.insert(key, (el.width, el.height));
-                label_dimensions.insert((edge.w.clone(), edge.v.clone()), (el.width, el.height));
+                label_dimensions
+                    .entry(rev_key)
+                    .or_insert((el.width, el.height));
             }
+        }
+    }
+
+    // Second pass: fill in reversed raw_points / bend_points for edges
+    // that don't have a real counterpart in the other direction.
+    for fe in forward_edges {
+        let rev_key = (fe.key.1, fe.key.0);
+        if let Some(raw) = fe.raw {
+            let rev_raw: Vec<_> = raw.into_iter().rev().collect();
+            raw_points.entry(rev_key.clone()).or_insert(rev_raw);
+        }
+        if let Some(bps) = fe.bps {
+            let rev_bps: Vec<_> = bps.into_iter().rev().collect();
+            bend_points.entry(rev_key).or_insert(rev_bps);
         }
     }
 
