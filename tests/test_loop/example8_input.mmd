@@ -1,0 +1,54 @@
+graph TD
+    subgraph Platform["Platform (user service DB)"]
+        Org1["<b>Acme Corp</b><br/>plan=enterprise, claimed_domains=[acme.com]<br/>ory_org_id = ory-org-aaa"]
+        Org2["<b>Newco</b><br/>plan=free, claimed_domains=[]<br/>ory_org_id = null"]
+        Org3["<b>Acme Consulting</b><br/>plan=free, claimed_domains=[]<br/>ory_org_id = null"]
+
+        U1["User: alice<br/>org = Acme Corp<br/>ory_identity_id = id-001"]
+        U2["User: bob<br/>org = Acme Corp<br/>ory_identity_id = id-002"]
+        U3["User: dan<br/>org = Newco<br/>ory_identity_id = id-003"]
+        U4["User: eve<br/>org = Acme Consulting<br/>ory_identity_id = id-004"]
+
+        Org1 --- U1
+        Org1 --- U2
+        Org2 --- U3
+        Org3 --- U4
+
+        DomainGraph[/"<b>Domain Claim Graph</b><br/>acme.com → Acme Corp (claimed)<br/>newco.io → unclaimed<br/>acme.com → Acme Consulting (not claimed, overlap ok)"/]
+    end
+
+    subgraph Ory["Ory Network (single project)"]
+        subgraph OryOrg["Ory Org: Acme<br/>id=ory-org-aaa  |  domains=[acme.com]"]
+            SSO["SAML: Okta"]
+            SCIM["SCIM Client"]
+        end
+
+        ID1["<b>Identity: alice@acme.com</b><br/>id=id-001, org_id=ory-org-aaa<br/>credentials: SAML"]
+        ID2["<b>Identity: bob@acme.com</b><br/>id=id-002, org_id=ory-org-aaa<br/>credentials: SAML + password"]
+        ID3["<b>Identity: dan@newco.io</b><br/>id=id-003, org_id=null<br/>credentials: password"]
+        ID4["<b>Identity: eve@acme.com</b><br/>id=id-004, org_id=null<br/>credentials: password"]
+
+        OryOrg --- ID1
+        OryOrg --- ID2
+    end
+
+    %% Cross-system links
+    U1 -. "ory_identity_id" .-> ID1
+    U2 -. "ory_identity_id" .-> ID2
+    U3 -. "ory_identity_id" .-> ID3
+    U4 -. "ory_identity_id" .-> ID4
+
+    Org1 -. "ory_org_id" .-> OryOrg
+
+    %% Styles
+    style OryOrg fill:#d4eaff,stroke:#336
+    style ID1 fill:#d4eaff,stroke:#336
+    style ID2 fill:#d4eaff,stroke:#336
+    style ID3 fill:#f9f9f9,stroke:#999
+    style ID4 fill:#f9f9f9,stroke:#999
+    style Org1 fill:#d4f5d4,stroke:#363
+    style Org2 fill:#f9f9f9,stroke:#999
+    style Org3 fill:#f9f9f9,stroke:#999
+    style DomainGraph fill:#fff3cd,stroke:#996
+    style SSO fill:#d4eaff,stroke:#336
+    style SCIM fill:#d4eaff,stroke:#336

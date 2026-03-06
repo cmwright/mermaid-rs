@@ -18,8 +18,8 @@ ab_glyph = "0.2"
 chrono = "0.4"
 thiserror.workspace = true
 log.workspace = true
-resvg = { version = "0.44", optional = true }
-png = { version = "0.17", optional = true }
+resvg = { version = "0.47", optional = true }
+png = { version = "0.18", optional = true }
 
 [dev-dependencies]
 pretty_assertions = "1"

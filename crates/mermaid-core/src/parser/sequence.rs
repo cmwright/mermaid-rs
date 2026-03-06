@@ -113,6 +113,9 @@ fn process_seq_top_level(
                 BlockKind::Rect,
             )?));
         }
+        Rule::block_box => {
+            parse_box(ast, pair)?;
+        }
         _ => {}
     }
     Ok(())
@@ -353,6 +356,59 @@ fn parse_block(pair: pest::iterators::Pair<'_, Rule>, kind: BlockKind) -> Result
         label,
         sections,
     })
+}
+
+/// Parse a `box [color] [title] ... end` block.
+/// Extracts participant/actor declarations and registers them as a visual group.
+fn parse_box(ast: &mut SequenceAst, pair: pest::iterators::Pair<'_, Rule>) -> Result<()> {
+    let mut color: Option<String> = None;
+    let mut label: Option<String> = None;
+    let mut participant_ids = Vec::new();
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::css_color => {
+                color = Some(inner.as_str().to_string());
+            }
+            Rule::block_label => {
+                let l = inner.as_str().trim().to_string();
+                if !l.is_empty() {
+                    label = Some(l);
+                }
+            }
+            Rule::box_body => {
+                for member in inner.into_inner() {
+                    match member.as_rule() {
+                        Rule::participant_stmt => {
+                            let p =
+                                parse_participant_stmt(member, ParticipantKind::Participant)?;
+                            participant_ids.push(p.id.clone());
+                            if !ast.participants.iter().any(|x| x.id == p.id) {
+                                ast.participants.push(p);
+                            }
+                        }
+                        Rule::actor_stmt => {
+                            let p = parse_participant_stmt(member, ParticipantKind::Actor)?;
+                            participant_ids.push(p.id.clone());
+                            if !ast.participants.iter().any(|x| x.id == p.id) {
+                                ast.participants.push(p);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    ast.participant_groups.push(ParticipantGroup {
+        label,
+        color,
+        participant_ids,
+    });
+
+    Ok(())
 }
 
 fn parse_section(
@@ -1212,5 +1268,148 @@ mod tests {
         } else {
             panic!("Expected Block");
         }
+    }
+
+    #[test]
+    fn test_parse_box_simple() {
+        let source = "sequenceDiagram\n    box Platform\n        participant A\n        participant B\n    end\n    A->>B: Hello";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.participants.len(), 2);
+        assert_eq!(ast.participants[0].id, "A");
+        assert_eq!(ast.participants[1].id, "B");
+        assert_eq!(ast.participant_groups.len(), 1);
+        assert_eq!(
+            ast.participant_groups[0].label.as_deref(),
+            Some("Platform")
+        );
+        assert!(ast.participant_groups[0].color.is_none());
+        assert_eq!(ast.participant_groups[0].participant_ids, vec!["A", "B"]);
+    }
+
+    #[test]
+    fn test_parse_box_with_display_names() {
+        let source = "sequenceDiagram\n    box Platform\n        participant UI as Factor UI\n        participant Svc as svc-users-v2\n    end\n    UI->>Svc: Request";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.participants.len(), 2);
+        assert_eq!(ast.participants[0].id, "UI");
+        assert_eq!(
+            ast.participants[0].display_name.as_deref(),
+            Some("Factor UI")
+        );
+        assert_eq!(ast.participants[1].id, "Svc");
+        assert_eq!(
+            ast.participants[1].display_name.as_deref(),
+            Some("svc-users-v2")
+        );
+        assert_eq!(ast.participant_groups[0].participant_ids, vec!["UI", "Svc"]);
+    }
+
+    #[test]
+    fn test_parse_box_with_actors() {
+        let source =
+            "sequenceDiagram\n    box Users\n        actor Alice\n        actor Bob\n    end\n    Alice->>Bob: Hi";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.participants.len(), 2);
+        assert_eq!(ast.participants[0].kind, ParticipantKind::Actor);
+        assert_eq!(ast.participants[1].kind, ParticipantKind::Actor);
+        assert_eq!(
+            ast.participant_groups[0].participant_ids,
+            vec!["Alice", "Bob"]
+        );
+    }
+
+    #[test]
+    fn test_parse_box_with_rgb_color() {
+        let source = "sequenceDiagram\n    box rgb(200, 220, 255) Blue Group\n        participant A\n    end\n    A->>A: Self";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.participant_groups.len(), 1);
+        assert_eq!(
+            ast.participant_groups[0].color.as_deref(),
+            Some("rgb(200, 220, 255)")
+        );
+        assert_eq!(
+            ast.participant_groups[0].label.as_deref(),
+            Some("Blue Group")
+        );
+    }
+
+    #[test]
+    fn test_parse_box_with_rgba_color() {
+        let source = "sequenceDiagram\n    box rgba(200, 220, 255, 0.5) Semi Group\n        participant A\n    end\n    A->>A: Self";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(
+            ast.participant_groups[0].color.as_deref(),
+            Some("rgba(200, 220, 255, 0.5)")
+        );
+        assert_eq!(
+            ast.participant_groups[0].label.as_deref(),
+            Some("Semi Group")
+        );
+    }
+
+    #[test]
+    fn test_parse_box_with_hex_color() {
+        let source = "sequenceDiagram\n    box #f0e68c Yellow Group\n        participant A\n    end\n    A->>A: Self";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(
+            ast.participant_groups[0].color.as_deref(),
+            Some("#f0e68c")
+        );
+        assert_eq!(
+            ast.participant_groups[0].label.as_deref(),
+            Some("Yellow Group")
+        );
+    }
+
+    #[test]
+    fn test_parse_box_no_label() {
+        let source =
+            "sequenceDiagram\n    box\n        participant A\n    end\n    A->>A: Self";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.participant_groups.len(), 1);
+        assert!(ast.participant_groups[0].label.is_none());
+        assert!(ast.participant_groups[0].color.is_none());
+    }
+
+    #[test]
+    fn test_parse_multiple_boxes() {
+        let source = "sequenceDiagram\n    box Group 1\n        participant A\n        participant B\n    end\n    box Group 2\n        participant C\n    end\n    A->>B: Hello\n    B->>C: Forward";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(ast.participants.len(), 3);
+        assert_eq!(ast.participant_groups.len(), 2);
+        assert_eq!(
+            ast.participant_groups[0].label.as_deref(),
+            Some("Group 1")
+        );
+        assert_eq!(ast.participant_groups[0].participant_ids, vec!["A", "B"]);
+        assert_eq!(
+            ast.participant_groups[1].label.as_deref(),
+            Some("Group 2")
+        );
+        assert_eq!(ast.participant_groups[1].participant_ids, vec!["C"]);
+    }
+
+    #[test]
+    fn test_parse_box_color_only_no_title() {
+        let source =
+            "sequenceDiagram\n    box #aabbcc\n        participant A\n    end\n    A->>A: Self";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(
+            ast.participant_groups[0].color.as_deref(),
+            Some("#aabbcc")
+        );
+        assert!(ast.participant_groups[0].label.is_none());
+    }
+
+    #[test]
+    fn test_parse_box_rgb_color_only() {
+        let source =
+            "sequenceDiagram\n    box rgb(1,2,3)\n        participant A\n    end\n    A->>A: Self";
+        let ast = parse_sequence(source).unwrap();
+        assert_eq!(
+            ast.participant_groups[0].color.as_deref(),
+            Some("rgb(1,2,3)")
+        );
+        assert!(ast.participant_groups[0].label.is_none());
     }
 }

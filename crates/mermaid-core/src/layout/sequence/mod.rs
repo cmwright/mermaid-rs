@@ -37,6 +37,7 @@ pub struct SequenceLayout {
     pub blocks: Vec<PositionedBlock>,
     pub notes: Vec<PositionedNote>,
     pub activations: Vec<PositionedActivation>,
+    pub participant_boxes: Vec<PositionedParticipantBox>,
     pub autonumber: bool,
 }
 
@@ -93,6 +94,17 @@ pub struct BlockDivider {
 #[derive(Debug, Clone)]
 pub struct PositionedNote {
     pub text: String,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// A visual box grouping participants.
+#[derive(Debug, Clone)]
+pub struct PositionedParticipantBox {
+    pub label: Option<String>,
+    pub color: Option<String>,
     pub x: f64,
     pub y: f64,
     pub width: f64,
@@ -205,6 +217,15 @@ pub fn layout_sequence(
         });
     }
 
+    // Compute participant box positions
+    let participant_boxes = compute_participant_boxes(
+        &ast.participant_groups,
+        &actor_idx,
+        &actor_infos,
+        DIAGRAM_PADDING,
+        cursor_y,
+    );
+
     // Compute bounding box (consider actors, notes, and blocks)
     let rightmost_actor = actor_infos
         .iter()
@@ -212,7 +233,15 @@ pub fn layout_sequence(
         .fold(0.0_f64, f64::max);
     let rightmost_note = notes.iter().map(|n| n.x + n.width).fold(0.0_f64, f64::max);
     let rightmost_block = blocks.iter().map(|b| b.x + b.width).fold(0.0_f64, f64::max);
-    let width = rightmost_actor.max(rightmost_note).max(rightmost_block) + DIAGRAM_PADDING;
+    let rightmost_pbox = participant_boxes
+        .iter()
+        .map(|b| b.x + b.width)
+        .fold(0.0_f64, f64::max);
+    let width = rightmost_actor
+        .max(rightmost_note)
+        .max(rightmost_block)
+        .max(rightmost_pbox)
+        + DIAGRAM_PADDING;
     let height = cursor_y;
 
     Ok(SequenceLayout {
@@ -224,6 +253,7 @@ pub fn layout_sequence(
         blocks,
         notes,
         activations,
+        participant_boxes,
         autonumber: ast.autonumber,
     })
 }
@@ -753,6 +783,53 @@ fn compute_block_bounds(
     )
 }
 
+const BOX_PADDING: f64 = 8.0;
+
+fn compute_participant_boxes(
+    groups: &[ParticipantGroup],
+    actor_idx: &HashMap<&str, usize>,
+    actor_infos: &[ActorInfo],
+    top_y: f64,
+    bottom_y: f64,
+) -> Vec<PositionedParticipantBox> {
+    let mut boxes = Vec::new();
+    for group in groups {
+        if group.participant_ids.is_empty() {
+            continue;
+        }
+        // Find the leftmost and rightmost actor center_x in this group
+        let mut min_x = f64::MAX;
+        let mut max_x = f64::MIN;
+        let mut found = false;
+        for pid in &group.participant_ids {
+            if let Some(&idx) = actor_idx.get(pid.as_str()) {
+                let info = &actor_infos[idx];
+                let left = info.center_x - info.box_width / 2.0;
+                let right = info.center_x + info.box_width / 2.0;
+                min_x = min_x.min(left);
+                max_x = max_x.max(right);
+                found = true;
+            }
+        }
+        if !found {
+            continue;
+        }
+        let x = min_x - BOX_PADDING;
+        let width = (max_x - min_x) + BOX_PADDING * 2.0;
+        let y = top_y - BOX_PADDING;
+        let height = (bottom_y - top_y) + BOX_PADDING * 2.0;
+        boxes.push(PositionedParticipantBox {
+            label: group.label.clone(),
+            color: group.color.clone(),
+            x,
+            y,
+            width,
+            height,
+        });
+    }
+    boxes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -850,6 +927,7 @@ mod tests {
                 }),
             ],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let font_ref = fp.font_ref().unwrap();
@@ -890,6 +968,7 @@ mod tests {
                 }),
             ],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let font_ref = fp.font_ref().unwrap();
@@ -965,6 +1044,7 @@ mod tests {
                 }),
             ],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let font_ref = fp.font_ref().unwrap();
@@ -1015,6 +1095,7 @@ mod tests {
                 }),
             ],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let font_ref = fp.font_ref().unwrap();
@@ -1072,6 +1153,7 @@ mod tests {
                 }),
             ],
             autonumber: true,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let font_ref = fp.font_ref().unwrap();
@@ -1111,6 +1193,7 @@ mod tests {
                 }),
             ],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let font_ref = fp.font_ref().unwrap();
@@ -1148,6 +1231,7 @@ mod tests {
                 }),
             ],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let font_ref = fp.font_ref().unwrap();
@@ -1184,6 +1268,7 @@ mod tests {
                 }),
             ],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let font_ref = fp.font_ref().unwrap();
@@ -1216,6 +1301,7 @@ mod tests {
                 }),
             ],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let font_ref = fp.font_ref().unwrap();
@@ -1259,6 +1345,7 @@ mod tests {
                 }),
             ],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let font_ref = fp.font_ref().unwrap();
@@ -1298,6 +1385,7 @@ mod tests {
                 }),
             ],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let font_ref = fp.font_ref().unwrap();
@@ -1336,6 +1424,7 @@ mod tests {
                 }),
             ],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let font_ref = fp.font_ref().unwrap();
@@ -1379,6 +1468,7 @@ mod tests {
                 }),
             ],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let font_ref = fp.font_ref().unwrap();
@@ -1409,6 +1499,7 @@ mod tests {
                 }),
             ],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let font_ref = fp.font_ref().unwrap();
@@ -1437,6 +1528,7 @@ mod tests {
                 }),
             ],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
@@ -1461,6 +1553,7 @@ mod tests {
                 deactivate_source: false,
             })],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
@@ -1494,6 +1587,7 @@ mod tests {
                 }),
             ],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
@@ -1528,6 +1622,7 @@ mod tests {
                 }),
             ],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
@@ -1555,6 +1650,7 @@ mod tests {
                 SequenceStatement::Deactivate("A".to_string()),
             ],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
@@ -1575,6 +1671,7 @@ mod tests {
                 text: "Note over A and B".to_string(),
             })],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
@@ -1606,6 +1703,7 @@ mod tests {
                 }],
             })],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
@@ -1636,6 +1734,7 @@ mod tests {
                 }],
             })],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
@@ -1672,6 +1771,7 @@ mod tests {
                 }],
             })],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
@@ -1707,6 +1807,7 @@ mod tests {
                 }),
             ],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
@@ -1743,6 +1844,7 @@ mod tests {
                 SequenceStatement::Deactivate("A".to_string()),
             ],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
@@ -1770,6 +1872,7 @@ mod tests {
                 text: "Note over A only".to_string(),
             })],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
@@ -1808,6 +1911,7 @@ mod tests {
                 }],
             })],
             autonumber: false,
+            participant_groups: vec![],
         };
         let (fp, theme) = make_measurer();
         let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
@@ -1816,5 +1920,80 @@ mod tests {
         assert!(layout.blocks[0].width > 0.0);
         assert_eq!(layout.messages.len(), 1);
         assert!(layout.messages[0].is_self);
+    }
+
+    #[test]
+    fn test_layout_participant_box() {
+        let source = "sequenceDiagram\n    box Platform\n        participant A\n        participant B\n    end\n    A->>B: Hello";
+        let ast = parse_sequence(source).unwrap();
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.participant_boxes.len(), 1);
+        let pbox = &layout.participant_boxes[0];
+        assert_eq!(pbox.label.as_deref(), Some("Platform"));
+        assert!(pbox.color.is_none());
+        assert!(pbox.width > 0.0);
+        assert!(pbox.height > 0.0);
+        // Box should span both actors horizontally
+        let a_left = layout.actors[0].center_x - layout.actors[0].box_width / 2.0;
+        let b_right = layout.actors[1].center_x + layout.actors[1].box_width / 2.0;
+        assert!(pbox.x < a_left);
+        assert!(pbox.x + pbox.width > b_right);
+    }
+
+    #[test]
+    fn test_layout_multiple_participant_boxes() {
+        let source = "sequenceDiagram\n    box Group 1\n        participant A\n    end\n    box Group 2\n        participant B\n    end\n    A->>B: Hello";
+        let ast = parse_sequence(source).unwrap();
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.participant_boxes.len(), 2);
+        assert_eq!(layout.participant_boxes[0].label.as_deref(), Some("Group 1"));
+        assert_eq!(layout.participant_boxes[1].label.as_deref(), Some("Group 2"));
+        // Second box should be to the right of the first
+        assert!(layout.participant_boxes[1].x > layout.participant_boxes[0].x);
+    }
+
+    #[test]
+    fn test_layout_participant_box_with_color() {
+        let source = "sequenceDiagram\n    box #ff0000 Red Group\n        participant A\n    end\n    A->>A: Self";
+        let ast = parse_sequence(source).unwrap();
+        let (fp, theme) = make_measurer();
+        let font_ref = fp.font_ref().unwrap();
+        let measurer = TextMeasurer::new(font_ref, theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+
+        assert_eq!(layout.participant_boxes.len(), 1);
+        assert_eq!(layout.participant_boxes[0].color.as_deref(), Some("#ff0000"));
+        assert_eq!(layout.participant_boxes[0].label.as_deref(), Some("Red Group"));
+    }
+
+    #[test]
+    fn test_layout_participant_box_empty_group_skipped() {
+        // A box with no participants shouldn't produce a positioned box
+        let ast = SequenceAst {
+            participants: vec![ParticipantDef {
+                id: "A".to_string(),
+                display_name: None,
+                kind: ParticipantKind::Participant,
+            }],
+            statements: vec![],
+            autonumber: false,
+            participant_groups: vec![ParticipantGroup {
+                label: Some("Empty".to_string()),
+                color: None,
+                participant_ids: vec![],
+            }],
+        };
+        let (fp, theme) = make_measurer();
+        let measurer = TextMeasurer::new(fp.font_ref().unwrap(), theme.font_size as f32);
+        let layout = layout_sequence(&ast, &measurer, &theme).unwrap();
+        assert_eq!(layout.participant_boxes.len(), 0);
     }
 }

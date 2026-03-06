@@ -4,6 +4,15 @@ pub struct SequenceAst {
     pub participants: Vec<ParticipantDef>,
     pub statements: Vec<SequenceStatement>,
     pub autonumber: bool,
+    pub participant_groups: Vec<ParticipantGroup>,
+}
+
+/// A visual grouping of participants (box keyword).
+#[derive(Debug, Clone)]
+pub struct ParticipantGroup {
+    pub label: Option<String>,
+    pub color: Option<String>,
+    pub participant_ids: Vec<String>,
 }
 
 /// Explicit participant/actor declaration.
