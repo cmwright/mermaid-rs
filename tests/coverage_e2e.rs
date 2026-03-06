@@ -858,6 +858,65 @@ fn sequence_activation_shorthand() {
     assert!(svg.contains("Response"));
 }
 
+// Sequence diagram with box grouping
+#[test]
+fn sequence_box_grouping() {
+    let source = r#"sequenceDiagram
+    box Platform
+        participant UI as Factor UI
+        participant Svc as svc-users-v2
+    end
+    box Ory Network
+        participant Kratos as Ory Kratos
+    end
+    UI->>Svc: Login request
+    Svc->>Kratos: Authenticate
+    Kratos-->>Svc: Token
+    Svc-->>UI: Success
+"#;
+    let svg = render_svg(source);
+    assert!(svg.contains("<svg"));
+    assert!(svg.contains("Platform"));
+    assert!(svg.contains("Ory Network"));
+    assert!(svg.contains("Factor UI"));
+    assert!(svg.contains("svc-users-v2"));
+    assert!(svg.contains("Ory Kratos"));
+    // Box backgrounds should have opacity
+    assert!(svg.contains("opacity=\"0.5\""));
+}
+
+// Sequence diagram with box and custom color
+#[test]
+fn sequence_box_with_color() {
+    let source = r#"sequenceDiagram
+    box rgb(200, 220, 255) Blue Group
+        participant A
+        participant B
+    end
+    A->>B: Hello
+"#;
+    let svg = render_svg(source);
+    assert!(svg.contains("<svg"));
+    assert!(svg.contains("rgb(200, 220, 255)"));
+    assert!(svg.contains("Blue Group"));
+}
+
+// Sequence diagram with box without label
+#[test]
+fn sequence_box_no_label() {
+    let source = r#"sequenceDiagram
+    box
+        participant A
+        participant B
+    end
+    A->>B: Hello
+"#;
+    let svg = render_svg(source);
+    assert!(svg.contains("<svg"));
+    // Should still render box background
+    assert!(svg.contains("opacity=\"0.5\""));
+}
+
 // Gantt with excludes weekends
 #[test]
 fn gantt_excludes_weekends() {

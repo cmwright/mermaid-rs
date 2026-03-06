@@ -30,6 +30,7 @@ seq_statement = _{
     | block_critical
     | block_break
     | block_rect
+    | block_box
     | message_stmt
 }
 
@@ -196,10 +197,33 @@ block_rect = {
     ^"end"
 }
 
+block_box = {
+    ^"box" ~ css_color? ~ block_label ~ NEWLINE+ ~
+    box_body ~
+    ^"end"
+}
+
+box_body = {
+    (box_member ~ stmt_sep)* ~ box_member?
+}
+
+box_member = _{
+    seq_comment
+    | participant_stmt
+    | actor_stmt
+}
+
 block_label = @{ (!NEWLINE ~ ANY)* }
 
 block_body = {
     (seq_statement ~ stmt_sep)* ~ seq_statement?
+}
+
+// ── Colors ─────────────────────────────────────────────────
+
+css_color = @{
+    (^"rgba" | ^"rgb") ~ "(" ~ (!")" ~ ANY)* ~ ")"
+    | "#" ~ ASCII_HEX_DIGIT+
 }
 
 // ── Primitives ──────────────────────────────────────────────

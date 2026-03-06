@@ -12,6 +12,11 @@ use crate::render::ascii_canvas::TextCanvas;
 pub fn render_ascii(layout: &SequenceLayout) -> Result<String> {
     let mut canvas = TextCanvas::from_pixel_size(layout.width, layout.height);
 
+    // 0. Draw participant boxes (visual grouping)
+    for pbox in &layout.participant_boxes {
+        draw_participant_box(&mut canvas, pbox);
+    }
+
     // 1. Draw blocks (background layer)
     for block in &layout.blocks {
         draw_block(&mut canvas, block);
@@ -264,6 +269,26 @@ fn draw_self_message(canvas: &mut TextCanvas, msg: &PositionedMessage, row: usiz
     canvas.put(col + 1, bottom_row, '▶');
 }
 
+fn draw_participant_box(
+    canvas: &mut TextCanvas,
+    pbox: &crate::layout::sequence::PositionedParticipantBox,
+) {
+    let left = canvas.px_to_col(pbox.x);
+    let top = canvas.px_to_row(pbox.y);
+    let right = canvas.px_to_col(pbox.x + pbox.width);
+    let bottom = canvas.px_to_row(pbox.y + pbox.height);
+
+    canvas.draw_box(left, top, right, bottom);
+
+    if let Some(ref label) = pbox.label {
+        let header = format!(" {} ", label);
+        let max_w = right.saturating_sub(left).saturating_sub(1);
+        let truncated: String = header.chars().take(max_w).collect();
+        let center = left + (right.saturating_sub(left).saturating_sub(truncated.len())) / 2;
+        canvas.draw_text(center.max(left + 1), top, &truncated);
+    }
+}
+
 fn draw_block(canvas: &mut TextCanvas, block: &crate::layout::sequence::PositionedBlock) {
     let left = canvas.px_to_col(block.x);
     let top = canvas.px_to_row(block.y);
@@ -389,6 +414,7 @@ mod tests {
             blocks: vec![],
             notes: vec![],
             activations: vec![],
+            participant_boxes: vec![],
         }
     }
 

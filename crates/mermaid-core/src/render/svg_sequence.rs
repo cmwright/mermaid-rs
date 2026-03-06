@@ -61,6 +61,11 @@ pub fn render_svg(layout: &SequenceLayout, theme: &Theme) -> Result<String> {
     );
     svg.push('\n');
 
+    // 0. Participant box backgrounds (visual grouping)
+    for pbox in &layout.participant_boxes {
+        render_participant_box(&mut svg, pbox, theme);
+    }
+
     // 1. Block backgrounds
     for block in &layout.blocks {
         render_block_bg(&mut svg, block, theme);
@@ -522,6 +527,32 @@ fn arrow_attrs(arrow: ArrowType) -> (&'static str, &'static str) {
     }
 }
 
+fn render_participant_box(svg: &mut String, pbox: &PositionedParticipantBox, theme: &Theme) {
+    let default_fill = theme.sequence.loop_fill.to_css();
+    let fill = pbox.color.as_deref().unwrap_or(&default_fill);
+    let stroke = theme.sequence.loop_line.to_css();
+    let _ = write!(
+        svg,
+        r#"<rect x="{}" y="{}" width="{}" height="{}" rx="4" fill="{}" stroke="{}" stroke-width="1" opacity="0.5"/>"#,
+        pbox.x, pbox.y, pbox.width, pbox.height, fill, stroke,
+    );
+    svg.push('\n');
+
+    // Label centered at the top of the box
+    if let Some(label) = &pbox.label {
+        let center_x = pbox.x + pbox.width / 2.0;
+        let _ = write!(
+            svg,
+            r#"<text class="seq-label" x="{}" y="{}" text-anchor="middle" dominant-baseline="hanging" fill="{}" font-weight="bold">{}</text>"#,
+            center_x,
+            pbox.y + 4.0,
+            theme.text_color.to_css(),
+            escape_xml(label),
+        );
+        svg.push('\n');
+    }
+}
+
 fn render_block_bg(svg: &mut String, block: &PositionedBlock, theme: &Theme) {
     // Block background
     let _ = write!(
@@ -654,6 +685,7 @@ mod tests {
             blocks: Vec::new(),
             notes: Vec::new(),
             activations: Vec::new(),
+            participant_boxes: Vec::new(),
             autonumber: false,
         }
     }
@@ -1504,5 +1536,76 @@ mod tests {
             "expected 2 dashed divider lines, got {}",
             dash_lines.len()
         );
+    }
+
+    #[test]
+    fn render_participant_box_default_color() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.participant_boxes.push(PositionedParticipantBox {
+            label: Some("Platform".to_string()),
+            color: None,
+            x: 20.0,
+            y: 20.0,
+            width: 200.0,
+            height: 280.0,
+        });
+        let svg = render_svg(&layout, &theme).unwrap();
+        assert!(svg.contains("rx=\"4\""), "expected rounded rect for box");
+        assert!(svg.contains("opacity=\"0.5\""), "expected translucent box");
+        assert!(svg.contains(">Platform</text>"), "expected box label");
+    }
+
+    #[test]
+    fn render_participant_box_custom_color() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.participant_boxes.push(PositionedParticipantBox {
+            label: Some("Red Group".to_string()),
+            color: Some("#ff0000".to_string()),
+            x: 10.0,
+            y: 10.0,
+            width: 100.0,
+            height: 200.0,
+        });
+        let svg = render_svg(&layout, &theme).unwrap();
+        assert!(
+            svg.contains("fill=\"#ff0000\""),
+            "expected custom color fill"
+        );
+        assert!(svg.contains(">Red Group</text>"), "expected box label");
+    }
+
+    #[test]
+    fn render_participant_box_no_label() {
+        let theme = default_theme();
+        let mut layout = empty_layout();
+        layout.participant_boxes.push(PositionedParticipantBox {
+            label: None,
+            color: None,
+            x: 10.0,
+            y: 10.0,
+            width: 100.0,
+            height: 200.0,
+        });
+        let svg = render_svg(&layout, &theme).unwrap();
+        // Should have the rect but no label text for this box
+        let box_rects: Vec<&str> = svg
+            .lines()
+            .filter(|l| l.contains("rx=\"4\"") && l.contains("opacity=\"0.5\""))
+            .collect();
+        assert_eq!(box_rects.len(), 1);
+    }
+
+    #[test]
+    fn block_kind_str_all_variants_with_box() {
+        // Verify block_kind_str still covers all existing variants
+        assert_eq!(block_kind_str(BlockKind::Alt), "alt");
+        assert_eq!(block_kind_str(BlockKind::Loop), "loop");
+        assert_eq!(block_kind_str(BlockKind::Opt), "opt");
+        assert_eq!(block_kind_str(BlockKind::Par), "par");
+        assert_eq!(block_kind_str(BlockKind::Critical), "critical");
+        assert_eq!(block_kind_str(BlockKind::Break), "break");
+        assert_eq!(block_kind_str(BlockKind::Rect), "rect");
     }
 }
