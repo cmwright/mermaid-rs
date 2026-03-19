@@ -163,6 +163,7 @@ impl Default for RenderConfig {
 
 /// Top-level render function: detect diagram type, parse, layout, render.
 pub fn render(source: &str, config: &RenderConfig) -> Result<RenderOutput> {
+    let source = parser::strip_frontmatter(source);
     let kind = parser::detect_diagram_kind(source)?;
 
     // ASCII output path: skip SVG entirely, render directly to text
@@ -460,6 +461,15 @@ mod tests {
     fn render_mindmap() {
         let config = RenderConfig::default();
         let out = render("mindmap\n  root\n    a\n    b", &config).unwrap();
+        let svg = out.as_svg().unwrap();
+        assert!(svg.contains("<svg"));
+    }
+
+    #[test]
+    fn render_statediagram_with_frontmatter_and_special_chars() {
+        let config = RenderConfig::default();
+        let source = "---\ntitle: Observation Status\n---\nstateDiagram\n    [*] --> Open\n    Open --> Resolved_(Pending)\n    Open --> Won't_Fix\n    Resolved_(Pending) --> Resolved_(Approved)";
+        let out = render(source, &config).unwrap();
         let svg = out.as_svg().unwrap();
         assert!(svg.contains("<svg"));
     }

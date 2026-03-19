@@ -840,4 +840,44 @@ mod tests {
         assert!(ast.states.iter().any(|s| s.id == "A"));
         assert!(ast.states.iter().any(|s| s.id == "B"));
     }
+
+    #[test]
+    fn test_parse_state_ids_with_parentheses() {
+        let source = "stateDiagram\n    Resolved_(Pending) --> Resolved_(Approved)";
+        let ast = parse_statediagram(source).unwrap();
+        assert_eq!(ast.transitions.len(), 1);
+        assert_eq!(ast.transitions[0].from, "Resolved_(Pending)");
+        assert_eq!(ast.transitions[0].to, "Resolved_(Approved)");
+    }
+
+    #[test]
+    fn test_parse_state_ids_with_apostrophe() {
+        let source = "stateDiagram\n    Open --> Won't_Fix";
+        let ast = parse_statediagram(source).unwrap();
+        assert_eq!(ast.transitions.len(), 1);
+        assert_eq!(ast.transitions[0].from, "Open");
+        assert_eq!(ast.transitions[0].to, "Won't_Fix");
+    }
+
+    #[test]
+    fn test_parse_observation_status_diagram() {
+        let source = r#"stateDiagram
+    [*] --> Open
+    Open --> Investigating
+    Investigating --> Resolved_(Pending)
+    Open --> Resolved_(Pending)
+    Investigating --> Compensating_Control_(Pending)
+    Open --> Compensating_Control_(Pending)
+    Investigating --> Cannot_Reproduce_(Pending)
+    Open --> Cannot_Reproduce_(Pending)
+    Investigating --> Won't_Fix
+    Open --> Won't_Fix
+    Resolved_(Pending) --> Resolved_(Approved)
+    Compensating_Control_(Pending) --> Compensating_Control_(Approved)"#;
+        let ast = parse_statediagram(source).unwrap();
+        assert_eq!(ast.transitions.len(), 12);
+        assert!(ast.states.iter().any(|s| s.id == "Won't_Fix"));
+        assert!(ast.states.iter().any(|s| s.id == "Resolved_(Pending)"));
+        assert!(ast.states.iter().any(|s| s.id == "Compensating_Control_(Approved)"));
+    }
 }

@@ -156,10 +156,11 @@ style_props_text = @{ (!(";" | NEWLINE) ~ ANY)+ }
 
 // ── Primitives ──────────────────────────────────────────────
 
-state_id = @{ !reserved_word ~ identifier }
-reserved_word = _{ ("end" | "note" | "state") ~ !(ASCII_ALPHANUMERIC | "_" | "-") }
+state_id = @{ !reserved_word ~ state_id_inner }
+state_id_inner = _{ (ASCII_ALPHANUMERIC | "_" | "-" | "(" | ")" | "'")+ }
+reserved_word = _{ ("end" | "note" | "state") ~ !(ASCII_ALPHANUMERIC | "_" | "-" | "(" | ")" | "'") }
 
-state_id_chars = @{ (ASCII_ALPHANUMERIC | "_" | "-")+ }
+state_id_chars = @{ (ASCII_ALPHANUMERIC | "_" | "-" | "(" | ")" | "'")+ }
 identifier = @{ (ASCII_ALPHANUMERIC | "_" | "-")+ }
 quoted_text = @{ (!"\"" ~ ANY)+ }
 
