@@ -83,6 +83,8 @@ Class diagrams, ER diagrams.
 
 ## Live Editor
 
+**[Try it in your browser](https://cmwright.github.io/mermaid-rs/)**
+
 A browser-based live editor similar to the Mermaid.js live editor is included. Edit diagrams in real-time with live preview, theme switching, and example templates.
 
 ```bash
