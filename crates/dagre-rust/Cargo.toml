@@ -1,9 +1,19 @@
 [package]
-name = "dagre-rust"
-version = "0.1.0"
-edition = "2024"
-description = "A 1:1 Rust port of the dagre JavaScript graph layout library"
-license = "MIT"
+name = "mermaid-dagre"
+description = "A 1:1 Rust port of the dagre JavaScript graph layout library — backs mermaid-core"
+keywords = ["graph", "layout", "dagre", "hierarchical", "dag"]
+categories = ["algorithms", "visualization"]
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+readme = "README.md"
+
+[lib]
+name = "dagre_rust"
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }

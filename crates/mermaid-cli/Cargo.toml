@@ -1,7 +1,16 @@
 [package]
-name = "mermaid-cli"
+name = "mermaid-rs-cli"
+description = "Command-line tool (`mmrs` binary) to render Mermaid diagrams to SVG/PNG/ASCII — pure Rust, no browser"
+keywords = ["mermaid", "diagram", "cli", "svg", "render"]
+categories = ["command-line-utilities", "visualization"]
 version.workspace = true
 edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+readme = "README.md"
 
 [[bin]]
 name = "mmrs"
@@ -12,7 +21,7 @@ default = ["ascii"]
 ascii = ["mermaid-core/ascii"]
 
 [dependencies]
-mermaid-core = { path = "../mermaid-core" }
+mermaid-core = { version = "0.1.1", path = "../mermaid-core" }
 clap = { version = "4", features = ["derive"] }
 anyhow = "1"
 env_logger = "0.11"

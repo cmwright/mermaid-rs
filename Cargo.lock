@@ -425,17 +425,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "dagre-rust"
-version = "0.1.0"
-dependencies = [
- "ahash",
- "criterion",
- "indexmap",
- "serde",
- "serde_json",
-]
-
-[[package]]
 name = "data-url"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -862,28 +851,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "mermaid-cli"
-version = "0.1.1"
-dependencies = [
- "anyhow",
- "assert_cmd",
- "clap",
- "env_logger",
- "log",
- "mermaid-core",
- "predicates",
- "tempfile",
-]
-
-[[package]]
 name = "mermaid-core"
 version = "0.1.1"
 dependencies = [
  "ab_glyph",
  "chrono",
  "criterion",
- "dagre-rust",
  "log",
+ "mermaid-dagre",
  "pest",
  "pest_derive",
  "petgraph",
@@ -896,10 +871,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "mermaid-dagre"
+version = "0.1.1"
+dependencies = [
+ "ahash",
+ "criterion",
+ "indexmap",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "mermaid-rs"
 version = "0.0.0"
 dependencies = [
  "mermaid-core",
+]
+
+[[package]]
+name = "mermaid-rs-cli"
+version = "0.1.1"
+dependencies = [
+ "anyhow",
+ "assert_cmd",
+ "clap",
+ "env_logger",
+ "log",
+ "mermaid-core",
+ "predicates",
+ "tempfile",
 ]
 
 [[package]]

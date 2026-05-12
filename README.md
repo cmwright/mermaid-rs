@@ -5,10 +5,14 @@ A pure Rust implementation of the [Mermaid](https://mermaid.js.org/) diagram ren
 ## Installation
 
 ```bash
-cargo install --git https://github.com/cmwright/mermaid-rs mermaid-cli
+cargo install mermaid-rs-cli
 ```
 
-This installs the `mmrs` binary.
+This installs the `mmrs` binary. To install straight from git instead:
+
+```bash
+cargo install --git https://github.com/cmwright/mermaid-rs mermaid-rs-cli
+```
 
 ## Quick Start
 

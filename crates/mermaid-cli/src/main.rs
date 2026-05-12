@@ -84,7 +84,7 @@ fn determine_output_format(
             "ascii" => mermaid_core::OutputFormat::Ascii,
             _ => mermaid_core::OutputFormat::Svg,
         }
-    } else if let Some(ref path) = output_path {
+    } else if let Some(path) = &output_path {
         // Auto-detect from extension
         match path.extension().and_then(|e| e.to_str()) {
             Some("png") => mermaid_core::OutputFormat::Png,

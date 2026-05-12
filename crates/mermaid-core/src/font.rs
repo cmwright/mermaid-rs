@@ -4,7 +4,7 @@ use crate::error::{MermaidError, Result};
 
 /// Embedded Hack font bytes (MIT License).
 /// This font is bundled so the tool works out of the box without system fonts.
-const DEFAULT_FONT_BYTES: &[u8] = include_bytes!("../../../assets/fonts/Hack-Regular.ttf");
+const DEFAULT_FONT_BYTES: &[u8] = include_bytes!("../assets/fonts/Hack-Regular.ttf");
 
 #[derive(Clone)]
 pub struct FontProvider {

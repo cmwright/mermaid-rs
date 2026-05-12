@@ -1,6 +1,6 @@
-# dagre-rust
+# mermaid-dagre
 
-A 1:1 Rust port of the [dagre](https://github.com/dagrejs/dagre) JavaScript graph layout library.
+A 1:1 Rust port of the [dagre](https://github.com/dagrejs/dagre) JavaScript graph layout library. Published as `mermaid-dagre` on crates.io (the import path remains `dagre_rust`).
 
 dagre-rust implements the Sugiyama-style layered graph layout algorithm, producing hierarchical, top-down (or left-right, bottom-top, right-left) layouts for directed graphs. It supports compound graphs (nested subgraphs), multigraphs, edge labels, and all the layout options of the original JS library.
 
@@ -14,7 +14,11 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-dagre-rust = { path = "path/to/dagre-rust" }
+mermaid-dagre = "0.1"
+```
+
+```rust
+use dagre_rust::Graph;
 ```
 
 ### Basic layout
