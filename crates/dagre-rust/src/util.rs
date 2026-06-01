@@ -8,19 +8,32 @@
 use crate::graph::{GraphOptions, LayoutGraph};
 use crate::types::*;
 use ahash::AHashMap as HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::cell::Cell;
 
-/// Global unique ID counter, mirroring JS `let idCounter = 0`.
-static ID_COUNTER: AtomicUsize = AtomicUsize::new(0);
+thread_local! {
+    /// Per-thread unique ID counter, mirroring JS `let idCounter = 0`.
+    ///
+    /// Thread-local rather than process-global because generated IDs only need
+    /// to be unique within a single graph, and a layout runs entirely on one
+    /// thread. Keeping it per-thread means parallel test threads (and any
+    /// concurrent layouts) can't perturb each other's counter — which is what
+    /// made `test_unique_id` flaky when it shared one global atomic.
+    static ID_COUNTER: Cell<usize> = const { Cell::new(0) };
+}
 
-/// Reset the ID counter (useful for tests to get deterministic output).
+/// Reset the (current thread's) ID counter. Useful for tests to get
+/// deterministic output.
 pub fn reset_id_counter() {
-    ID_COUNTER.store(0, Ordering::Relaxed);
+    ID_COUNTER.with(|c| c.set(0));
 }
 
 /// Generates a unique ID with the given prefix. Mirrors JS `uniqueId`.
 pub fn unique_id(prefix: &str) -> String {
-    let id = ID_COUNTER.fetch_add(1, Ordering::Relaxed) + 1;
+    let id = ID_COUNTER.with(|c| {
+        let next = c.get() + 1;
+        c.set(next);
+        next
+    });
     format!("{}{}", prefix, id)
 }
 
