@@ -15,6 +15,15 @@ pub const SUBGRAPH_PADDING: f64 = 12.0;
 pub const SUBGRAPH_TITLE_HEIGHT: f64 = 18.0;
 pub const SUBGRAPH_GROUP_GAP: f64 = 20.0;
 
+/// Key identifying a single edge in the dagre-extraction maps.
+///
+/// `(from, to, name)` where `name` is the per-edge unique identifier
+/// (the edge's positional index, as a string) assigned when the edge is
+/// registered with dagre.  Including the name is what lets parallel edges
+/// between the same pair of nodes carry distinct routing/label data instead
+/// of clobbering one another.
+pub(crate) type EdgeKey = (String, String, Option<String>);
+
 // ── Positioned types (public API) ───────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
