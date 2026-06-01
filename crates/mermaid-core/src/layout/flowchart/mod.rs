@@ -119,9 +119,11 @@ fn layout_flowchart_impl(
     let mut bend_pts = extraction.bend_points;
     for edge in &all_edges {
         if sg_ids.contains(&edge.from) || sg_ids.contains(&edge.to) {
-            let key = (edge.from.clone(), edge.to.clone());
-            raw_points.remove(&key);
-            bend_pts.remove(&key);
+            // Drop dagre routing for every edge between this pair regardless of
+            // its per-edge name so subgraph endpoints fall back to geometric
+            // routing.
+            raw_points.retain(|(from, to, _), _| !(from == &edge.from && to == &edge.to));
+            bend_pts.retain(|(from, to, _), _| !(from == &edge.from && to == &edge.to));
         }
     }
     let mut positioned_edges = edge_routing::route_edges(
@@ -415,10 +417,10 @@ pub(crate) fn count_subgraphs(subgraphs: &[crate::ast::flowchart::SubgraphDef]) 
 
 /// Result of extracting edge data from dagre layout.
 pub(crate) struct DagreEdgeExtraction {
-    pub(crate) raw_points: HashMap<(String, String), Vec<(f64, f64)>>,
-    pub(crate) bend_points: HashMap<(String, String), Vec<(f64, f64)>>,
-    pub(crate) label_positions: HashMap<(String, String), (f64, f64)>,
-    pub(crate) label_dimensions: HashMap<(String, String), (f64, f64)>,
+    pub(crate) raw_points: HashMap<EdgeKey, Vec<(f64, f64)>>,
+    pub(crate) bend_points: HashMap<EdgeKey, Vec<(f64, f64)>>,
+    pub(crate) label_positions: HashMap<EdgeKey, (f64, f64)>,
+    pub(crate) label_dimensions: HashMap<EdgeKey, (f64, f64)>,
 }
 
 /// Extract bend points, label positions, and label dimensions from dagre edge labels.
@@ -433,7 +435,7 @@ pub(crate) fn extract_edge_data_from_dagre(g: &dagre_rust::LayoutGraph) -> Dagre
     // no real edge.  This prevents bidirectional edges (A→B, B→A) from
     // clobbering each other's dagre-computed layouts.
     struct ForwardEdge {
-        key: (String, String),
+        key: EdgeKey,
         raw: Option<Vec<(f64, f64)>>,
         bps: Option<Vec<(f64, f64)>>,
     }
@@ -444,7 +446,7 @@ pub(crate) fn extract_edge_data_from_dagre(g: &dagre_rust::LayoutGraph) -> Dagre
             continue;
         };
 
-        let key = (edge.v.clone(), edge.w.clone());
+        let key = (edge.v.clone(), edge.w.clone(), edge.name.clone());
         let raw = if el.points.len() >= 2 {
             let pts: Vec<(f64, f64)> = el.points.iter().map(|p| (p.x, p.y)).collect();
             raw_points.insert(key.clone(), pts.clone());
@@ -468,10 +470,10 @@ pub(crate) fn extract_edge_data_from_dagre(g: &dagre_rust::LayoutGraph) -> Dagre
 
         // Extract label position
         if let (Some(x), Some(y)) = (el.x, el.y) {
-            let key = (edge.v.clone(), edge.w.clone());
+            let key = (edge.v.clone(), edge.w.clone(), edge.name.clone());
             label_positions.insert(key.clone(), (x, y));
             // Only fill reverse if no real edge exists in that direction
-            let rev_key = (edge.w.clone(), edge.v.clone());
+            let rev_key = (edge.w.clone(), edge.v.clone(), edge.name.clone());
             label_positions.entry(rev_key.clone()).or_insert((x, y));
 
             // Store label dimensions
@@ -487,7 +489,7 @@ pub(crate) fn extract_edge_data_from_dagre(g: &dagre_rust::LayoutGraph) -> Dagre
     // Second pass: fill in reversed raw_points / bend_points for edges
     // that don't have a real counterpart in the other direction.
     for fe in forward_edges {
-        let rev_key = (fe.key.1, fe.key.0);
+        let rev_key = (fe.key.1, fe.key.0, fe.key.2);
         if let Some(raw) = fe.raw {
             let rev_raw: Vec<_> = raw.into_iter().rev().collect();
             raw_points.entry(rev_key.clone()).or_insert(rev_raw);
@@ -739,6 +741,69 @@ mod tests {
             sq.x,
             ci.x,
             x_diff
+        );
+    }
+
+    /// Regression test: two parallel edges between the same pair of nodes
+    /// (`wait2 -->|submitted| review` and `wait2 -->|window lapses| review`)
+    /// must be routed and labeled separately, not drawn on top of each other.
+    ///
+    /// Previously every edge was registered with dagre under a `None` name, so
+    /// parallel edges collapsed to a single edge ID and shared one routing path
+    /// and one label position. Each edge now gets a unique dagre name (its
+    /// positional index), so the two labels land at distinct positions.
+    #[test]
+    fn test_parallel_edges_are_separated() {
+        use crate::parser::flowchart::parse_flowchart;
+
+        let source = r#"flowchart TD
+    remind[Send reminder] --> wait2{Keep waiting}
+    wait2 -->|submitted| review[Analyst review<br/>approval gate]
+    wait2 -->|window lapses| review
+    review --> done([End])"#;
+
+        let ast = parse_flowchart(source).unwrap();
+        let provider = FontProvider::default_font();
+        let measurer = make_measurer(&provider);
+        let result = layout_flowchart(&ast, &measurer).unwrap();
+
+        // Collect the two parallel wait2 -> review edges.
+        let parallel: Vec<&PositionedEdge> = result
+            .edges
+            .iter()
+            .filter(|e| e.from_id == "wait2" && e.to_id == "review")
+            .collect();
+        assert_eq!(
+            parallel.len(),
+            2,
+            "expected both wait2 -> review edges to be present"
+        );
+
+        // Both edges carry labels with computed positions.
+        let labeled: Vec<&&PositionedEdge> = parallel
+            .iter()
+            .filter(|e| e.label.is_some() && e.label_x.is_some() && e.label_y.is_some())
+            .collect();
+        assert_eq!(
+            labeled.len(),
+            2,
+            "both parallel edges should have positioned labels"
+        );
+
+        // The two label anchors must not coincide — the whole point of the fix.
+        let (ax, ay) = (labeled[0].label_x.unwrap(), labeled[0].label_y.unwrap());
+        let (bx, by) = (labeled[1].label_x.unwrap(), labeled[1].label_y.unwrap());
+        let dist = ((ax - bx).powi(2) + (ay - by).powi(2)).sqrt();
+        assert!(
+            dist > 1.0,
+            "parallel-edge labels overlap: ({ax:.1},{ay:.1}) vs ({bx:.1},{by:.1})"
+        );
+
+        // And their routed paths must differ (not identical point sequences).
+        assert!(
+            parallel[0].points != parallel[1].points,
+            "parallel-edge routes are identical: {:?}",
+            parallel[0].points
         );
     }
 

@@ -112,10 +112,10 @@ pub fn route_edges(
     positioned_nodes: &[PositionedNode],
     edges: &[EdgeDef],
     is_horizontal: bool,
-    raw_points: &HashMap<(String, String), Vec<(f64, f64)>>,
-    bend_points: &HashMap<(String, String), Vec<(f64, f64)>>,
-    label_positions: &HashMap<(String, String), (f64, f64)>,
-    label_dimensions: &HashMap<(String, String), (f64, f64)>,
+    raw_points: &HashMap<EdgeKey, Vec<(f64, f64)>>,
+    bend_points: &HashMap<EdgeKey, Vec<(f64, f64)>>,
+    label_positions: &HashMap<EdgeKey, (f64, f64)>,
+    label_dimensions: &HashMap<EdgeKey, (f64, f64)>,
 ) -> Vec<PositionedEdge> {
     let node_pos: HashMap<&str, &PositionedNode> = positioned_nodes
         .iter()
@@ -124,11 +124,15 @@ pub fn route_edges(
 
     edges
         .iter()
-        .filter_map(|edge| {
+        .enumerate()
+        .filter_map(|(edge_idx, edge)| {
             let from = node_pos.get(edge.from.as_str())?;
             let to = node_pos.get(edge.to.as_str())?;
 
-            let key = (edge.from.clone(), edge.to.clone());
+            // Reconstruct the per-edge name assigned in graph_builder (the
+            // edge's positional index) so parallel edges look up their own
+            // distinct routing/label data instead of sharing one entry.
+            let key = (edge.from.clone(), edge.to.clone(), Some(edge_idx.to_string()));
             let points = if is_rect_like(from.shape) && is_rect_like(to.shape) {
                 if let Some(raw) = raw_points.get(&key) {
                     raw.clone()
@@ -1172,9 +1176,15 @@ mod tests {
         }];
 
         let mut label_positions = HashMap::new();
-        label_positions.insert(("A".to_string(), "B".to_string()), (100.0, 125.0));
+        label_positions.insert(
+            ("A".to_string(), "B".to_string(), Some("0".to_string())),
+            (100.0, 125.0),
+        );
         let mut label_dimensions = HashMap::new();
-        label_dimensions.insert(("A".to_string(), "B".to_string()), (30.0, 15.0));
+        label_dimensions.insert(
+            ("A".to_string(), "B".to_string(), Some("0".to_string())),
+            (30.0, 15.0),
+        );
 
         let result = route_edges(
             &nodes,
@@ -1312,7 +1322,7 @@ mod tests {
 
         let mut raw_points = HashMap::new();
         raw_points.insert(
-            ("A".to_string(), "B".to_string()),
+            ("A".to_string(), "B".to_string(), Some("0".to_string())),
             vec![(140.0, 100.0), (260.0, 100.0)],
         );
 

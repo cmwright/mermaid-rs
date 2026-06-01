@@ -508,7 +508,7 @@ pub(crate) fn build_dagre_graph_with_fixed_node_sizes_and_membership(
 
     let ordered_edges: Vec<&EdgeDef> = edges.iter().collect();
 
-    for edge in ordered_edges {
+    for (edge_idx, edge) in ordered_edges.iter().enumerate() {
         if !all_nodes.contains_key(&edge.from) && !sg_ids.contains(&edge.from) {
             return Err(MermaidError::Layout(format!(
                 "Unknown source node: {}",
@@ -531,7 +531,11 @@ pub(crate) fn build_dagre_graph_with_fixed_node_sizes_and_membership(
         el.width = label_width;
         el.height = label_height;
         el.labelpos = dagre_rust::LabelPos::Center;
-        g.set_edge(&edge.from, &edge.to, Some(el), None);
+        // Give every edge a unique name (its positional index) so that parallel
+        // edges between the same pair of nodes are kept distinct by dagre's
+        // multigraph rather than collapsing into one. route_edges reconstructs
+        // the same index by enumerating the identical edge slice.
+        g.set_edge(&edge.from, &edge.to, Some(el), Some(&edge_idx.to_string()));
     }
 
     // Register subgraph nodes in dagre and set parent relationships
