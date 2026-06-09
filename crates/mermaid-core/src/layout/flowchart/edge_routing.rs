@@ -122,7 +122,7 @@ pub fn route_edges(
         .map(|n| (n.id.as_str(), n))
         .collect();
 
-    edges
+    let mut routed: Vec<PositionedEdge> = edges
         .iter()
         .enumerate()
         .filter_map(|(edge_idx, edge)| {
@@ -175,7 +175,149 @@ pub fn route_edges(
                 points,
             })
         })
-        .collect()
+        .collect();
+
+    reorder_sibling_waypoints(&mut routed, &node_pos, is_horizontal);
+    routed
+}
+
+/// Remove crossings among edges that fan out from a shared source node.
+///
+/// Dagre's ordering pass can place the interior waypoints (dummy-node columns)
+/// of two sibling edges in an order inconsistent with their targets' positions,
+/// so the edges cross between the source and their destinations (e.g. an edge to
+/// a far-right node routed through a leftward lane while an edge to a nearer node
+/// bulges past it). For edges sharing a source, the correct, crossing-free
+/// arrangement is for the interior lanes to be monotonic in the target's
+/// cross-axis position.
+///
+/// For each source group, at every interior rank the set of x-coordinates (or
+/// y, for horizontal layouts) is reassigned to the sibling edges in order of
+/// their target's cross-axis position. The set of lane positions is preserved
+/// exactly (only the assignment is permuted), so spacing dagre computed is kept.
+/// Ties on the target coordinate (parallel edges to the same node) are broken by
+/// the edge's current lane, leaving such edges untouched. Endpoints are then
+/// recomputed as border intersections toward the adjusted adjacent waypoint.
+fn reorder_sibling_waypoints(
+    edges: &mut [PositionedEdge],
+    node_pos: &HashMap<&str, &PositionedNode>,
+    is_horizontal: bool,
+) {
+    // Flow-axis rank key for an interior waypoint (the axis along the layout
+    // flow, rounded to tolerate floating point noise).
+    let flow_key = |p: (f64, f64)| (if is_horizontal { p.0 } else { p.1 }).round() as i64;
+
+    // Group edge indices by source node, then by the sequence of interior ranks
+    // they traverse. Only edges that travel through an identical set of ranks
+    // form a "bundle" that can be safely re-laned: permuting their lane
+    // assignment is consistent across every rank they share, so no edge is
+    // pulled off its route. Edges with divergent rank-sets (e.g. a long edge
+    // that detours around the graph) are kept in separate bundles.
+    let mut bundles: HashMap<(String, Vec<i64>), Vec<usize>> = HashMap::new();
+    for (i, e) in edges.iter().enumerate() {
+        if e.points.len() < 3 {
+            continue; // bare two-point edges have no interior lane to reorder
+        }
+        let interior = &e.points[1..e.points.len() - 1];
+        let mut sig: Vec<i64> = interior.iter().map(|&p| flow_key(p)).collect();
+        sig.sort_unstable();
+        sig.dedup();
+        bundles.entry((e.from_id.clone(), sig)).or_default().push(i);
+    }
+
+    for ((_src, ranks), bundle) in bundles {
+        if bundle.len() < 2 {
+            continue;
+        }
+
+        // Target cross-axis position per edge, defining the desired lane order.
+        let target_coord: HashMap<usize, f64> = bundle
+            .iter()
+            .map(|&i| {
+                let c = node_pos
+                    .get(edges[i].to_id.as_str())
+                    .map(|n| if is_horizontal { n.y } else { n.x })
+                    .unwrap_or(0.0);
+                (i, c)
+            })
+            .collect();
+
+        let mut changed = false;
+        for &rk in &ranks {
+            // Each bundle edge's waypoint at this rank: (edge, point_idx, lane).
+            let mut entries: Vec<(usize, usize, f64)> = Vec::new();
+            for &i in &bundle {
+                let pts = &edges[i].points;
+                for (pi, &p) in pts.iter().enumerate().take(pts.len() - 1).skip(1) {
+                    if flow_key(p) == rk {
+                        entries.push((i, pi, if is_horizontal { p.1 } else { p.0 }));
+                        break;
+                    }
+                }
+            }
+            if entries.len() < 2 {
+                continue;
+            }
+
+            // Desired order: by target cross-axis, ties broken by current lane
+            // so parallel edges (identical target) keep their arrangement.
+            let mut order: Vec<usize> = (0..entries.len()).collect();
+            order.sort_by(|&a, &b| {
+                target_coord[&entries[a].0]
+                    .partial_cmp(&target_coord[&entries[b].0])
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .then(
+                        entries[a]
+                            .2
+                            .partial_cmp(&entries[b].2)
+                            .unwrap_or(std::cmp::Ordering::Equal),
+                    )
+            });
+
+            // Available lane positions, ascending.
+            let mut lanes: Vec<f64> = entries.iter().map(|e| e.2).collect();
+            lanes.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+            // Reassign lanes to edges in the desired order.
+            for (slot, &ei) in order.iter().enumerate() {
+                let (edge_idx, point_idx, old) = entries[ei];
+                let new_lane = lanes[slot];
+                if (new_lane - old).abs() > 1e-6 {
+                    if is_horizontal {
+                        edges[edge_idx].points[point_idx].1 = new_lane;
+                    } else {
+                        edges[edge_idx].points[point_idx].0 = new_lane;
+                    }
+                    changed = true;
+                }
+            }
+        }
+
+        if !changed {
+            continue;
+        }
+
+        // Recompute endpoints toward the (possibly relocated) adjacent interior
+        // waypoint so the edge still meets each node's border cleanly.
+        for &i in &bundle {
+            let from = match node_pos.get(edges[i].from_id.as_str()) {
+                Some(n) => *n,
+                None => continue,
+            };
+            let to = match node_pos.get(edges[i].to_id.as_str()) {
+                Some(n) => *n,
+                None => continue,
+            };
+            let pts = &edges[i].points;
+            let first_interior = pts[1];
+            let last_interior = pts[pts.len() - 2];
+            let start = intersect_shape(from, first_interior.0, first_interior.1);
+            let end = intersect_shape(to, last_interior.0, last_interior.1);
+            let n = edges[i].points.len();
+            edges[i].points[0] = start;
+            edges[i].points[n - 1] = end;
+        }
+    }
 }
 
 fn is_rect_like(shape: NodeShape) -> bool {
@@ -1474,5 +1616,163 @@ mod tests {
             10.0,
             10.0
         ));
+    }
+
+    // -----------------------------------------------------------------------
+    // reorder_sibling_waypoints tests
+    // -----------------------------------------------------------------------
+
+    fn make_edge(from: &str, to: &str, points: Vec<(f64, f64)>) -> PositionedEdge {
+        PositionedEdge {
+            from_id: from.to_string(),
+            to_id: to.to_string(),
+            line_style: LineStyle::Solid,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::Arrow,
+            label: None,
+            label_x: None,
+            label_y: None,
+            label_width: None,
+            label_height: None,
+            points,
+        }
+    }
+
+    fn node_map(nodes: &[PositionedNode]) -> HashMap<&str, &PositionedNode> {
+        nodes.iter().map(|n| (n.id.as_str(), n)).collect()
+    }
+
+    /// Two edges fanning down from a shared source whose interior lanes are
+    /// inverted relative to their targets should be swapped so the edge to the
+    /// right-hand target takes the right-hand lane.
+    #[test]
+    fn test_reorder_swaps_inverted_sibling_lanes() {
+        let nodes = vec![
+            make_rect_node("S", 400.0, 100.0),
+            make_rect_node("L", 300.0, 300.0), // left target
+            make_rect_node("R", 700.0, 300.0), // right target
+        ];
+        let nm = node_map(&nodes);
+
+        // Edge to the LEFT target routed through the RIGHT lane (x=500), and the
+        // edge to the RIGHT target through the LEFT lane (x=350): inverted.
+        let mut edges = vec![
+            make_edge("S", "L", vec![(420.0, 120.0), (500.0, 200.0), (320.0, 280.0)]),
+            make_edge("S", "R", vec![(420.0, 120.0), (350.0, 200.0), (680.0, 280.0)]),
+        ];
+
+        reorder_sibling_waypoints(&mut edges, &nm, false);
+
+        // The S->L edge should now use the smaller (left) lane and S->R the
+        // larger (right) lane.
+        let l_lane = edges[0].points[1].0;
+        let r_lane = edges[1].points[1].0;
+        assert!(
+            l_lane < r_lane,
+            "left-target lane ({l_lane}) should be left of right-target lane ({r_lane})"
+        );
+        assert_eq!(l_lane, 350.0, "S->L should take the 350 lane");
+        assert_eq!(r_lane, 500.0, "S->R should take the 500 lane");
+    }
+
+    /// An already-correct ordering must be left unchanged (endpoints included).
+    #[test]
+    fn test_reorder_noop_when_already_ordered() {
+        let nodes = vec![
+            make_rect_node("S", 400.0, 100.0),
+            make_rect_node("L", 300.0, 300.0),
+            make_rect_node("R", 700.0, 300.0),
+        ];
+        let nm = node_map(&nodes);
+
+        let mut edges = vec![
+            make_edge("S", "L", vec![(420.0, 120.0), (350.0, 200.0), (320.0, 280.0)]),
+            make_edge("S", "R", vec![(420.0, 120.0), (500.0, 200.0), (680.0, 280.0)]),
+        ];
+        let before = edges.clone();
+
+        reorder_sibling_waypoints(&mut edges, &nm, false);
+
+        assert_eq!(edges[0].points, before[0].points);
+        assert_eq!(edges[1].points, before[1].points);
+    }
+
+    /// Parallel edges (identical source and target) carry equal target
+    /// coordinates; their distinct separation lanes must be preserved.
+    #[test]
+    fn test_reorder_preserves_parallel_edge_lanes() {
+        let nodes = vec![make_rect_node("A", 100.0, 100.0), make_rect_node("B", 100.0, 300.0)];
+        let nm = node_map(&nodes);
+
+        let mut edges = vec![
+            make_edge("A", "B", vec![(100.0, 120.0), (130.0, 200.0), (100.0, 280.0)]),
+            make_edge("A", "B", vec![(100.0, 120.0), (70.0, 200.0), (100.0, 280.0)]),
+        ];
+        let before = edges.clone();
+
+        reorder_sibling_waypoints(&mut edges, &nm, false);
+
+        // Equal targets are tie-broken by current lane, so each edge keeps its
+        // own lane and nothing moves.
+        assert_eq!(edges[0].points[1].0, before[0].points[1].0);
+        assert_eq!(edges[1].points[1].0, before[1].points[1].0);
+    }
+
+    /// A long edge that detours through extra ranks must not be re-laned
+    /// against its shorter siblings: its divergent rank-set keeps it in its own
+    /// bundle, so its routing is left untouched even when its target sits where
+    /// a sibling's lane would otherwise pull it.
+    #[test]
+    fn test_reorder_isolates_divergent_long_edge() {
+        let nodes = vec![
+            make_rect_node("S", 100.0, 100.0),
+            make_rect_node("N", 100.0, 300.0), // near target (one rank down)
+            make_rect_node("F", 600.0, 300.0), // far target reached via a detour
+        ];
+        let nm = node_map(&nodes);
+
+        // S->N: single interior rank at x=120.
+        // S->F: long edge that sweeps along a lower lane through several ranks.
+        let mut edges = vec![
+            make_edge("S", "N", vec![(110.0, 120.0), (120.0, 200.0), (100.0, 280.0)]),
+            make_edge(
+                "S",
+                "F",
+                vec![(110.0, 120.0), (120.0, 260.0), (300.0, 260.0), (500.0, 260.0), (580.0, 280.0)],
+            ),
+        ];
+        let before = edges.clone();
+
+        reorder_sibling_waypoints(&mut edges, &nm, false);
+
+        // Different rank-sets -> separate bundles -> nothing reordered.
+        assert_eq!(edges[0].points, before[0].points);
+        assert_eq!(edges[1].points, before[1].points);
+    }
+
+    /// Horizontal layouts reorder along the y axis using target y position.
+    #[test]
+    fn test_reorder_horizontal_uses_y_axis() {
+        let nodes = vec![
+            make_rect_node("S", 100.0, 400.0),
+            make_rect_node("T", 300.0, 300.0), // upper target
+            make_rect_node("B", 300.0, 700.0), // lower target
+        ];
+        let nm = node_map(&nodes);
+
+        // Inverted: edge to upper target (T) uses the lower lane (y=500), edge to
+        // lower target (B) uses the upper lane (y=350).
+        let mut edges = vec![
+            make_edge("S", "T", vec![(120.0, 420.0), (200.0, 500.0), (280.0, 320.0)]),
+            make_edge("S", "B", vec![(120.0, 420.0), (200.0, 350.0), (280.0, 680.0)]),
+        ];
+
+        reorder_sibling_waypoints(&mut edges, &nm, true);
+
+        let t_lane = edges[0].points[1].1;
+        let b_lane = edges[1].points[1].1;
+        assert!(t_lane < b_lane, "upper-target lane should be above lower-target lane");
+        assert_eq!(t_lane, 350.0);
+        assert_eq!(b_lane, 500.0);
     }
 }
