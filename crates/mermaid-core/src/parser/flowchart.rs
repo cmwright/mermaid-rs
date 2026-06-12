@@ -473,6 +473,9 @@ fn parse_subgraph(
             Rule::subgraph_label => {
                 label = Some(extract_subgraph_label(inner));
             }
+            Rule::subgraph_unquoted_label => {
+                label = Some(inner.as_str().trim().to_string());
+            }
             Rule::subgraph_direction => {
                 for dir_inner in inner.into_inner() {
                     if dir_inner.as_rule() == Rule::direction {
@@ -987,6 +990,33 @@ mod tests {
             Some("LangGraph Runtime")
         );
         assert_eq!(ast.subgraphs[0].id, "subgraph_1");
+    }
+
+    #[test]
+    fn test_parse_subgraph_with_unquoted_multiword_label() {
+        let source = r#"flowchart LR
+    AT --> WE
+    subgraph Workflow Engine
+        WE[Event consumer] --> SUB{Match}
+    end"#;
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.subgraphs.len(), 1);
+        assert_eq!(ast.subgraphs[0].label.as_deref(), Some("Workflow Engine"));
+        // An unquoted multi-word title is not a valid id, so one is generated.
+        assert_eq!(ast.subgraphs[0].id, "subgraph_1");
+    }
+
+    #[test]
+    fn test_parse_subgraph_bare_id_still_has_no_label() {
+        // A lone identifier remains an id (referenceable), not an unquoted label.
+        let source = r#"flowchart LR
+    subgraph sg1
+        A --> B
+    end"#;
+        let ast = parse_flowchart(source).unwrap();
+        assert_eq!(ast.subgraphs.len(), 1);
+        assert_eq!(ast.subgraphs[0].id, "sg1");
+        assert_eq!(ast.subgraphs[0].label, None);
     }
 
     #[test]
