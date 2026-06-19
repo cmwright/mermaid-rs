@@ -50,11 +50,23 @@ subgraph_block = {
     NEWLINE* ~ "end"
 }
 
-subgraph_header = _{ subgraph_id ~ subgraph_label? | subgraph_label }
+// Ordered choice (PEG): try the explicit `id[label]` / `id"label"` and
+// quoted-only forms first, then a bare single-token id, and finally fall back
+// to an unquoted multi-word title (e.g. `subgraph Workflow Engine`), which
+// Mermaid accepts. The `&NEWLINE` lookahead keeps a lone identifier (`subgraph A`)
+// classified as an id rather than an unquoted label.
+subgraph_header = _{
+    subgraph_id ~ subgraph_label
+  | subgraph_label
+  | subgraph_id ~ &NEWLINE
+  | subgraph_unquoted_label
+}
 
 subgraph_id = @{ identifier }
 
 subgraph_label = { "[\"" ~ quoted_text ~ "\"]" | "[" ~ bracket_text ~ "]" | "\"" ~ quoted_text ~ "\"" }
+
+subgraph_unquoted_label = @{ (!NEWLINE ~ ANY)+ }
 
 subgraph_direction = { "direction" ~ direction ~ NEWLINE+ }
 
