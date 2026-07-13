@@ -145,6 +145,9 @@ fn layout_flowchart_impl(
         &positioned_subgraphs,
     );
 
+    // 8.7. Separate any edge labels that still overlap one another.
+    edge_routing::separate_overlapping_labels(&mut positioned_edges);
+
     // 9. Normalize coordinates and compute bounding box
     let (width, height) = normalize::normalize_and_compute_bounds(
         &mut positioned_nodes,
