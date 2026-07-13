@@ -106,6 +106,80 @@ pub fn adjust_labels_for_subgraph_boundaries(
     }
 }
 
+/// Separate mutually overlapping edge labels by nudging each overlapping pair
+/// apart along its axis of minimum translation (the direction requiring the
+/// least movement to clear the overlap). Runs after the subgraph-boundary
+/// adjustment as the final word on label-vs-label collisions, which arise when
+/// dagre places two label dummies at nearly the same point (e.g. several edges
+/// converging on one subgraph border). Iterates to settle cascades.
+pub fn separate_overlapping_labels(edges: &mut [PositionedEdge]) {
+    let gap = 4.0;
+
+    // Effective label box, matching the fallback the renderer uses when dagre
+    // supplied no measured dimensions (e.g. edges to a subgraph border).
+    let label_box = |e: &PositionedEdge| -> Option<(f64, f64, f64, f64)> {
+        let x = e.label_x?;
+        let y = e.label_y?;
+        let text = e.label.as_deref()?;
+        let w = e.label_width.unwrap_or(text.len() as f64 * 8.0 + 10.0);
+        let h = e.label_height.unwrap_or(20.0);
+        (w >= 1.0 && h >= 1.0).then_some((x, y, w, h))
+    };
+
+    let idxs: Vec<usize> = edges
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| label_box(e).is_some())
+        .map(|(i, _)| i)
+        .collect();
+    if idxs.len() < 2 {
+        return;
+    }
+
+    for _ in 0..8 {
+        let mut moved = false;
+        for a in 0..idxs.len() {
+            for b in (a + 1)..idxs.len() {
+                let (ia, ib) = (idxs[a], idxs[b]);
+
+                let (ax, ay, aw, ah) = label_box(&edges[ia]).unwrap();
+                let (bx, by, bw, bh) = label_box(&edges[ib]).unwrap();
+
+                // Signed overlap on each axis (positive => boxes intersect).
+                let overlap_x = (aw / 2.0 + bw / 2.0 + gap) - (ax - bx).abs();
+                let overlap_y = (ah / 2.0 + bh / 2.0 + gap) - (ay - by).abs();
+                if overlap_x <= 0.0 || overlap_y <= 0.0 {
+                    continue;
+                }
+
+                if overlap_y <= overlap_x {
+                    let shift = overlap_y / 2.0;
+                    if ay <= by {
+                        edges[ia].label_y = Some(ay - shift);
+                        edges[ib].label_y = Some(by + shift);
+                    } else {
+                        edges[ia].label_y = Some(ay + shift);
+                        edges[ib].label_y = Some(by - shift);
+                    }
+                } else {
+                    let shift = overlap_x / 2.0;
+                    if ax <= bx {
+                        edges[ia].label_x = Some(ax - shift);
+                        edges[ib].label_x = Some(bx + shift);
+                    } else {
+                        edges[ia].label_x = Some(ax + shift);
+                        edges[ib].label_x = Some(bx - shift);
+                    }
+                }
+                moved = true;
+            }
+        }
+        if !moved {
+            break;
+        }
+    }
+}
+
 /// Route edges using dummy-node bend points for long edges and direct segments
 /// for short edges.
 pub fn route_edges(
@@ -1774,5 +1848,83 @@ mod tests {
         assert!(t_lane < b_lane, "upper-target lane should be above lower-target lane");
         assert_eq!(t_lane, 350.0);
         assert_eq!(b_lane, 500.0);
+    }
+
+    // -----------------------------------------------------------------------
+    // separate_overlapping_labels tests
+    // -----------------------------------------------------------------------
+
+    fn make_label_edge(x: f64, y: f64, w: Option<f64>, h: Option<f64>) -> PositionedEdge {
+        PositionedEdge {
+            from_id: "A".into(),
+            to_id: "B".into(),
+            line_style: LineStyle::Solid,
+            arrow_start: ArrowEnd::None,
+            arrow_end: ArrowEnd::Arrow,
+            label: Some("label".into()),
+            label_x: Some(x),
+            label_y: Some(y),
+            label_width: w,
+            label_height: h,
+            points: vec![(x - 10.0, y), (x + 10.0, y)],
+        }
+    }
+
+    fn boxes_overlap(a: &PositionedEdge, b: &PositionedEdge) -> bool {
+        let (ax, ay, aw, ah) = (
+            a.label_x.unwrap(),
+            a.label_y.unwrap(),
+            a.label_width.unwrap(),
+            a.label_height.unwrap(),
+        );
+        let (bx, by, bw, bh) = (
+            b.label_x.unwrap(),
+            b.label_y.unwrap(),
+            b.label_width.unwrap(),
+            b.label_height.unwrap(),
+        );
+        (ax - bx).abs() < (aw + bw) / 2.0 && (ay - by).abs() < (ah + bh) / 2.0
+    }
+
+    #[test]
+    fn test_separate_stacks_vertically_when_cheaper() {
+        // Two wide, near-coincident labels: vertical separation is the smaller move.
+        let mut edges = vec![
+            make_label_edge(100.0, 100.0, Some(200.0), Some(20.0)),
+            make_label_edge(130.0, 104.0, Some(180.0), Some(20.0)),
+        ];
+        separate_overlapping_labels(&mut edges);
+        assert!(!boxes_overlap(&edges[0], &edges[1]), "labels should not overlap");
+        // Moved apart on y (the minimum-translation axis), x unchanged.
+        assert_eq!(edges[0].label_x.unwrap(), 100.0);
+        assert_eq!(edges[1].label_x.unwrap(), 130.0);
+        assert!((edges[0].label_y.unwrap() - edges[1].label_y.unwrap()).abs() >= 20.0);
+    }
+
+    #[test]
+    fn test_separate_uses_effective_dimensions_when_unset() {
+        // No measured dimensions: the pass must fall back to the text-length
+        // estimate the renderer uses, otherwise these labels are skipped.
+        let mut edges = vec![
+            make_label_edge(100.0, 100.0, None, None),
+            make_label_edge(105.0, 100.0, None, None),
+        ];
+        separate_overlapping_labels(&mut edges);
+        let dx = (edges[0].label_x.unwrap() - edges[1].label_x.unwrap()).abs();
+        let dy = (edges[0].label_y.unwrap() - edges[1].label_y.unwrap()).abs();
+        assert!(dx > 5.0 || dy > 0.0, "coincident unmeasured labels should be moved apart");
+    }
+
+    #[test]
+    fn test_separate_leaves_disjoint_labels_untouched() {
+        let mut edges = vec![
+            make_label_edge(100.0, 100.0, Some(40.0), Some(20.0)),
+            make_label_edge(400.0, 400.0, Some(40.0), Some(20.0)),
+        ];
+        separate_overlapping_labels(&mut edges);
+        assert_eq!(edges[0].label_x.unwrap(), 100.0);
+        assert_eq!(edges[0].label_y.unwrap(), 100.0);
+        assert_eq!(edges[1].label_x.unwrap(), 400.0);
+        assert_eq!(edges[1].label_y.unwrap(), 400.0);
     }
 }
